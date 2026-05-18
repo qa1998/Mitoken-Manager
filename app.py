@@ -433,6 +433,34 @@ def quote_is_expired(quote):
         return False
     return quote_valid_until(quote) < date.today()
 
+def get_quote_order(quote):
+    qid = quote if isinstance(quote, int) else quote.id
+    return Order.query.filter_by(quote_id=qid).first()
+
+def orders_by_quote_ids(quote_ids):
+    if not quote_ids:
+        return {}
+    return {o.quote_id: o for o in Order.query.filter(Order.quote_id.in_(quote_ids)).all()}
+
+def create_order_from_quote_record(quote):
+    existing = get_quote_order(quote)
+    if existing:
+        return existing, False
+    order = Order(
+        order_code=next_code('DH', Order, 'order_code'),
+        customer_id=quote.customer_id,
+        quote_id=quote.id,
+        total=quote.total,
+        paid_amount=0,
+        status='Chờ xác nhận',
+    )
+    db.session.add(order)
+    return order, True
+
+def chot_quote(quote):
+    quote.status = 'Đã chốt'
+    return create_order_from_quote_record(quote)
+
 def effective_quote_status(quote):
     return quote_display_status(quote)
 
@@ -448,6 +476,7 @@ app.jinja_env.globals['quote_display_status'] = quote_display_status
 app.jinja_env.globals['effective_quote_status'] = effective_quote_status
 app.jinja_env.globals['quote_is_expired'] = quote_is_expired
 app.jinja_env.globals['quote_valid_until'] = quote_valid_until
+app.jinja_env.globals['get_quote_order'] = get_quote_order
 
 def quote_note_preview(note, limit=40):
     text = (note or '').strip()
@@ -1908,6 +1937,7 @@ def quotes():
     stats_query = Quote.query.filter(Quote.status != 'Nháp')
     query = apply_quote_sort(query, filters['sort'], filters['order'])
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    orders_by_quote = orders_by_quote_ids([q.id for q in pagination.items])
 
     list_args = {k: v for k, v in filters.items() if v and k != 'tab'}
     list_args['per_page'] = per_page
@@ -1919,6 +1949,7 @@ def quotes():
     return render_template(
         'quotes.html',
         quotes=pagination.items,
+        orders_by_quote=orders_by_quote,
         pagination=pagination,
         stats=quote_stats(stats_query),
         filters=filters,
@@ -1974,9 +2005,17 @@ def update_quote_status(qid):
         'Mới tạo': {'Đã chốt', 'Đã hủy'},
     }
     if new_status in QUOTE_STATUSES and new_status in allowed.get(current, set()):
-        quote.status = new_status
-        db.session.commit()
-        flash_status_updated(new_status)
+        if new_status == 'Đã chốt':
+            order, created = chot_quote(quote)
+            db.session.commit()
+            if created:
+                flash(f'Đã chốt báo giá và tạo đơn hàng {order.order_code}', 'success')
+            else:
+                flash(f'Đã chốt báo giá (đơn hàng {order.order_code})', 'success')
+        else:
+            quote.status = new_status
+            db.session.commit()
+            flash_status_updated(new_status)
     elif new_status in QUOTE_STATUSES:
         flash('Không thể chuyển trạng thái báo giá theo hướng này', 'warning')
     return quotes_redirect(tab=request.form.get('_tab', 'list'))
@@ -1993,8 +2032,12 @@ def update_quote(qid):
     if valid_raw:
         quote.valid_until = datetime.strptime(valid_raw, '%Y-%m-%d').date()
     new_status = request.form.get('status', '').strip()
+    old_status = quote_display_status(quote)
     if new_status in QUOTE_STATUSES:
-        quote.status = new_status
+        if new_status == 'Đã chốt' and old_status != 'Đã chốt':
+            chot_quote(quote)
+        elif new_status != 'Đã chốt':
+            quote.status = new_status
     recalculate_quote_totals(quote)
     generate_quote_documents(quote, commit=False)
     db.session.commit()
@@ -2063,6 +2106,7 @@ def quote_preview(qid):
         valid_until=quote_valid_until(quote),
         status=quote_display_status(quote),
         expired=quote_is_expired(quote),
+        linked_order=get_quote_order(quote),
     )
 
 @app.route('/quotes/<int:qid>/print')
@@ -2080,20 +2124,17 @@ def create_order_from_quote(qid):
     ensure_quote_columns()
     normalize_quote_statuses()
     quote = Quote.query.get_or_404(qid)
+    existing = get_quote_order(quote)
+    if existing:
+        flash(f'Báo giá đã có đơn hàng {existing.order_code}', 'info')
+        return redirect(url_for('order_preview', oid=existing.id))
     if quote_display_status(quote) != 'Đã chốt':
         flash('Vui lòng chốt báo giá trước khi tạo đơn hàng', 'warning')
         return redirect(url_for('quotes'))
-    order = Order(
-        order_code=next_code('DH', Order, 'order_code'),
-        customer_id=quote.customer_id,
-        quote_id=quote.id,
-        total=quote.total,
-        status='Chờ xác nhận',
-    )
-    db.session.add(order)
+    order, _ = create_order_from_quote_record(quote)
     db.session.commit()
-    flash('Đã tạo đơn hàng từ báo giá', 'success')
-    return redirect(url_for('orders'))
+    flash(f'Đã tạo đơn hàng {order.order_code}', 'success')
+    return redirect(url_for('order_preview', oid=order.id))
 
 @app.route('/contracts', methods=['GET', 'POST'])
 def contracts():

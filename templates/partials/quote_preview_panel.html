@@ -1,5 +1,6 @@
 {% if selected_quote %}
 {% from 'partials/quote_status_cell.html' import quote_status_cell %}
+{% from 'partials/quote_options_menu.html' import quote_options_dropdown %}
 {% set quote = selected_quote %}
 {% set st = quote_display_status(quote) %}
 <div class="quote-preview-inner">
@@ -14,21 +15,7 @@
     </div>
   </div>
   <div class="quote-preview-actions no-print">
-    <a href="{{ url_for('quote_print', qid=quote.id) }}" target="_blank" class="btn btn-outline-secondary btn-sm w-100 mb-2"><i class="bi bi-printer me-1"></i> In / PDF</a>
-    {% if st == 'Mới tạo' %}
-    <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}" class="mb-2">
-      <input type="hidden" name="status" value="Đã chốt">
-      <input type="hidden" name="_tab" value="{{ filters.tab }}">
-      <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-check-circle me-1"></i> Chốt báo giá</button>
-    </form>
-    <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}">
-      <input type="hidden" name="status" value="Đã hủy">
-      <input type="hidden" name="_tab" value="{{ filters.tab }}">
-      <button type="submit" class="btn btn-outline-danger btn-sm w-100"><i class="bi bi-x-circle me-1"></i> Hủy báo giá</button>
-    </form>
-    {% elif st == 'Đã chốt' %}
-    <a href="{{ url_for('create_order_from_quote', qid=quote.id) }}" class="btn btn-outline-success btn-sm w-100 mt-2"><i class="bi bi-cart me-1"></i> Tạo đơn hàng</a>
-    {% endif %}
+    {{ quote_options_dropdown(quote, st, filters.tab, show_edit=false, btn_class='btn-outline-secondary btn-sm w-100') }}
   </div>
   {% set valid_until = quote_valid_until(quote) %}
   <div class="quote-preview-doc-scale">

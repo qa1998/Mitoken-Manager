@@ -1,10 +1,10 @@
 {% extends 'base.html' %}
 {% from 'partials/quote_status_cell.html' import quote_status_cell %}
-{% from 'partials/quote_doc_links.html' import quote_doc_links %}
-{% macro quote_sort_th(label, field) %}
-<th>
+{% from 'partials/quote_options_menu.html' import quote_options_dropdown %}
+{% macro quote_sort_th(label, field, extra_class='') %}
+<th class="quote-th-sortable {{ extra_class }}">
   <a href="{{ quote_sort_url(field, list_args, sort, order) }}" class="th-sort {% if sort == field %}active {{ order }}{% endif %}">
-    {{ label }}
+    <span class="th-sort-label">{{ label }}</span>
     <span class="sort-icons"><i class="bi bi-caret-up-fill"></i><i class="bi bi-caret-down-fill"></i></span>
   </a>
 </th>
@@ -140,18 +140,18 @@
       </form>
     </div>
 
-    <div class="customer-table-wrap">
-      <table class="table customer-table quote-table">
+    <div class="table-responsive quote-list-table-wrap">
+      <table class="table table-hover align-middle customer-table quote-table mb-0">
         <thead>
           <tr>
             {{ quote_sort_th('Mã báo giá', 'quote_code') }}
             <th>Khách hàng</th>
             {{ quote_sort_th('Ngày tạo', 'created_at') }}
             {{ quote_sort_th('Hiệu lực đến', 'valid_until') }}
-            {{ quote_sort_th('Tổng tiền', 'total') }}
+            {{ quote_sort_th('Tổng tiền', 'total', 'text-end') }}
             {{ quote_sort_th('Trạng thái', 'status') }}
             <th>Ghi chú</th>
-            <th class="text-end">Thao tác</th>
+            <th class="text-end quote-col-actions">Thao tác</th>
           </tr>
         </thead>
         <tbody>
@@ -160,52 +160,16 @@
           <tr>
             <td><a href="{{ url_for('quote_preview', qid=q.id) }}" class="quote-code-link">{{ q.quote_code }}</a></td>
             <td class="quote-customer-name">{{ q.customer.name }}</td>
-            <td>{{ q.created_at.strftime('%d/%m/%Y') }}</td>
-            <td>{{ quote_valid_until(q).strftime('%d/%m/%Y') }}</td>
-            <td class="text-end fw-semibold money">{{ q.total|money }}</td>
+            <td class="text-nowrap">{{ q.created_at.strftime('%d/%m/%Y') }}</td>
+            <td class="text-nowrap">{{ quote_valid_until(q).strftime('%d/%m/%Y') }}</td>
+            <td class="text-end fw-semibold money text-nowrap">{{ q.total|money }}</td>
             <td>{{ quote_status_cell(q) }}</td>
             <td class="quote-note-cell small-muted">{{ quote_note_preview(q.note) }}</td>
-            <td class="text-end">
-              <div class="quote-action-btns">
-                <a href="{{ url_for('quote_preview', qid=q.id) }}" class="btn btn-light btn-quote-action" title="Xem"><i class="bi bi-eye"></i></a>
-                <button type="button" class="btn btn-light btn-quote-action" data-bs-toggle="modal" data-bs-target="#editQuote{{ q.id }}" title="Sửa"><i class="bi bi-pencil"></i></button>
-                <a href="{{ url_for('quote_print', qid=q.id) }}" target="_blank" class="btn btn-light btn-quote-action" title="Báo giá"><i class="bi bi-file-earmark-text"></i></a>
-                <a href="{{ url_for('preview_quote_sale_contract', qid=q.id) }}" target="_blank" class="btn btn-light btn-quote-action" title="Hợp đồng mua bán"><i class="bi bi-file-earmark-ruled"></i></a>
-                <a href="{{ url_for('preview_quote_handover', qid=q.id) }}" target="_blank" class="btn btn-light btn-quote-action" title="Biên bản nhận hàng"><i class="bi bi-clipboard-check"></i></a>
-                <div class="dropdown">
-                  <button class="btn btn-light btn-quote-action" type="button" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></button>
-                  <ul class="dropdown-menu dropdown-menu-end shadow-sm">
-                    {% if st == 'Mới tạo' %}
-                    <li>
-                      <form method="post" action="{{ url_for('update_quote_status', qid=q.id) }}">
-                        <input type="hidden" name="status" value="Đã chốt">
-                        <input type="hidden" name="_tab" value="{{ filters.tab }}">
-                        <button type="submit" class="dropdown-item"><i class="bi bi-check-circle me-2"></i>Chốt báo giá</button>
-                      </form>
-                    </li>
-                    <li>
-                      <form method="post" action="{{ url_for('update_quote_status', qid=q.id) }}">
-                        <input type="hidden" name="status" value="Đã hủy">
-                        <input type="hidden" name="_tab" value="{{ filters.tab }}">
-                        <button type="submit" class="dropdown-item text-danger"><i class="bi bi-x-circle me-2"></i>Hủy báo giá</button>
-                      </form>
-                    </li>
-                    {% elif st == 'Đã chốt' %}
-                    <li><a class="dropdown-item" href="{{ url_for('create_order_from_quote', qid=q.id) }}"><i class="bi bi-cart me-2"></i>Tạo đơn hàng</a></li>
-                    {% endif %}
-                    {% if st == 'Nháp' %}
-                    <li><hr class="dropdown-divider"></li>
-                    <li>
-                      <form method="post" action="{{ url_for('update_quote_status', qid=q.id) }}">
-                        <input type="hidden" name="status" value="Mới tạo">
-                        <input type="hidden" name="_tab" value="draft">
-                        <button type="submit" class="dropdown-item">Xuất bản nháp</button>
-                      </form>
-                    </li>
-                    {% endif %}
-                  </ul>
-                </div>
+            <td class="text-end quote-col-actions">
+              <div class="quote-action-btns justify-content-end">
+                {{ quote_options_dropdown(q, st, filters.tab, orders_by_quote.get(q.id)) }}
               </div>
+
             </td>
           </tr>
           {% else %}

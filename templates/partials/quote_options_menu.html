@@ -1,0 +1,127 @@
+{% macro quote_options_dropdown(quote, st, tab='list', linked_order=none, show_edit=true, show_status_actions=true, btn_class='') %}
+{% set order_link = linked_order if linked_order is not none else get_quote_order(quote) %}
+<div class="dropdown quote-options-dropdown position-static">
+  <button class="btn btn-light btn-quote-action btn-quote-options {{ btn_class }}" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Tùy chọn">
+    <i class="bi bi-three-dots-vertical{% if btn_class %} me-1{% endif %}"></i>{% if btn_class %}<span>Tùy chọn</span>{% endif %}
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end shadow-sm quote-options-menu">
+    <li>
+      <a class="dropdown-item" href="{{ url_for('quote_preview', qid=quote.id) }}">
+        <i class="bi bi-eye me-2"></i>Xem chi tiết
+      </a>
+    </li>
+    {% if show_edit %}
+    <li>
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editQuote{{ quote.id }}">
+        <i class="bi bi-pencil me-2"></i>Chỉnh sửa
+      </button>
+    </li>
+    {% endif %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('quote_print', qid=quote.id) }}" target="_blank">
+        <i class="bi bi-file-earmark-text me-2"></i>Báo giá
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('preview_quote_sale_contract', qid=quote.id) }}" target="_blank">
+        <i class="bi bi-file-earmark-ruled me-2"></i>Hợp đồng mua bán
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('preview_quote_handover', qid=quote.id) }}" target="_blank">
+        <i class="bi bi-clipboard-check me-2"></i>Biên bản nhận hàng
+      </a>
+    </li>
+    {% if show_status_actions %}
+    <li><hr class="dropdown-divider"></li>
+    {% if st == 'Mới tạo' %}
+    <li>
+      <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}">
+        <input type="hidden" name="status" value="Đã chốt">
+        <input type="hidden" name="_tab" value="{{ tab }}">
+        <button type="submit" class="dropdown-item"><i class="bi bi-check-circle me-2"></i>Chốt báo giá & tạo đơn</button>
+      </form>
+    </li>
+    <li>
+      <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}">
+        <input type="hidden" name="status" value="Đã hủy">
+        <input type="hidden" name="_tab" value="{{ tab }}">
+        <button type="submit" class="dropdown-item text-danger"><i class="bi bi-x-circle me-2"></i>Hủy báo giá</button>
+      </form>
+    </li>
+    {% elif st == 'Đã chốt' and order_link %}
+    <li>
+      <a class="dropdown-item" href="{{ url_for('order_preview', oid=order_link.id) }}">
+        <i class="bi bi-cart-check me-2"></i>Xem đơn hàng {{ order_link.order_code }}
+      </a>
+    </li>
+    {% endif %}
+    {% if st == 'Nháp' %}
+    <li>
+      <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}">
+        <input type="hidden" name="status" value="Mới tạo">
+        <input type="hidden" name="_tab" value="draft">
+        <button type="submit" class="dropdown-item"><i class="bi bi-send me-2"></i>Xuất bản nháp</button>
+      </form>
+    </li>
+    {% endif %}
+    {% endif %}
+  </ul>
+</div>
+{% endmacro %}
+
+{% macro quote_doc_options_dropdown(quote, linked_order=none) %}
+{% set st = quote_display_status(quote) %}
+{% set order_link = linked_order if linked_order is not none else get_quote_order(quote) %}
+<div class="dropdown quote-options-dropdown position-static">
+  <button class="btn btn-outline-primary btn-sm btn-quote-options dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+    <i class="bi bi-three-dots-vertical me-1"></i><span>Tùy chọn</span>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end shadow-sm quote-options-menu">
+    <li>
+      <a class="dropdown-item" href="{{ url_for('quote_print', qid=quote.id) }}" target="_blank">
+        <i class="bi bi-file-earmark-text me-2"></i>Báo giá
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('preview_quote_sale_contract', qid=quote.id) }}" target="_blank">
+        <i class="bi bi-file-earmark-ruled me-2"></i>Hợp đồng mua bán
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('preview_quote_handover', qid=quote.id) }}" target="_blank">
+        <i class="bi bi-clipboard-check me-2"></i>Biên bản nhận hàng
+      </a>
+    </li>
+    {% if st == 'Mới tạo' %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}">
+        <input type="hidden" name="status" value="Đã chốt">
+        <button type="submit" class="dropdown-item"><i class="bi bi-check-circle me-2"></i>Chốt báo giá & tạo đơn</button>
+      </form>
+    </li>
+    <li>
+      <form method="post" action="{{ url_for('update_quote_status', qid=quote.id) }}">
+        <input type="hidden" name="status" value="Đã hủy">
+        <button type="submit" class="dropdown-item text-danger"><i class="bi bi-x-circle me-2"></i>Hủy báo giá</button>
+      </form>
+    </li>
+    {% elif st == 'Đã chốt' and order_link %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('order_preview', oid=order_link.id) }}">
+        <i class="bi bi-cart-check me-2"></i>Xem đơn hàng {{ order_link.order_code }}
+      </a>
+    </li>
+    {% endif %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <a class="dropdown-item" href="{{ url_for('quotes') }}">
+        <i class="bi bi-arrow-left me-2"></i>Quay lại danh sách
+      </a>
+    </li>
+  </ul>
+</div>
+{% endmacro %}

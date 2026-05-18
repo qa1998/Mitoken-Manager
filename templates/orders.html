@@ -131,8 +131,8 @@
       </form>
     </div>
 
-    <div class="customer-table-wrap">
-      <table class="table customer-table order-table">
+    <div class="table-responsive order-list-table-wrap">
+      <table class="table table-hover align-middle customer-table order-table mb-0">
         <thead>
           <tr>
             <th>Mã đơn</th>
@@ -143,7 +143,7 @@
             <th class="text-end">Còn nợ</th>
             <th>Trạng thái</th>
             <th>Thanh toán</th>
-            <th class="text-end">Thao tác</th>
+            <th class="text-end order-col-actions">Thao tác</th>
           </tr>
         </thead>
         <tbody>
@@ -153,10 +153,10 @@
           <tr>
             <td><a href="{{ url_for('order_preview', oid=o.id) }}" class="order-code-link">{{ o.order_code }}</a></td>
             <td class="order-customer-name">{{ o.customer.name }}</td>
-            <td>{{ o.created_at.strftime('%d/%m/%Y') if o.created_at else '—' }}</td>
-            <td class="text-end fw-semibold money">{{ o.total|money }}</td>
-            <td class="text-end">{{ o.paid_amount|money }}</td>
-            <td class="text-end fw-semibold">{{ order_balance(o)|money }}</td>
+            <td class="text-nowrap">{{ o.created_at.strftime('%d/%m/%Y') if o.created_at else '—' }}</td>
+            <td class="text-end fw-semibold money text-nowrap">{{ o.total|money }}</td>
+            <td class="text-end text-nowrap">{{ o.paid_amount|money }}</td>
+            <td class="text-end fw-semibold text-nowrap">{{ order_balance(o)|money }}</td>
             <td><span class="order-status-badge status-{{ order_status_key(st) }}">{{ st }}</span></td>
             <td>
               {% if pay == '—' %}
@@ -165,13 +165,13 @@
               <span class="order-payment-badge payment-{{ order_payment_key(pay) }}">{{ pay }}</span>
               {% endif %}
             </td>
-            <td class="text-end">
+            <td class="text-end order-col-actions">
               <div class="order-action-btns">
                 <a href="{{ url_for('order_preview', oid=o.id) }}" class="btn btn-light btn-order-action" title="Xem"><i class="bi bi-eye"></i></a>
                 <a href="{{ url_for('order_preview', oid=o.id) }}" target="_blank" class="btn btn-light btn-order-action" title="In"><i class="bi bi-printer"></i></a>
-                <div class="dropdown">
-                  <button class="btn btn-light btn-order-action" type="button" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>
-                  <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                <div class="dropdown position-static">
+                  <button class="btn btn-light btn-order-action" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Tùy chọn"><i class="bi bi-three-dots-vertical"></i></button>
+                  <ul class="dropdown-menu dropdown-menu-end shadow-sm order-options-menu">
                     {% for s in order_statuses %}
                     {% if s != st %}
                     <li>

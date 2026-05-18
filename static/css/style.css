@@ -58,8 +58,14 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .quote-totals-box{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:16px 18px}
 .quote-totals-grand span:last-child{font-size:22px;font-weight:800;color:#2563eb}
 .quote-line-row:hover{background:#fafbfc}
-.quote-doc-links .btn{border-radius:10px}
-.quote-preview-toolbar .quote-doc-links{justify-content:flex-end}
+.quote-options-menu{min-width:220px;padding:6px}
+.quote-options-menu .dropdown-item{display:flex;align-items:center;padding:10px 14px;font-size:14px;border-radius:8px}
+.quote-options-menu .dropdown-item i{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.quote-options-menu form{margin:0}
+.quote-options-menu .dropdown-divider{margin:6px 0}
+.btn-quote-options{min-width:36px;display:inline-flex;align-items:center;justify-content:center}
+.btn-quote-options span{font-weight:500}
+.quote-action-btns{gap:0}
 .sidebar{width:240px;min-height:100vh;background:#111827;position:sticky;top:0}.sidebar a{display:block;color:#cbd5e1;text-decoration:none;padding:10px 12px;border-radius:12px;margin-bottom:4px}.sidebar a:hover{background:#1f2937;color:white}.card{border:0;border-radius:18px;box-shadow:0 10px 25px rgba(15,23,42,.06)}.table{vertical-align:middle}.badge-soft{background:#eef2ff;color:#3730a3}.form-control,.form-select{border-radius:12px}.btn{border-radius:12px}.content{overflow-x:auto}.stat{font-size:28px;font-weight:800}.small-muted{font-size:13px;color:#64748b}.money{font-weight:700}.doc-preview-wrap{display:flex;justify-content:center;padding:8px 0 32px}.doc-preview-paper{width:100%;max-width:820px;background:#fff;color:#111827;padding:48px 56px;border-radius:4px;box-shadow:0 4px 24px rgba(15,23,42,.12);font-family:"Times New Roman",Times,serif;font-size:14px;line-height:1.6}.doc-preview-paper p{margin:0 0 8px}.doc-preview-paper .doc-empty{height:8px}.doc-preview-paper .doc-table{width:100%;border-collapse:collapse;margin:16px 0}.doc-preview-paper .doc-table td{border:1px solid #cbd5e1;padding:12px 16px;vertical-align:top}@media print{body{background:#fff}.sidebar,.btn,.alert{display:none!important}.content{padding:0!important}.doc-preview-wrap{padding:0}.doc-preview-paper{box-shadow:none;max-width:100%;padding:24px}}
 
 /* Stock page */
@@ -167,12 +173,21 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .quote-stat-hint{font-size:12px;color:#94a3b8;margin-top:2px}
 .quote-tabs-inline .nav-link{padding:4px 12px;font-size:13px;font-weight:600;color:#64748b;border-radius:8px}
 .quote-tabs-inline .nav-link.active{background:#eff6ff;color:#2563eb}
-.quote-note-cell{max-width:180px}
+.quote-note-cell{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quote-action-btns{display:inline-flex;gap:4px;justify-content:flex-end}
 .btn-quote-action{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #e2e8f0;color:#64748b;background:#fff}
 .btn-quote-action:hover{background:#f8fafc;color:#2563eb;border-color:#cbd5e1}
-.quote-table .th-sort.justify-end,.quote-table th.text-end .th-sort{justify-content:flex-end;width:100%}
-.quote-table th.text-end{text-align:right}
+.quote-table-card .table-toolbar{margin-bottom:18px}
+.quote-list-table-wrap{border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+.quote-list-table-wrap .quote-table{margin-bottom:0}
+.quote-list-table-wrap .quote-table thead th{position:static}
+.quote-list-table-wrap .quote-table tbody td{overflow:visible}
+.quote-list-table-wrap .quote-col-actions{width:72px;white-space:nowrap}
+.quote-list-table-wrap .quote-options-dropdown .dropdown-menu{z-index:1080}
+.quote-table-card .quote-customer-name{font-weight:600;color:#0f172a;max-width:240px}
+.quote-table-card .quote-table thead .th-sort{display:inline-flex;align-items:center;gap:6px;color:inherit;text-decoration:none}
+.quote-table-card .quote-table thead th.text-end .th-sort{justify-content:flex-end}
+.quote-table-card .table-footer{margin-top:18px;padding-top:18px;border-top:1px solid #f1f5f9}
 .quote-status-badge.status-new{background:#e0f2fe;color:#0369a1}
 @media (max-width:992px){.quote-stat-row-4 .col-md-3{width:50%}}
 @media (max-width:576px){.quote-stat-row-4 .col-md-3{width:100%}}
@@ -206,9 +221,19 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .order-payment-badge.payment-paid{background:#dcfce7;color:#15803d}
 .order-payment-badge.payment-partial{background:#dbeafe;color:#1d4ed8}
 .order-payment-badge.payment-unpaid{background:#ffedd5;color:#c2410c}
-.order-action-btns{display:inline-flex;gap:4px;justify-content:flex-end}
-.btn-order-action{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #e2e8f0;color:#64748b;background:#fff}
+.order-action-btns{display:inline-flex;gap:4px;justify-content:flex-end;flex-wrap:nowrap}
+.btn-order-action{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #e2e8f0;color:#64748b;background:#fff;flex-shrink:0}
 .btn-order-action:hover{background:#f8fafc;color:#2563eb;border-color:#cbd5e1}
+.order-table-card .table-toolbar{margin-bottom:18px}
+.order-list-table-wrap{border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+.order-list-table-wrap .order-table{margin-bottom:0}
+.order-list-table-wrap .order-table thead th{position:static}
+.order-list-table-wrap .order-table tbody td{overflow:visible}
+.order-list-table-wrap .order-col-actions{white-space:nowrap}
+.order-list-table-wrap .dropdown-menu{z-index:1080;min-width:220px}
+.order-options-menu .dropdown-item{display:flex;align-items:center;padding:10px 14px;font-size:14px;border-radius:8px}
+.order-options-menu form{margin:0}
+.order-table-card .table-footer{margin-top:18px;padding-top:18px;border-top:1px solid #f1f5f9}
 .order-preview-doc{padding:28px}
 .order-preview-total-box{background:#f8fafc;border-radius:12px;padding:16px;height:100%}
 .order-preview-total-box.highlight{background:#eff6ff}

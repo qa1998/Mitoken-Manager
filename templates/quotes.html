@@ -1,0 +1,315 @@
+{% extends 'base.html' %}
+{% from 'partials/quote_status_cell.html' import quote_status_cell %}
+{% from 'partials/quote_doc_links.html' import quote_doc_links %}
+{% macro quote_sort_th(label, field) %}
+<th>
+  <a href="{{ quote_sort_url(field, list_args, sort, order) }}" class="th-sort {% if sort == field %}active {{ order }}{% endif %}">
+    {{ label }}
+    <span class="sort-icons"><i class="bi bi-caret-up-fill"></i><i class="bi bi-caret-down-fill"></i></span>
+  </a>
+</th>
+{% endmacro %}
+{% block content %}
+
+<div class="quote-page">
+  <div class="panel-card quote-header-card">
+    <div class="panel-card-head mb-0">
+      <div class="section-header">
+        <div class="page-header-icon"><i class="bi bi-file-earmark-text-fill"></i></div>
+        <div>
+          <h2 class="section-title">Báo giá</h2>
+          <p class="small-muted mb-0">Quản lý và theo dõi các báo giá gửi đến khách hàng</p>
+        </div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('quotes_export', **export_args) }}" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel me-1"></i> Xuất Excel</a>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createQuoteModal"><i class="bi bi-plus-lg me-1"></i> Tạo báo giá mới</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 quote-stat-row quote-stat-row-4">
+    <div class="col-md-3 col-6">
+      <div class="quote-stat-card">
+        <div class="quote-stat-icon stat-blue"><i class="bi bi-clipboard-data"></i></div>
+        <div>
+          <div class="quote-stat-label">Tổng số báo giá</div>
+          <div class="quote-stat-value">{{ stats.total }}</div>
+          <div class="quote-stat-hint">Tất cả</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="quote-stat-card">
+        <div class="quote-stat-icon stat-cyan"><i class="bi bi-file-earmark-plus"></i></div>
+        <div>
+          <div class="quote-stat-label">Mới tạo</div>
+          <div class="quote-stat-value">{{ stats.new }}</div>
+          <div class="quote-stat-hint">{{ stats.new_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="quote-stat-card">
+        <div class="quote-stat-icon stat-purple"><i class="bi bi-check-circle"></i></div>
+        <div>
+          <div class="quote-stat-label">Đã chốt</div>
+          <div class="quote-stat-value">{{ stats.won }}</div>
+          <div class="quote-stat-hint">{{ stats.won_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="quote-stat-card">
+        <div class="quote-stat-icon stat-red"><i class="bi bi-x-circle"></i></div>
+        <div>
+          <div class="quote-stat-label">Đã hủy</div>
+          <div class="quote-stat-value">{{ stats.cancelled }}</div>
+          <div class="quote-stat-hint">{{ stats.cancelled_pct }}%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card">
+    <form method="get" class="quote-filter-form">
+      <input type="hidden" name="tab" value="{{ filters.tab }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="order" value="{{ order }}">
+      <input type="hidden" name="per_page" value="{{ per_page }}">
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label-custom">Khách hàng</label>
+          <select name="customer_id" class="form-select">
+            <option value="">Tất cả</option>
+            {% for c in customers %}
+            <option value="{{ c.id }}" {% if filters.customer_id and filters.customer_id|int == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label-custom">Từ ngày</label>
+          <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label-custom">Đến ngày</label>
+          <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label-custom">Trạng thái</label>
+          <select name="status" class="form-select">
+            <option value="">Tất cả</option>
+            {% for s in quote_filter_statuses %}
+            <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label-custom">Tìm kiếm</label>
+          <div class="input-icon-wrap">
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm theo mã báo giá, khách hàng...">
+          </div>
+        </div>
+      </div>
+      <div class="quote-filter-actions">
+        <a href="{{ url_for('quotes', tab=filters.tab) }}" class="btn btn-outline-secondary btn-clear-filter"><i class="bi bi-arrow-counterclockwise me-1"></i> Xóa bộ lọc</a>
+        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-search me-1"></i> Tìm kiếm</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel-card quote-table-card">
+    <div class="table-toolbar">
+      <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h5 class="section-title mb-0">DANH SÁCH BÁO GIÁ</h5>
+        <ul class="nav nav-pills quote-tabs-inline mb-0">
+          <li class="nav-item"><a class="nav-link {% if filters.tab != 'draft' %}active{% endif %}" href="{{ url_for('quotes', **list_args_list) }}">Chính thức</a></li>
+          <li class="nav-item"><a class="nav-link {% if filters.tab == 'draft' %}active{% endif %}" href="{{ url_for('quotes', **list_args_draft) }}">Nháp</a></li>
+        </ul>
+      </div>
+      <form method="get" class="per-page-select">
+        {% for key, val in list_args.items() %}
+        {% if val %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
+        {% endfor %}
+        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="10" {% if per_page == 10 %}selected{% endif %}>10 / trang</option>
+          <option value="25" {% if per_page == 25 %}selected{% endif %}>25 / trang</option>
+          <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / trang</option>
+        </select>
+      </form>
+    </div>
+
+    <div class="customer-table-wrap">
+      <table class="table customer-table quote-table">
+        <thead>
+          <tr>
+            {{ quote_sort_th('Mã báo giá', 'quote_code') }}
+            <th>Khách hàng</th>
+            {{ quote_sort_th('Ngày tạo', 'created_at') }}
+            {{ quote_sort_th('Hiệu lực đến', 'valid_until') }}
+            {{ quote_sort_th('Tổng tiền', 'total') }}
+            {{ quote_sort_th('Trạng thái', 'status') }}
+            <th>Ghi chú</th>
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in quotes %}
+          {% set st = quote_display_status(q) %}
+          <tr>
+            <td><a href="{{ url_for('quote_preview', qid=q.id) }}" class="quote-code-link">{{ q.quote_code }}</a></td>
+            <td class="quote-customer-name">{{ q.customer.name }}</td>
+            <td>{{ q.created_at.strftime('%d/%m/%Y') }}</td>
+            <td>{{ quote_valid_until(q).strftime('%d/%m/%Y') }}</td>
+            <td class="text-end fw-semibold money">{{ q.total|money }}</td>
+            <td>{{ quote_status_cell(q) }}</td>
+            <td class="quote-note-cell small-muted">{{ quote_note_preview(q.note) }}</td>
+            <td class="text-end">
+              <div class="quote-action-btns">
+                <a href="{{ url_for('quote_preview', qid=q.id) }}" class="btn btn-light btn-quote-action" title="Xem"><i class="bi bi-eye"></i></a>
+                <button type="button" class="btn btn-light btn-quote-action" data-bs-toggle="modal" data-bs-target="#editQuote{{ q.id }}" title="Sửa"><i class="bi bi-pencil"></i></button>
+                <a href="{{ url_for('quote_print', qid=q.id) }}" target="_blank" class="btn btn-light btn-quote-action" title="Báo giá"><i class="bi bi-file-earmark-text"></i></a>
+                <a href="{{ url_for('preview_quote_sale_contract', qid=q.id) }}" target="_blank" class="btn btn-light btn-quote-action" title="Hợp đồng mua bán"><i class="bi bi-file-earmark-ruled"></i></a>
+                <a href="{{ url_for('preview_quote_handover', qid=q.id) }}" target="_blank" class="btn btn-light btn-quote-action" title="Biên bản nhận hàng"><i class="bi bi-clipboard-check"></i></a>
+                <div class="dropdown">
+                  <button class="btn btn-light btn-quote-action" type="button" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></button>
+                  <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                    {% if st == 'Mới tạo' %}
+                    <li>
+                      <form method="post" action="{{ url_for('update_quote_status', qid=q.id) }}">
+                        <input type="hidden" name="status" value="Đã chốt">
+                        <input type="hidden" name="_tab" value="{{ filters.tab }}">
+                        <button type="submit" class="dropdown-item"><i class="bi bi-check-circle me-2"></i>Chốt báo giá</button>
+                      </form>
+                    </li>
+                    <li>
+                      <form method="post" action="{{ url_for('update_quote_status', qid=q.id) }}">
+                        <input type="hidden" name="status" value="Đã hủy">
+                        <input type="hidden" name="_tab" value="{{ filters.tab }}">
+                        <button type="submit" class="dropdown-item text-danger"><i class="bi bi-x-circle me-2"></i>Hủy báo giá</button>
+                      </form>
+                    </li>
+                    {% elif st == 'Đã chốt' %}
+                    <li><a class="dropdown-item" href="{{ url_for('create_order_from_quote', qid=q.id) }}"><i class="bi bi-cart me-2"></i>Tạo đơn hàng</a></li>
+                    {% endif %}
+                    {% if st == 'Nháp' %}
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                      <form method="post" action="{{ url_for('update_quote_status', qid=q.id) }}">
+                        <input type="hidden" name="status" value="Mới tạo">
+                        <input type="hidden" name="_tab" value="draft">
+                        <button type="submit" class="dropdown-item">Xuất bản nháp</button>
+                      </form>
+                    </li>
+                    {% endif %}
+                  </ul>
+                </div>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted py-5">Chưa có báo giá</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-footer">
+      {% if pagination.total > 0 %}
+      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
+      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} báo giá</span>
+      {% else %}
+      <span>Chưa có dữ liệu</span>
+      {% endif %}
+      <div class="table-footer-right">
+        {% if pagination.pages > 1 %}
+        <nav>
+          <ul class="pagination pagination-custom mb-0">
+            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('quotes', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
+            </li>
+            {% for pg in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+            {% if pg %}
+            <li class="page-item {% if pg == pagination.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('quotes', page=pg, **list_args) }}">{{ pg }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">...</span></li>
+            {% endif %}
+            {% endfor %}
+            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('quotes', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
+            </li>
+          </ul>
+        </nav>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% include 'partials/quote_create_modal.html' %}
+
+{% for q in quotes %}
+<div class="modal fade quote-page-modal" id="editQuote{{ q.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_quote', qid=q.id) }}">
+        <input type="hidden" name="_tab" value="{{ filters.tab }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Chỉnh sửa {{ q.quote_code }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">Khách hàng</label>
+              <select name="customer_id" class="form-select" required>
+                {% for c in customers %}
+                <option value="{{ c.id }}" {% if c.id == q.customer_id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Trạng thái</label>
+              <select name="status" class="form-select">
+                {% for s in quote_filter_statuses %}
+                <option value="{{ s }}" {% if q.status == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+                {% if q.status == 'Nháp' %}<option value="Nháp" selected>Nháp</option>{% endif %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">VAT %</label>
+              <input name="vat_rate" class="form-control" value="{{ q.vat_rate }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Chiết khấu</label>
+              <input name="discount" class="form-control" value="{{ q.discount }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Hiệu lực đến</label>
+              <input type="date" name="valid_until" class="form-control" value="{{ quote_valid_until(q).isoformat() }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Ghi chú</label>
+              <textarea name="note" class="form-control" rows="2">{{ q.note or '' }}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/quotes.js') }}"></script>
+{% endblock %}

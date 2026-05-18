@@ -1,0 +1,9 @@
+{% macro quote_status_cell(quote) %}
+{% set st = quote_display_status(quote) %}
+<div class="quote-status-wrap">
+  <span class="quote-status-badge status-{{ quote_status_key(st) }}">{{ st }}</span>
+  {% if quote_is_expired(quote) %}
+  <span class="quote-expired-badge">Hết hạn</span>
+  {% endif %}
+</div>
+{% endmacro %}

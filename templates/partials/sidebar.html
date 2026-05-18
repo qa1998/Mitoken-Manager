@@ -1,0 +1,40 @@
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <span class="sidebar-brand-logo"><i class="bi bi-box-seam-fill"></i></span>
+    <span class="sidebar-brand-text">Business Web</span>
+  </div>
+
+  <div class="sidebar-company-block">
+    <label class="sidebar-company-label" for="sidebarCompanySelect">Công ty</label>
+    <div class="sidebar-select-wrap">
+      <i class="bi bi-building sidebar-select-icon"></i>
+      <select id="sidebarCompanySelect" class="sidebar-company-select" onchange="if(this.value){window.location.href=this.value}">
+        <option value="" selected>{{ company.short_name or company.name or 'Chọn công ty' }}</option>
+        <option value="{{ url_for('company_settings') }}">Chỉnh sửa thông tin công ty</option>
+      </select>
+      <i class="bi bi-chevron-down sidebar-select-chevron"></i>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    {% set nav_items = [
+      ('dashboard', url_for('dashboard'), 'Dashboard', 'bi-house-door'),
+      ('customers', url_for('customers'), 'Khách hàng', 'bi-people'),
+      ('products', url_for('products'), 'Sản phẩm', 'bi-box-seam'),
+      ('quotes', url_for('quotes'), 'Báo giá', 'bi-file-earmark-text'),
+      ('orders', url_for('orders'), 'Đơn hàng', 'bi-cart3'),
+      ('stock', url_for('stock'), 'Kho hàng', 'bi-building'),
+      ('debt', url_for('debt'), 'Công nợ', 'bi-wallet2'),
+    ] %}
+    {% for endpoint, href, label, icon in nav_items %}
+    <a href="{{ href }}" class="sidebar-link{% if nav_endpoint == endpoint %} active{% endif %}">
+      <i class="bi {{ icon }}"></i>
+      <span>{{ label }}</span>
+    </a>
+    {% endfor %}
+    <a href="{{ url_for('company_settings') }}" class="sidebar-link{% if nav_endpoint == 'company_settings' %} active{% endif %}">
+      <i class="bi bi-gear"></i>
+      <span>Thông tin công ty</span>
+    </a>
+  </nav>
+</aside>

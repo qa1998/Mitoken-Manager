@@ -1,0 +1,101 @@
+<div class="modal fade" id="createQuoteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content quote-create-modal">
+      <form method="post" action="{{ url_for('quotes') }}" id="create-quote-form" class="quote-create-form">
+        <div class="modal-header border-0 pb-0">
+          <h5 class="modal-title">Tạo báo giá mới</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3 mb-4">
+            <div class="col-lg-5">
+              <label class="form-label-custom">Khách hàng <span class="text-danger">*</span></label>
+              <div class="d-flex gap-2 align-items-stretch">
+                <select name="customer_id" class="form-select" required id="quote-customer-select">
+                  <option value="">Chọn khách hàng</option>
+                  {% for c in customers %}
+                  <option value="{{ c.id }}">{{ c.name }}</option>
+                  {% endfor %}
+                </select>
+                <a href="{{ url_for('customers') }}" target="_blank" class="btn btn-outline-primary btn-sm text-nowrap flex-shrink-0">
+                  <i class="bi bi-plus-lg"></i> Thêm KH
+                </a>
+              </div>
+            </div>
+            <div class="col-lg-2 col-md-4">
+              <label class="form-label-custom">VAT (%)</label>
+              <input name="vat_rate" type="number" min="0" max="100" class="form-control quote-calc-input" id="quote-vat-rate" value="0">
+            </div>
+            <div class="col-lg-2 col-md-4">
+              <label class="form-label-custom">Chiết khấu (%)</label>
+              <input type="number" min="0" max="100" class="form-control quote-calc-input" id="quote-discount-percent" value="0">
+              <input type="hidden" name="discount" id="quote-discount-amount" value="0">
+            </div>
+            <div class="col-lg-3 col-md-4">
+              <label class="form-label-custom">Hiệu lực đến</label>
+              <input type="date" name="valid_until" class="form-control" value="{{ default_valid }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Ghi chú</label>
+              <textarea name="note" class="form-control" rows="2" maxlength="500" placeholder="Ghi chú báo giá (nếu có)" id="quote-note-input"></textarea>
+              <div class="text-end small-muted mt-1"><span id="quote-note-count">0</span>/500</div>
+            </div>
+          </div>
+
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <p class="panel-section-label mb-0">Chi tiết hàng hóa</p>
+          </div>
+          <div class="quote-lines-table-wrap">
+            <table class="table quote-lines-table mb-0">
+              <thead>
+                <tr>
+                  <th class="col-num">#</th>
+                  <th>Sản phẩm</th>
+                  <th class="col-unit">Đơn vị</th>
+                  <th class="col-qty">SL</th>
+                  <th class="col-price">Đơn giá</th>
+                  <th class="col-amount">Thành tiền</th>
+                  <th class="col-actions text-end">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="quote-items-body"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-outline-primary btn-sm mt-3" id="btn-add-quote-row">
+            <i class="bi bi-plus-lg me-1"></i> Thêm dòng hàng
+          </button>
+
+          <div class="quote-create-totals row g-3 mt-4">
+            <div class="col-md-7">
+              <div class="quote-totals-meta small-muted">
+                <div class="d-flex justify-content-between py-1"><span>Tổng chiết khấu</span><span id="quote-summary-discount">0 đ</span></div>
+                <div class="d-flex justify-content-between py-1"><span id="quote-summary-vat-label">VAT (0%)</span><span id="quote-summary-vat">0 đ</span></div>
+              </div>
+            </div>
+            <div class="col-md-5">
+              <div class="quote-totals-box">
+                <div class="d-flex justify-content-between mb-2"><span class="text-muted">Tổng tiền hàng</span><span id="quote-summary-subtotal" class="fw-semibold">0 đ</span></div>
+                <div class="d-flex justify-content-between mb-2"><span class="text-muted">Tổng giảm giá</span><span id="quote-summary-discount-box" class="fw-semibold">0 đ</span></div>
+                <div class="d-flex justify-content-between align-items-center quote-totals-grand">
+                  <span>Tổng thanh toán</span>
+                  <span id="quote-summary-total">0 đ</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0 pt-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" name="save_draft" value="1" class="btn btn-outline-secondary">
+            <i class="bi bi-save me-1"></i> Lưu nháp
+          </button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-send me-1"></i> Tạo báo giá
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="quote-catalog-data">{{ quote_catalog|tojson }}</script>

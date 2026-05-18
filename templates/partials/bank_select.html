@@ -1,0 +1,11 @@
+{% macro bank_select(selected='', banks=None, bank_value_set=None) %}
+<select name="bank_name" class="form-select">
+  <option value="">Chọn ngân hàng</option>
+  {% for bank in banks or [] %}
+  <option value="{{ bank.name }}" {% if selected == bank.name or selected == bank.shortName %}selected{% endif %}>{{ bank.shortName }} — {{ bank.name }}</option>
+  {% endfor %}
+  {% if selected and bank_value_set is not none and selected not in bank_value_set %}
+  <option value="{{ selected }}" selected>{{ selected }}</option>
+  {% endif %}
+</select>
+{% endmacro %}

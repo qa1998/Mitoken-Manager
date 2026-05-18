@@ -1,0 +1,328 @@
+{% extends 'base.html' %}
+{% from 'partials/product_thumb.html' import product_thumb %}
+{% block title %}Sản phẩm — Business Web{% endblock %}
+{% block content %}
+
+<div class="product-page product-page-v2">
+  <nav class="page-breadcrumb" aria-label="breadcrumb">
+    <a href="{{ url_for('dashboard') }}">Trang chủ</a>
+    <span class="page-breadcrumb-sep">/</span>
+    <span class="page-breadcrumb-current">Sản phẩm</span>
+  </nav>
+
+  <div class="product-page-top">
+    <div class="product-page-intro">
+      <h1 class="product-page-title">Sản phẩm</h1>
+      <p class="product-page-subtitle">Quản lý danh mục sản phẩm của cửa hàng</p>
+    </div>
+    <div class="product-page-actions">
+      <button type="button" class="btn btn-light btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#categoryModal">
+        <i class="bi bi-folder2 me-2"></i>Quản lý danh mục
+      </button>
+      <a href="{{ url_for('products_export', **export_args) }}" class="btn btn-light btn-product-toolbar">
+        <i class="bi bi-download me-2"></i>Export Excel
+      </a>
+      <button type="button" class="btn btn-primary btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#createProductModal">
+        <i class="bi bi-plus-lg me-1"></i> Thêm sản phẩm
+      </button>
+    </div>
+  </div>
+
+  <div class="panel-card product-filter-card product-filter-card-v2">
+    <form method="get" class="product-filter-form-v2" id="product-filter-form">
+      <input type="hidden" name="per_page" value="{{ per_page }}">
+      <div class="product-filter-search-row">
+        <div class="input-icon-wrap product-search-wrap">
+          <i class="bi bi-search"></i>
+          <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm kiếm theo tên sản phẩm, SKU, mã vạch...">
+        </div>
+      </div>
+      <div class="product-filter-fields-row">
+        <div class="product-filter-field">
+          <label class="product-filter-label">Danh mục</label>
+          <select name="category" class="form-select">
+            <option value="">Tất cả</option>
+            {% for cat in categories %}
+            <option value="{{ cat.name }}" {% if filters.category == cat.name %}selected{% endif %}>{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="product-filter-field">
+          <label class="product-filter-label">Thương hiệu</label>
+          <select name="brand" class="form-select">
+            <option value="">Tất cả</option>
+            {% for b in brands %}
+            <option value="{{ b }}" {% if filters.brand == b %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="product-filter-field">
+          <label class="product-filter-label">Trạng thái</label>
+          <select name="status" class="form-select">
+            <option value="">Tất cả</option>
+            <option value="selling" {% if filters.status == 'selling' %}selected{% endif %}>Đang bán</option>
+            <option value="stopped" {% if filters.status == 'stopped' %}selected{% endif %}>Ngừng bán</option>
+          </select>
+        </div>
+        <div class="product-filter-field product-filter-submit-field">
+          <label class="product-filter-label d-none d-md-block">&nbsp;</label>
+          <button type="submit" class="btn btn-light btn-product-filter w-100">
+            <i class="bi bi-funnel me-2"></i>Bộ lọc
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel-card product-list-card product-list-card-v2">
+    <div class="customer-table-wrap">
+      <table class="table product-table-v2">
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Ảnh</th>
+            <th>Tên sản phẩm</th>
+            <th>Danh mục</th>
+            <th>Thương hiệu</th>
+            <th>Giá bán</th>
+            <th>Bảo hành</th>
+            <th>Trạng thái</th>
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in products %}
+          {% set sale_key, sale_label = product_list_status(p) %}
+          <tr>
+            <td><span class="product-sku-cell">{{ p.sku }}</span></td>
+            <td>{{ product_thumb(p) }}</td>
+            <td>
+              <div class="product-name-block">
+                <div class="product-name-main">{{ p.name }}</div>
+                <div class="product-barcode-sub">Mã vạch: {{ product_barcode(p) }}</div>
+              </div>
+            </td>
+            <td>
+              {% if p.category %}
+              <span class="category-tag {{ category_tag(p.category) }}">{{ p.category }}</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td>{{ p.brand or '—' }}</td>
+            <td class="money product-price-td">{{ p.retail_price|money }}</td>
+            <td>{{ p.warranty or '—' }}</td>
+            <td>
+              <span class="product-status-pill status-{{ sale_key }}">{{ sale_label }}</span>
+            </td>
+            <td class="text-end">
+              <div class="dropdown">
+                <button class="btn btn-light btn-action-dots" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                  <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
+                  <li>
+                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
+                      <i class="bi bi-pencil me-2"></i>Sửa giá
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productStock{{ p.id }}">
+                      <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPriceHistory{{ p.id }}">
+                      <i class="bi bi-clock-history me-2"></i>Xem lịch sử giá
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productEdit{{ p.id }}">
+                      <i class="bi bi-pencil-square me-2"></i>Sửa sản phẩm
+                    </button>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form method="post" action="{{ url_for('toggle_product_active', pid=p.id) }}" class="m-0 product-toggle-form">
+                      <input type="hidden" name="_q" value="{{ filters.q }}">
+                      <input type="hidden" name="_page" value="{{ pagination.page }}">
+                      <input type="hidden" name="_per_page" value="{{ per_page }}">
+                      <input type="hidden" name="_category" value="{{ filters.category }}">
+                      <input type="hidden" name="_brand" value="{{ filters.brand }}">
+                      <input type="hidden" name="_status" value="{{ filters.status }}">
+                      <button type="submit" class="dropdown-item text-danger">
+                        <i class="bi bi-power me-2"></i>{% if p.is_active %}Ngừng bán{% else %}Bật bán lại{% endif %}
+                      </button>
+                    </form>
+                  </li>
+                </ul>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-footer">
+      {% if pagination.total > 0 %}
+      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
+      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} sản phẩm</span>
+      {% else %}
+      <span>Chưa có dữ liệu</span>
+      {% endif %}
+      <div class="table-footer-right">
+        {% if pagination.pages > 1 %}
+        <nav>
+          <ul class="pagination pagination-custom mb-0">
+            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('products', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
+            </li>
+            {% for pg in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+            {% if pg %}
+            <li class="page-item {% if pg == pagination.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('products', page=pg, **list_args) }}">{{ pg }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            {% endfor %}
+            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('products', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
+            </li>
+          </ul>
+        </nav>
+        {% endif %}
+        <form method="get" class="per-page-select per-page-footer">
+          {% for key, val in list_args.items() %}
+          {% if val %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
+          {% endfor %}
+          <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+            <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+          </select>
+          <span>/ trang</span>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% for p in products %}
+{% include 'partials/product_modals.html' %}
+{% endfor %}
+
+<div class="modal fade product-page-modal" id="createProductModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('products') }}" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold">Thêm sản phẩm mới</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">SKU / Mã vạch <span class="text-danger">*</span></label>
+              <input type="text" name="sku" class="form-control" required placeholder="VD: DJI-A4-COMBO">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
+              <input type="text" name="name" class="form-control" required placeholder="Nhập tên sản phẩm">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Danh mục</label>
+              <select name="category" class="form-select">
+                <option value="">— Chọn danh mục —</option>
+                {% for cat in categories %}
+                <option value="{{ cat.name }}">{{ cat.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Thương hiệu</label>
+              <input type="text" name="brand" class="form-control" placeholder="VD: Samsung, DJI">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Tồn kho</label>
+              <input type="number" name="stock" class="form-control" value="0" min="0">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá nhập</label>
+              <input type="text" name="cost_price" class="form-control" placeholder="0">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá bán lẻ</label>
+              <input type="text" name="retail_price" class="form-control" placeholder="0">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá dự án</label>
+              <input type="text" name="project_price" class="form-control" placeholder="0">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Bảo hành</label>
+              <input type="text" name="warranty" class="form-control" placeholder="VD: 12 tháng">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Ảnh sản phẩm</label>
+              <input type="file" name="image" class="form-control product-image-input" accept="image/jpeg,image/png,image/webp,image/gif">
+              <div class="small-muted mt-1">JPG, PNG, WEBP, GIF — tối đa 5MB</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Thêm sản phẩm</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">Quản lý danh mục</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" action="{{ url_for('create_category') }}" class="mb-4">
+          <label class="form-label-custom">Thêm danh mục mới <span class="text-danger">*</span></label>
+          <div class="d-flex gap-2">
+            <input type="text" name="name" class="form-control" required placeholder="Nhập tên danh mục">
+            <button type="submit" class="btn btn-primary text-nowrap">Thêm</button>
+          </div>
+        </form>
+        <label class="form-label-custom">Danh sách danh mục</label>
+        <div class="category-manage-list">
+          {% for cat in categories %}
+          <div class="category-manage-item">
+            <div class="category-manage-info">
+              <span class="category-tag {{ category_tag(cat.name) }}">{{ cat.name }}</span>
+              <span class="small-muted">{{ category_counts.get(cat.id, 0) }} sản phẩm</span>
+            </div>
+            <form method="post" action="{{ url_for('delete_category', cid=cat.id) }}" class="m-0 category-delete-form" data-name="{{ cat.name }}" data-count="{{ category_counts.get(cat.id, 0) }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa danh mục">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </div>
+          {% else %}
+          <p class="text-muted small mb-0">Chưa có danh mục</p>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/products.js') }}"></script>
+{% endblock %}

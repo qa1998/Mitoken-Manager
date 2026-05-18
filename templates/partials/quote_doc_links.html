@@ -1,0 +1,13 @@
+{% macro quote_doc_links(quote) %}
+<div class="quote-doc-links d-flex flex-wrap gap-2">
+  <a href="{{ url_for('quote_print', qid=quote.id) }}" target="_blank" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-file-earmark-text me-1"></i> Báo giá
+  </a>
+  <a href="{{ url_for('preview_quote_sale_contract', qid=quote.id) }}" target="_blank" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-file-earmark-ruled me-1"></i> Hợp đồng mua bán
+  </a>
+  <a href="{{ url_for('preview_quote_handover', qid=quote.id) }}" target="_blank" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-clipboard-check me-1"></i> Biên bản nhận hàng
+  </a>
+</div>
+{% endmacro %}

@@ -1,0 +1,115 @@
+{% set q = quote %}
+{% set subtotal_net = [q.subtotal - q.discount, 0]|max %}
+<div class="quote-print-sheet quote-print-frame">
+    <table class="quote-print-header-table" cellpadding="0" cellspacing="0">
+      <tr>
+        <td class="quote-print-header-left">
+          <div class="quote-print-company-inner">
+            <div class="quote-print-logo-wrap">
+              {% if company.logo_url %}
+              <img src="{{ company.logo_url }}" alt="" class="quote-print-logo-img">
+              {% else %}
+              <div class="quote-print-logo">{{ company.short_name or 'LOGO' }}</div>
+              {% endif %}
+            </div>
+            <div>
+              <h1 class="quote-print-company-name">{{ company.name }}</h1>
+              <ul class="quote-print-contact">
+                <li><i class="bi bi-telephone-fill"></i><span>{{ company.phone }}</span></li>
+                {% if company.bank %}<li><i class="bi bi-bank2"></i><span>{{ company.bank }}</span></li>{% endif %}
+                <li><i class="bi bi-geo-alt-fill"></i><span>{{ company.address }}</span></li>
+              </ul>
+            </div>
+          </div>
+        </td>
+        <td class="quote-print-header-right">
+          <h2 class="quote-print-title">BÁO GIÁ</h2>
+          <table class="quote-print-meta-table" cellpadding="0" cellspacing="0">
+            <tr><td>Số báo giá</td><td>: {{ q.quote_code }}</td></tr>
+            <tr><td>Ngày báo giá</td><td>: {{ q.created_at.strftime('%d/%m/%Y') if q.created_at else '—' }}</td></tr>
+            <tr><td>Hiệu lực đến</td><td>: {{ valid_until.strftime('%d/%m/%Y') }}</td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <section class="quote-print-customer">
+      <p><strong>Kính gửi:</strong> {{ q.customer.name }}</p>
+      {% if q.customer.phone %}<p><strong>Điện thoại:</strong> {{ q.customer.phone }}</p>{% endif %}
+      {% if q.customer.address and not q.customer.phone %}<p><strong>Địa chỉ:</strong> {{ q.customer.address }}</p>{% endif %}
+    </section>
+
+    <table class="quote-print-table">
+      <thead>
+        <tr>
+          <th class="col-stt">STT</th>
+          <th class="col-img">Hình ảnh</th>
+          <th class="col-name">Tên sản phẩm</th>
+          <th class="col-unit">Đơn vị tính</th>
+          <th class="col-qty">Số lượng</th>
+          <th class="col-price">Đơn giá (VNĐ)</th>
+          <th class="col-amount">Thành tiền (VNĐ)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in q.items %}
+        <tr>
+          <td class="col-stt">{{ loop.index }}</td>
+          <td class="col-img">
+            {% if item.product and product_image_url(item.product) %}
+            <img src="{{ product_image_url(item.product) }}" alt="" class="quote-print-item-img">
+            {% else %}
+            <span class="quote-print-item-placeholder"><i class="bi bi-image"></i></span>
+            {% endif %}
+          </td>
+          <td class="col-name">{{ item.product_name }}</td>
+          <td class="col-unit">{{ item.unit or 'cái' }}</td>
+          <td class="col-qty">{{ item.qty }}</td>
+          <td class="col-price">{{ item.price|money_plain }}</td>
+          <td class="col-amount"><strong>{{ item.amount|money_plain }}</strong></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" style="text-align:center;padding:16px">Chưa có sản phẩm</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">Tổng tiền hàng (chưa VAT)</td>
+          <td class="col-amount">{{ subtotal_net|money_plain }}</td>
+        </tr>
+        <tr>
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">VAT ({{ q.vat_rate }}%)</td>
+          <td class="col-amount">{{ q.vat_amount|money_plain }}</td>
+        </tr>
+        <tr class="quote-print-grand">
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">Tổng cộng (đã bao gồm VAT)</td>
+          <td class="col-amount"><strong>{{ q.total|money_plain }}</strong></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <table class="quote-print-footer-table" cellpadding="0" cellspacing="0">
+      <tr>
+        <td class="quote-print-footer-left">
+          <h3 class="quote-print-notes-title">GHI CHÚ</h3>
+          <ul>
+            <li>Báo giá trên chưa bao gồm VAT.</li>
+            <li>Thuế VAT: {{ q.vat_rate }}%.</li>
+            <li>Giá trên có thể thay đổi tùy theo thời điểm và số lượng đặt hàng.</li>
+            {% if q.note %}<li>{{ q.note }}</li>{% endif %}
+            <li>Rất mong nhận được sự hợp tác từ Quý Công ty!</li>
+          </ul>
+        </td>
+        <td class="quote-print-footer-right">
+          <p class="quote-print-sign-company">{{ company.name }}</p>
+          <p class="quote-print-sign-role">{{ company.director or 'Giám đốc' }}</p>
+          {% if company.director_name %}<p class="quote-print-sign-name">{{ company.director_name }}</p>{% endif %}
+          <div class="quote-print-sign-line"></div>
+          <p class="quote-print-sign-done">(Đã ký)</p>
+        </td>
+      </tr>
+    </table>
+</div>

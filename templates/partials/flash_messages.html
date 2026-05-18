@@ -1,0 +1,21 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-messages mb-3">
+  {% for category, message in messages %}
+  {% set cat = 'danger' if category == 'error' else (category if category in ['success', 'danger', 'warning', 'info', 'secondary'] else 'info') %}
+  {% set icons = {
+    'success': 'bi-check-circle-fill',
+    'danger': 'bi-x-circle-fill',
+    'warning': 'bi-exclamation-triangle-fill',
+    'info': 'bi-info-circle-fill',
+    'secondary': 'bi-bell-fill'
+  } %}
+  <div class="alert alert-{{ cat }} alert-dismissible fade show flash-alert flash-alert-{{ cat }}" role="alert">
+    <i class="bi {{ icons.get(cat, 'bi-info-circle-fill') }} flash-alert-icon"></i>
+    <span class="flash-alert-text">{{ message }}</span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Đóng"></button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}

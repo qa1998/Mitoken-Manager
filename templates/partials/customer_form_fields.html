@@ -1,0 +1,109 @@
+{% from 'partials/bank_select.html' import bank_select %}
+{% macro customer_form_fields(customer=None, banks=[], bank_value_set=None, form_suffix='') %}
+{% set ctype = 'individual' if customer and customer.customer_type == 'individual' else 'company' %}
+{% set suffix = form_suffix %}
+
+<div class="customer-type-segment mb-4" data-customer-type-segment>
+  <input type="hidden" name="customer_type" value="{{ ctype }}" data-customer-type-input>
+  <div class="customer-type-segment-inner" role="group" aria-label="Loại khách hàng">
+    <button type="button" class="customer-type-btn{% if ctype == 'company' %} active{% endif %}" data-customer-type="company" aria-pressed="{{ 'true' if ctype == 'company' else 'false' }}">
+      <i class="bi bi-building me-1"></i> Công ty
+    </button>
+    <button type="button" class="customer-type-btn{% if ctype == 'individual' %} active{% endif %}" data-customer-type="individual" aria-pressed="{{ 'true' if ctype == 'individual' else 'false' }}">
+      <i class="bi bi-person me-1"></i> Cá nhân
+    </button>
+  </div>
+</div>
+
+<div class="customer-fields-company" data-customer-panel="company"{% if ctype != 'company' %} hidden{% endif %}>
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label-custom">Tên công ty <span class="text-danger">*</span></label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-building"></i>
+        <input type="text" name="name" class="form-control" data-field-company-required value="{{ customer.name if customer else '' }}" placeholder="Nhập tên công ty"{% if ctype == 'company' %} required{% endif %}>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">MST <span class="text-danger">*</span></label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-file-earmark-text"></i>
+        <input type="text" name="tax_code" class="form-control" data-field-company-required value="{{ customer.tax_code if customer else '' }}" placeholder="Nhập mã số thuế"{% if ctype == 'company' %} required{% endif %}>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">Người đại diện</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-person"></i>
+        <input type="text" name="representative" class="form-control" value="{{ customer.representative if customer else '' }}" placeholder="Nhập người đại diện">
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">Chức vụ</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-briefcase"></i>
+        <input type="text" name="position" class="form-control" value="{{ customer.position if customer else '' }}" placeholder="Nhập chức vụ">
+      </div>
+    </div>
+    <div class="col-12">
+      <label class="form-label-custom">Địa chỉ công ty</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-geo-alt"></i>
+        <input type="text" name="address" class="form-control" data-field-company-address value="{{ customer.address if customer else '' }}" placeholder="Nhập địa chỉ công ty">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="customer-fields-individual" data-customer-panel="individual"{% if ctype != 'individual' %} hidden{% endif %}>
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label-custom">Họ và tên <span class="text-danger">*</span></label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-person"></i>
+        <input type="text" name="name" class="form-control" data-field-individual-required value="{{ customer.name if customer else '' }}" placeholder="Nhập họ và tên"{% if ctype == 'individual' %} required{% endif %}>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">SĐT <span class="text-danger">*</span></label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-telephone"></i>
+        <input type="text" name="phone" class="form-control" data-field-individual-required value="{{ customer.phone if customer else '' }}" placeholder="Nhập số điện thoại"{% if ctype == 'individual' %} required{% endif %}>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">CCCD</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-credit-card-2-front"></i>
+        <input type="text" name="id_card" class="form-control" value="{{ customer.id_card if customer else '' }}" placeholder="Nhập số CCCD (tùy chọn)">
+      </div>
+    </div>
+    <div class="col-12">
+      <label class="form-label-custom">Địa chỉ</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-geo-alt"></i>
+        <input type="text" name="address" class="form-control" data-field-individual-address value="{{ customer.address if customer else '' }}" placeholder="Nhập địa chỉ">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="customer-fields-shared mt-1" data-customer-panel="shared">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label-custom">Ngân hàng</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-bank"></i>
+        {{ bank_select(customer.bank_name if customer else '', banks, bank_value_set) }}
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">STK</label>
+      <div class="input-icon-wrap">
+        <i class="bi bi-wallet2"></i>
+        <input type="text" name="bank_account" class="form-control" value="{{ customer.bank_account if customer else '' }}" placeholder="Nhập số tài khoản">
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

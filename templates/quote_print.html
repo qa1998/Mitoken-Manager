@@ -1,0 +1,18 @@
+{% extends 'print_base.html' %}
+{% block title %}Báo giá {{ quote.quote_code }}{% endblock %}
+{% block content %}
+<div class="quote-print-toolbar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> In / Lưu PDF</button>
+  <button type="button" class="btn" onclick="window.close()">Đóng</button>
+</div>
+<div class="quote-print-page-body">
+  {% include 'partials/quote_document.html' %}
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  window.addEventListener('load', function () {
+    setTimeout(function () { window.print(); }, 400);
+  });
+</script>
+{% endblock %}

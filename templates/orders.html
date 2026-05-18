@@ -1,0 +1,320 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="order-page">
+  <div class="panel-card order-header-card">
+    <div class="panel-card-head mb-0">
+      <div class="section-header">
+        <div class="page-header-icon"><i class="bi bi-bag-check-fill"></i></div>
+        <div>
+          <h2 class="section-title">Đơn hàng</h2>
+          <p class="small-muted mb-0">Quản lý và theo dõi tình trạng đơn hàng</p>
+        </div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('orders_export', **export_args) }}" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel me-1"></i> Xuất Excel</a>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createOrderModal"><i class="bi bi-plus-lg me-1"></i> Tạo đơn hàng mới</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card">
+    <form method="get" class="order-filter-form">
+      <input type="hidden" name="per_page" value="{{ per_page }}">
+      <div class="row g-3">
+        <div class="col-md-2">
+          <label class="form-label-custom">Từ ngày</label>
+          <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label-custom">Đến ngày</label>
+          <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label-custom">Khách hàng</label>
+          <select name="customer_id" class="form-select">
+            <option value="">Chọn khách hàng</option>
+            {% for c in customers %}
+            <option value="{{ c.id }}" {% if filters.customer_id and filters.customer_id|int == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label-custom">Trạng thái</label>
+          <select name="status" class="form-select">
+            <option value="">Chọn trạng thái</option>
+            {% for s in order_statuses %}
+            <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label-custom">Tìm kiếm</label>
+          <div class="input-icon-wrap">
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm theo mã đơn, tên khách hàng...">
+          </div>
+        </div>
+      </div>
+      <div class="order-filter-actions">
+        <a href="{{ url_for('orders') }}" class="btn btn-outline-secondary btn-clear-filter"><i class="bi bi-arrow-counterclockwise me-1"></i> Xóa bộ lọc</a>
+        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-search me-1"></i> Tìm kiếm</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="row g-3 order-stat-row">
+    <div class="col">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-blue"><i class="bi bi-bag-check"></i></div>
+        <div>
+          <div class="order-stat-label">Tổng đơn hàng</div>
+          <div class="order-stat-value">{{ stats.total }}</div>
+          <div class="order-stat-hint">Tất cả</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
+        <div>
+          <div class="order-stat-label">Đã chốt</div>
+          <div class="order-stat-value">{{ stats.won }}</div>
+          <div class="order-stat-hint">{{ stats.won_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-orange"><i class="bi bi-hourglass-split"></i></div>
+        <div>
+          <div class="order-stat-label">Đang xử lý</div>
+          <div class="order-stat-value">{{ stats.processing }}</div>
+          <div class="order-stat-hint">{{ stats.processing_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-purple"><i class="bi bi-truck"></i></div>
+        <div>
+          <div class="order-stat-label">Đang giao</div>
+          <div class="order-stat-value">{{ stats.delivering }}</div>
+          <div class="order-stat-hint">{{ stats.delivering_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-red"><i class="bi bi-x-circle"></i></div>
+        <div>
+          <div class="order-stat-label">Đã hủy</div>
+          <div class="order-stat-value">{{ stats.cancelled }}</div>
+          <div class="order-stat-hint">{{ stats.cancelled_pct }}%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card order-table-card">
+    <div class="table-toolbar">
+      <h5 class="section-title mb-0">DANH SÁCH ĐƠN HÀNG</h5>
+      <form method="get" class="per-page-select">
+        {% for key, val in list_args.items() %}
+        {% if val and key != 'per_page' %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
+        {% endfor %}
+        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="10" {% if per_page == 10 %}selected{% endif %}>10 / trang</option>
+          <option value="25" {% if per_page == 25 %}selected{% endif %}>25 / trang</option>
+          <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / trang</option>
+        </select>
+      </form>
+    </div>
+
+    <div class="customer-table-wrap">
+      <table class="table customer-table order-table">
+        <thead>
+          <tr>
+            <th>Mã đơn</th>
+            <th>Khách hàng</th>
+            <th>Ngày tạo</th>
+            <th class="text-end">Tổng tiền</th>
+            <th class="text-end">Đã trả</th>
+            <th class="text-end">Còn nợ</th>
+            <th>Trạng thái</th>
+            <th>Thanh toán</th>
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in orders %}
+          {% set st = effective_order_status(o) %}
+          {% set pay = order_payment_status(o) %}
+          <tr>
+            <td><a href="{{ url_for('order_preview', oid=o.id) }}" class="order-code-link">{{ o.order_code }}</a></td>
+            <td class="order-customer-name">{{ o.customer.name }}</td>
+            <td>{{ o.created_at.strftime('%d/%m/%Y') if o.created_at else '—' }}</td>
+            <td class="text-end fw-semibold money">{{ o.total|money }}</td>
+            <td class="text-end">{{ o.paid_amount|money }}</td>
+            <td class="text-end fw-semibold">{{ order_balance(o)|money }}</td>
+            <td><span class="order-status-badge status-{{ order_status_key(st) }}">{{ st }}</span></td>
+            <td>
+              {% if pay == '—' %}
+              <span class="text-muted">—</span>
+              {% else %}
+              <span class="order-payment-badge payment-{{ order_payment_key(pay) }}">{{ pay }}</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <div class="order-action-btns">
+                <a href="{{ url_for('order_preview', oid=o.id) }}" class="btn btn-light btn-order-action" title="Xem"><i class="bi bi-eye"></i></a>
+                <a href="{{ url_for('order_preview', oid=o.id) }}" target="_blank" class="btn btn-light btn-order-action" title="In"><i class="bi bi-printer"></i></a>
+                <div class="dropdown">
+                  <button class="btn btn-light btn-order-action" type="button" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>
+                  <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                    {% for s in order_statuses %}
+                    {% if s != st %}
+                    <li>
+                      <form method="post" action="{{ url_for('update_order_status', oid=o.id) }}">
+                        <input type="hidden" name="status" value="{{ s }}">
+                        <input type="hidden" name="_page" value="{{ pagination.page }}">
+                        <button type="submit" class="dropdown-item">Đặt: {{ s }}</button>
+                      </form>
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                    {% if pay != '—' and pay != 'Đã thanh toán' %}
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#paymentOrder{{ o.id }}">
+                        <i class="bi bi-cash-coin me-2"></i>Ghi nhận thanh toán
+                      </button>
+                    </li>
+                    {% endif %}
+                  </ul>
+                </div>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="text-center text-muted py-5">Chưa có đơn hàng</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-footer">
+      {% if pagination.total > 0 %}
+      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
+      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} đơn hàng</span>
+      {% else %}
+      <span>Chưa có dữ liệu</span>
+      {% endif %}
+      <div class="table-footer-right">
+        {% if pagination.pages > 1 %}
+        <nav>
+          <ul class="pagination pagination-custom mb-0">
+            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('orders', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
+            </li>
+            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+            {% if p %}
+            <li class="page-item {% if p == pagination.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('orders', page=p, **list_args) }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            {% endfor %}
+            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('orders', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
+            </li>
+          </ul>
+        </nav>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade order-page-modal" id="createOrderModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('orders') }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Tạo đơn hàng mới</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label-custom">Khách hàng</label>
+            <select name="customer_id" class="form-select" required>
+              <option value="">Chọn khách hàng</option>
+              {% for c in customers %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Tổng tiền (đ)</label>
+            <input type="number" name="total" class="form-control" min="0" step="1000" required>
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Trạng thái</label>
+            <select name="status" class="form-select">
+              {% for s in order_statuses %}
+              <option value="{{ s }}" {% if s == 'Chờ xác nhận' %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Tạo đơn</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% for o in orders %}
+{% if order_payment_status(o) not in ('—', 'Đã thanh toán') %}
+<div class="modal fade order-page-modal" id="paymentOrder{{ o.id }}" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('add_payment', oid=o.id) }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Ghi nhận thanh toán</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-2">{{ o.order_code }} — còn nợ <strong>{{ order_balance(o)|money }}</strong></p>
+          <input type="hidden" name="_page" value="{{ pagination.page }}">
+          <div class="mb-3">
+            <label class="form-label-custom">Số tiền</label>
+            <input type="number" name="amount" class="form-control" min="1" required>
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Phương thức</label>
+            <select name="method" class="form-select">
+              <option>Chuyển khoản</option>
+              <option>Tiền mặt</option>
+              <option>Thẻ</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary w-100">Xác nhận</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/orders.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>Hợp đồng</h3>
+<div class="card p-3 mb-3">
+  <form method="post" class="row g-2">
+    <div class="col-md-3">
+      <select name="customer_id" class="form-select" required>
+        <option value="">Chọn khách hàng</option>
+        {% for c in customers %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2"><input name="contract_code" class="form-control" placeholder="Số HĐ tự động nếu bỏ trống"></div>
+    <div class="col-md-2"><input type="date" name="signed_date" class="form-control" value="{{ today }}"></div>
+    <div class="col-md-2"><input type="date" name="expired_date" class="form-control" value="{{ year_end }}"></div>
+    <div class="col-md-2">
+      <select name="quote_id" class="form-select">
+        <option value="">Không gắn BG</option>
+        {% for q in quotes %}
+        <option value="{{ q.id }}">{{ q.quote_code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 d-flex gap-2">
+      <button type="submit" formaction="{{ url_for('preview_contract_draft') }}" formtarget="_blank" class="btn btn-outline-secondary flex-grow-1">Xem trước</button>
+      <button type="submit" class="btn btn-primary flex-grow-1">Tạo</button>
+    </div>
+  </form>
+</div>
+<div class="card p-3">
+  <table class="table">
+    <tr><th>Số HĐ</th><th>Khách</th><th>Ngày ký</th><th>Hết hạn</th><th></th></tr>
+    {% for c in contracts %}
+    <tr>
+      <td>{{ c.contract_code }}</td>
+      <td>{{ c.customer.name }}</td>
+      <td>{{ c.signed_date.strftime('%d/%m/%Y') }}</td>
+      <td>{{ c.expired_date.strftime('%d/%m/%Y') if c.expired_date else '' }}</td>
+      <td class="text-nowrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('preview_contract', cid=c.id) }}" target="_blank">Xem</a>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('download_contract', cid=c.id) }}">Tải Word</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

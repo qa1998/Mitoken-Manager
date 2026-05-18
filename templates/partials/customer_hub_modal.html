@@ -1,0 +1,207 @@
+{% macro customer_hub_modal(c, framework_contracts, customer_quotes, customer_orders, q='', pagination=none, per_page=10, sort='created_at', order='desc') %}
+{% set fc = framework_contracts.get(c.id) %}
+{% set quotes = customer_quotes.get(c.id, []) %}
+{% set orders = customer_orders.get(c.id, []) %}
+<div class="modal fade customer-hub-modal" id="customerHub{{ c.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">{{ c.name }}</h5>
+          <span class="customer-type-badge {% if customer_is_company(c) %}type-company{% else %}type-individual{% endif %}">{{ customer_type_label(c) }}</span>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-0">
+        <ul class="nav nav-tabs customer-hub-tabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#hubInfo{{ c.id }}" type="button">Thông tin</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#hubContract{{ c.id }}" type="button">Hợp đồng nguyên tắc</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#hubHistory{{ c.id }}" type="button">
+              Lịch sử giao dịch
+              {% if quotes or orders %}<span class="badge bg-secondary ms-1">{{ quotes|length + orders|length }}</span>{% endif %}
+            </button>
+          </li>
+        </ul>
+        <div class="tab-content customer-hub-tab-content">
+          <div class="tab-pane fade show active" id="hubInfo{{ c.id }}" role="tabpanel">
+            {% if customer_is_company(c) %}
+            <div class="row g-3">
+              <div class="col-md-6"><span class="small-muted d-block">Tên công ty</span><div class="fw-semibold">{{ c.name }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">MST</span><div>{{ c.tax_code or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">Người đại diện</span><div>{{ c.representative or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">Chức vụ</span><div>{{ c.position or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">SĐT</span><div>{{ c.phone or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">Ngân hàng</span><div>{{ c.bank_name or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">STK</span><div>{{ c.bank_account or '—' }}</div></div>
+              <div class="col-12"><span class="small-muted d-block">Địa chỉ công ty</span><div>{{ c.address or '—' }}</div></div>
+            </div>
+            {% else %}
+            <div class="row g-3">
+              <div class="col-md-6"><span class="small-muted d-block">Họ và tên</span><div class="fw-semibold">{{ c.name }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">SĐT</span><div>{{ c.phone or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">CCCD</span><div>{{ c.id_card or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">Ngân hàng</span><div>{{ c.bank_name or '—' }}</div></div>
+              <div class="col-md-6"><span class="small-muted d-block">STK</span><div>{{ c.bank_account or '—' }}</div></div>
+              <div class="col-12"><span class="small-muted d-block">Địa chỉ</span><div>{{ c.address or '—' }}</div></div>
+            </div>
+            {% endif %}
+            {% if c.note %}
+            <div class="mt-3 pt-3 border-top">
+              <span class="small-muted d-block">Ghi chú</span>
+              <div>{{ c.note }}</div>
+            </div>
+            {% endif %}
+          </div>
+
+          <div class="tab-pane fade" id="hubContract{{ c.id }}" role="tabpanel">
+            <div class="customer-contract-panel">
+              {% if fc %}
+              <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                  <span class="small-muted d-block">Số hợp đồng</span>
+                  <div class="fw-semibold">{{ fc.contract_code }}</div>
+                </div>
+                <div class="col-md-4">
+                  <span class="small-muted d-block">Ngày ký</span>
+                  <div>{{ fc.signed_date.strftime('%d/%m/%Y') if fc.signed_date else '—' }}</div>
+                </div>
+                <div class="col-md-4">
+                  <span class="small-muted d-block">Hết hiệu lực</span>
+                  <div>{{ fc.expired_date.strftime('%d/%m/%Y') if fc.expired_date else '—' }}</div>
+                </div>
+              </div>
+              {% else %}
+              <p class="text-muted mb-3">Hợp đồng nguyên tắc sẽ được tạo tự động khi xem hoặc tải.</p>
+              {% endif %}
+              <div class="d-flex flex-wrap gap-2 mb-4">
+                <a href="{{ url_for('preview_customer_framework_contract', cid=c.id) }}" target="_blank" class="btn btn-primary">
+                  <i class="bi bi-eye me-1"></i> Xem mẫu Word
+                </a>
+                <a href="{{ url_for('download_customer_framework_contract', cid=c.id) }}" class="btn btn-outline-primary">
+                  <i class="bi bi-download me-1"></i> Tải Word
+                </a>
+              </div>
+
+              <div class="customer-signed-scan-block">
+                <h6 class="customer-signed-scan-title"><i class="bi bi-file-earmark-check me-1"></i> Hợp đồng đã ký (bản scan)</h6>
+                {% if fc and fc.signed_scan_path %}
+                {% if fc.signed_scan_uploaded_at %}
+                <p class="small-muted mb-2">Tải lên: {{ fc.signed_scan_uploaded_at.strftime('%d/%m/%Y %H:%M') }}</p>
+                {% endif %}
+                <div class="signed-scan-viewer-panel mb-3">
+                  {% if signed_scan_is_pdf(fc.signed_scan_path) %}
+                  <iframe src="{{ url_for('view_customer_signed_contract', cid=c.id) }}" class="signed-scan-inline-frame" title="Xem bản scan PDF"></iframe>
+                  {% else %}
+                  <a href="{{ url_for('preview_customer_signed_contract', cid=c.id) }}" target="_blank" class="signed-scan-image-link">
+                    <img src="{{ url_for('view_customer_signed_contract', cid=c.id) }}" alt="Hợp đồng đã ký" class="signed-scan-image">
+                  </a>
+                  {% endif %}
+                </div>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  <a href="{{ url_for('preview_customer_signed_contract', cid=c.id) }}" target="_blank" class="btn btn-sm btn-primary">
+                    <i class="bi bi-eye me-1"></i> Xem bản scan
+                  </a>
+                  <a href="{{ url_for('download_customer_signed_contract', cid=c.id) }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download me-1"></i> Tải xuống
+                  </a>
+                  <form method="post" action="{{ url_for('delete_customer_signed_contract', cid=c.id) }}" class="d-inline" onsubmit="return confirm('Xóa file hợp đồng đã ký?');">
+                    <input type="hidden" name="_q" value="{{ q }}">
+                    <input type="hidden" name="_page" value="{{ pagination.page if pagination else 1 }}">
+                    <input type="hidden" name="_per_page" value="{{ per_page }}">
+                    <input type="hidden" name="_sort" value="{{ sort }}">
+                    <input type="hidden" name="_order" value="{{ order }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i> Xóa file</button>
+                  </form>
+                </div>
+                {% else %}
+                <p class="text-muted small mb-3">Chưa có bản scan hợp đồng đã ký. Tải lên ảnh chụp hoặc file PDF.</p>
+                {% endif %}
+
+                <form method="post" action="{{ url_for('upload_customer_signed_contract', cid=c.id) }}" enctype="multipart/form-data" class="customer-signed-upload-form">
+                  <input type="hidden" name="_q" value="{{ q }}">
+                  <input type="hidden" name="_page" value="{{ pagination.page if pagination else 1 }}">
+                  <input type="hidden" name="_per_page" value="{{ per_page }}">
+                  <input type="hidden" name="_sort" value="{{ sort }}">
+                  <input type="hidden" name="_order" value="{{ order }}">
+                  <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                      <label class="form-label-custom mb-1">Chọn file</label>
+                      <input type="file" name="signed_scan" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf" {% if not fc or not fc.signed_scan_path %}required{% endif %}>
+                      <div class="small-muted mt-1">JPG, PNG, WEBP, PDF — tối đa 10MB</div>
+                    </div>
+                    <div class="col-md-4">
+                      <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-upload me-1"></i> {% if fc and fc.signed_scan_path %}Thay file{% else %}Tải lên{% endif %}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              <p class="small-muted mt-3 mb-0">Mẫu Word tạo tự động khi thêm/cập nhật khách hàng. Sau khi ký, tải bản scan lên để lưu trữ.</p>
+            </div>
+          </div>
+
+          <div class="tab-pane fade" id="hubHistory{{ c.id }}" role="tabpanel">
+            {% if quotes or orders %}
+            <div class="table-responsive">
+              <table class="table table-sm customer-history-table mb-0">
+                <thead>
+                  <tr>
+                    <th>Loại</th>
+                    <th>Mã</th>
+                    <th>Ngày</th>
+                    <th>Trạng thái</th>
+                    <th class="text-end">Giá trị</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for q in quotes %}
+                  <tr>
+                    <td><span class="history-kind-badge kind-quote">Báo giá</span></td>
+                    <td><code>{{ q.quote_code }}</code></td>
+                    <td>{{ q.created_at.strftime('%d/%m/%Y') if q.created_at else '—' }}</td>
+                    <td>{{ quote_display_status(q) }}{% if quote_is_expired(q) %} <span class="quote-expired-badge">Hết hạn</span>{% endif %}</td>
+                    <td class="text-end money">{{ q.total|money }}</td>
+                    <td class="text-end">
+                      <a href="{{ url_for('quote_preview', qid=q.id) }}" target="_blank" class="btn btn-sm btn-link">Xem</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                  {% for o in orders %}
+                  <tr>
+                    <td><span class="history-kind-badge kind-order">Đơn hàng</span></td>
+                    <td><code>{{ o.order_code }}</code></td>
+                    <td>{{ o.created_at.strftime('%d/%m/%Y') if o.created_at else '—' }}</td>
+                    <td>{{ o.status }}</td>
+                    <td class="text-end money">{{ o.total|money }}</td>
+                    <td class="text-end">
+                      <a href="{{ url_for('order_preview', oid=o.id) }}" target="_blank" class="btn btn-sm btn-link">Xem</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <p class="text-muted text-center py-4 mb-0">Chưa có báo giá hoặc đơn hàng</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ c.id }}">
+          <i class="bi bi-pencil me-1"></i> Cập nhật
+        </button>
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

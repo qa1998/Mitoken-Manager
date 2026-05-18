@@ -1,0 +1,10 @@
+{% macro product_thumb(product, size='') %}
+<div class="product-thumb{% if size %} product-thumb-{{ size }}{% endif %}">
+  {% set img = product_image_url(product) %}
+  {% if img %}
+  <img src="{{ img }}" alt="{{ product.name }}">
+  {% else %}
+  <i class="bi bi-image"></i>
+  {% endif %}
+</div>
+{% endmacro %}

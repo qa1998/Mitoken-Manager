@@ -1,0 +1,237 @@
+{% from 'partials/product_thumb.html' import product_thumb %}
+
+<div class="modal fade product-page-modal" id="productPrice{{ p.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_price', pid=p.id) }}">
+        <input type="hidden" name="_q" value="{{ filters.q }}">
+        <input type="hidden" name="_page" value="{{ pagination.page }}">
+        <input type="hidden" name="_per_page" value="{{ per_page }}">
+        <input type="hidden" name="_category" value="{{ filters.category }}">
+        <input type="hidden" name="_brand" value="{{ filters.brand }}">
+        <input type="hidden" name="_status" value="{{ filters.status }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Sửa giá — {{ p.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">Giá bán lẻ</label>
+              <input type="text" name="retail_price" class="form-control" value="{{ p.retail_price }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Giá dự án</label>
+              <input type="text" name="project_price" class="form-control" value="{{ p.project_price }}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu giá</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade product-page-modal" id="productStock{{ p.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('adjust_product_stock', pid=p.id) }}">
+        <input type="hidden" name="_q" value="{{ filters.q }}">
+        <input type="hidden" name="_page" value="{{ pagination.page }}">
+        <input type="hidden" name="_per_page" value="{{ per_page }}">
+        <input type="hidden" name="_category" value="{{ filters.category }}">
+        <input type="hidden" name="_brand" value="{{ filters.brand }}">
+        <input type="hidden" name="_status" value="{{ filters.status }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Chỉnh tồn kho — {{ p.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-3">Tồn hiện tại: <strong class="stock-qty">{{ p.stock }}</strong> {{ p.unit }}</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">Loại điều chỉnh</label>
+              <select name="movement_type" class="form-select product-stock-type" data-in-methods="{{ stock_in_methods|join('||') }}" data-out-methods="{{ stock_out_methods|join('||') }}">
+                <option value="IN">Nhập kho</option>
+                <option value="OUT">Xuất kho</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Số lượng</label>
+              <input type="number" name="qty" class="form-control" min="1" value="1" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Lý do</label>
+              <select name="method" class="form-select product-stock-method">
+                {% for m in stock_in_methods %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Ghi chú</label>
+              <input type="text" name="note" class="form-control" placeholder="Tùy chọn">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Cập nhật tồn</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade product-page-modal" id="productPriceHistory{{ p.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Lịch sử giá — {{ p.name }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm mb-0 product-price-history-table">
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Loại giá</th>
+                <th>Giá cũ</th>
+                <th>Giá mới</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for h in price_histories.get(p.id, []) %}
+              <tr>
+                <td>{{ h.created_at.strftime('%d/%m/%Y %H:%M') if h.created_at else '—' }}</td>
+                <td>{{ price_type_label(h.price_type) }}</td>
+                <td class="money">{{ h.old_price|money }}</td>
+                <td class="money">{{ h.new_price|money }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-center text-muted py-4">Chưa có lịch sử thay đổi giá</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade product-page-modal" id="productEdit{{ p.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_product', pid=p.id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="_q" value="{{ filters.q }}">
+        <input type="hidden" name="_page" value="{{ pagination.page }}">
+        <input type="hidden" name="_per_page" value="{{ per_page }}">
+        <input type="hidden" name="_category" value="{{ filters.category }}">
+        <input type="hidden" name="_brand" value="{{ filters.brand }}">
+        <input type="hidden" name="_status" value="{{ filters.status }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Chỉnh sửa sản phẩm</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3 mb-2">
+            <div class="col-md-4">
+              {{ product_thumb(p, 'lg') }}
+            </div>
+            <div class="col-md-8">
+              <label class="form-label-custom">Ảnh sản phẩm</label>
+              <input type="file" name="image" class="form-control product-image-input" accept="image/jpeg,image/png,image/webp,image/gif">
+              <div class="small-muted mt-1">Để trống nếu không đổi ảnh</div>
+              {% if p.image_path %}
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" name="remove_image" value="1" id="removeImage{{ p.id }}">
+                <label class="form-check-label small-muted" for="removeImage{{ p.id }}">Xóa ảnh hiện tại</label>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">SKU <span class="text-danger">*</span></label>
+              <input type="text" name="sku" class="form-control" required value="{{ p.sku }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
+              <input type="text" name="name" class="form-control" required value="{{ p.name }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Danh mục</label>
+              <select name="category" class="form-select">
+                <option value="">— Không chọn —</option>
+                {% for cat in categories %}
+                <option value="{{ cat.name }}" {% if p.category == cat.name %}selected{% endif %}>{{ cat.name }}</option>
+                {% endfor %}
+                {% if p.category %}
+                {% set cat_names = categories|map(attribute='name')|list %}
+                {% if p.category not in cat_names %}
+                <option value="{{ p.category }}" selected>{{ p.category }}</option>
+                {% endif %}
+                {% endif %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Thương hiệu</label>
+              <input type="text" name="brand" class="form-control" value="{{ p.brand }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Model</label>
+              <input type="text" name="model" class="form-control" value="{{ p.model }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Biến thể</label>
+              <input type="text" name="variant" class="form-control" value="{{ p.variant }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Đơn vị</label>
+              <input type="text" name="unit" class="form-control" value="{{ p.unit }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Tồn kho</label>
+              <input type="text" name="stock" class="form-control" value="{{ p.stock }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Tồn tối thiểu</label>
+              <input type="text" name="low_stock" class="form-control" value="{{ p.low_stock }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá nhập</label>
+              <input type="text" name="cost_price" class="form-control" value="{{ p.cost_price }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá bán lẻ</label>
+              <input type="text" name="retail_price" class="form-control" value="{{ p.retail_price }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá đại lý</label>
+              <input type="text" name="dealer_price" class="form-control" value="{{ p.dealer_price }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Giá dự án</label>
+              <input type="text" name="project_price" class="form-control" value="{{ p.project_price }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Bảo hành</label>
+              <input type="text" name="warranty" class="form-control" value="{{ p.warranty }}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

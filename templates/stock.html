@@ -1,0 +1,446 @@
+{% extends 'base.html' %}
+{% from 'partials/product_thumb.html' import product_thumb %}
+{% block content %}
+
+<div class="stock-page">
+  
+  <div class="panel-card stock-header-card">
+    <div class="panel-card-head mb-0">
+      <div class="section-header">
+        <div class="page-header-icon"><i class="bi bi-box-seam-fill"></i></div>
+        <div>
+          <h2 class="section-title">Kho hàng</h2>
+          <p class="small-muted mb-0">Quản lý tồn kho và lịch sử xuất nhập hàng</p>
+        </div>
+      </div>
+      <a href="{{ url_for('stock_export', **export_args) }}" class="btn btn-outline-secondary btn-stock-report">
+        <i class="bi bi-file-earmark-bar-graph me-1"></i> Báo cáo kho
+      </a>
+    </div>
+  </div>
+
+  <div class="row g-3 stock-stat-row">
+    <div class="col">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-blue"><i class="bi bi-box-seam"></i></div>
+        <div>
+          <div class="stock-stat-label">Tổng sản phẩm</div>
+          <div class="stock-stat-value">{{ stats.total_products|int }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-blue"><i class="bi bi-stack"></i></div>
+        <div>
+          <div class="stock-stat-label">Tổng số lượng</div>
+          <div class="stock-stat-value">{{ stats.total_qty|int }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
+        <div>
+          <div class="stock-stat-label">Đang có sẵn</div>
+          <div class="stock-stat-value text-success">{{ stats.available_qty|int }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-orange"><i class="bi bi-hourglass-split"></i></div>
+        <div>
+          <div class="stock-stat-label">Sắp hết hàng</div>
+          <div class="stock-stat-value text-warning">{{ stats.low_stock|int }}</div>
+          <div class="stock-stat-hint">SL ≤ ngưỡng cảnh báo</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-red"><i class="bi bi-exclamation-triangle"></i></div>
+        <div>
+          <div class="stock-stat-label">Hết hàng</div>
+          <div class="stock-stat-value text-danger">{{ stats.out_stock|int }}</div>
+          <div class="stock-stat-hint">SL = 0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card">
+    <form method="get" class="stock-filter-form" id="stock-filter-form">
+      <input type="hidden" name="tab" value="{{ filters.tab }}">
+      <div class="row g-3">
+        <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Sản phẩm</label>
+          <select name="product_id" class="form-select">
+            <option value="">Tất cả</option>
+            {% for p in all_products %}
+            <option value="{{ p.id }}" {% if filters.product_id and filters.product_id|int == p.id %}selected{% endif %}>{{ p.sku }} — {{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Loại giao dịch</label>
+          <select name="movement_type" class="form-select">
+            <option value="">Tất cả</option>
+            <option value="IN" {% if filters.movement_type == 'IN' %}selected{% endif %}>Nhập kho</option>
+            <option value="OUT" {% if filters.movement_type == 'OUT' %}selected{% endif %}>Xuất kho</option>
+          </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Lý do</label>
+          <select name="method" class="form-select">
+            <option value="">Tất cả</option>
+            {% for m in stock_filter_methods %}
+            <option value="{{ m }}" {% if filters.method == m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Kho</label>
+          <select name="warehouse" class="form-select">
+            <option value="">Tất cả</option>
+            {% for w in warehouses %}
+            <option value="{{ w }}" {% if filters.warehouse == w %}selected{% endif %}>{{ w }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Từ ngày</label>
+          <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
+        </div>
+        <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Đến ngày</label>
+          <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+        </div>
+        <div class="col-12">
+          <label class="form-label-custom">Tìm kiếm</label>
+          <div class="input-icon-wrap">
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm kiếm theo SKU, tên sản phẩm...">
+          </div>
+        </div>
+      </div>
+      <div class="stock-filter-actions">
+        <a href="{{ url_for('stock', tab=filters.tab) }}" class="btn btn-outline-secondary btn-clear-filter"><i class="bi bi-funnel me-1"></i> Xóa bộ lọc</a>
+        <button type="submit" class="btn btn-primary btn-stock-search"><i class="bi bi-search me-1"></i> Tìm kiếm</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel-card stock-table-card">
+    <div class="stock-tabs-toolbar">
+      <ul class="nav nav-tabs stock-tabs" role="tablist">
+        <li class="nav-item">
+          <a class="nav-link {% if filters.tab != 'history' %}active{% endif %}" href="{{ url_for('stock', **inventory_args) }}">Tồn kho hiện tại</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if filters.tab == 'history' %}active{% endif %}" href="{{ url_for('stock', **history_args) }}">Lịch sử xuất nhập</a>
+        </li>
+      </ul>
+      <div class="stock-action-btns">
+        <a href="{{ url_for('stock_export', **export_args) }}" class="btn btn-success btn-sm"><i class="bi bi-file-earmark-excel me-1"></i> Export Excel</a>
+        <button type="button" class="btn btn-outline-primary btn-sm js-open-stock-modal" data-modal-target="#stockInModal"><i class="bi bi-box-arrow-in-down me-1"></i> Nhập hàng</button>
+        <button type="button" class="btn btn-outline-danger btn-sm js-open-stock-modal" data-modal-target="#stockOutModal"><i class="bi bi-box-arrow-up me-1"></i> Xuất hàng</button>
+        <div class="dropdown">
+          <button class="btn btn-outline-secondary btn-sm btn-action-dots" type="button" data-bs-toggle="dropdown"><i class="bi bi-gear"></i></button>
+          <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+            <li><a class="dropdown-item" href="{{ url_for('stock', **low_stock_args) }}">Lọc sắp hết hàng</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('stock', **out_stock_args) }}">Lọc hết hàng</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    {% if filters.tab == 'history' %}
+    <div class="customer-table-wrap">
+      <table class="table customer-table stock-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Ngày</th>
+            <th>SKU</th>
+            <th>Sản phẩm</th>
+            <th>Loại</th>
+            <th>Lý do</th>
+            <th>Kho</th>
+            <th class="text-end">Số lượng</th>
+            <th>Chứng từ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in movements %}
+          {% set row_num = (history_pagination.page - 1) * history_pagination.per_page + loop.index %}
+          <tr>
+            <td class="text-muted">{{ row_num }}</td>
+            <td>{{ m.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+            <td><code class="sku-code">{{ m.product.sku }}</code></td>
+            <td>
+              <div class="product-name-cell">
+                {{ product_thumb(m.product) }}
+                <div class="product-title">{{ m.product.name }}</div>
+              </div>
+            </td>
+            <td>
+              {% if m.movement_type == 'IN' %}
+              <span class="stock-move-tag in">Nhập</span>
+              {% else %}
+              <span class="stock-move-tag out">Xuất</span>
+              {% endif %}
+            </td>
+            <td>{{ m.method or 'Nhập tay' }}</td>
+            <td><span class="warehouse-label"><i class="bi bi-building"></i> {{ m.warehouse or 'Kho chính' }}</span></td>
+            <td class="text-end {% if m.movement_type == 'IN' %}text-stock-in{% else %}text-stock-out{% endif %}">{{ m.qty }}</td>
+            <td>{{ m.ref_code or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="text-center text-muted py-5">Chưa có lịch sử xuất nhập</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% set active_pagination = history_pagination %}
+    {% else %}
+    <div class="customer-table-wrap">
+      <table class="table customer-table stock-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>SKU</th>
+            <th>Sản phẩm</th>
+            <th>Kho</th>
+            <th class="text-end">Tồn đầu kỳ</th>
+            <th class="text-end">Nhập</th>
+            <th class="text-end">Xuất</th>
+            <th class="text-end">Tồn hiện tại</th>
+            <th>Đơn vị</th>
+            <th>Trạng thái</th>
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in inventory_rows %}
+          {% set p = row.product %}
+          {% set row_num = (pagination.page - 1) * pagination.per_page + loop.index %}
+          <tr>
+            <td class="text-muted">{{ row_num }}</td>
+            <td><code class="sku-code">{{ p.sku }}</code></td>
+            <td>
+              <div class="product-name-cell">
+                {{ product_thumb(p) }}
+                <div class="product-title">{{ p.name }}</div>
+              </div>
+            </td>
+            <td><span class="warehouse-label"><i class="bi bi-building"></i> {{ row.warehouse }}</span></td>
+            <td class="text-end">{{ row.opening }}</td>
+            <td class="text-end text-stock-in">{{ row.inbound }}</td>
+            <td class="text-end text-stock-out">{{ row.outbound }}</td>
+            <td class="text-end fw-semibold">{{ row.current }}</td>
+            <td>{{ p.unit }}</td>
+            <td><span class="stock-status-badge status-{{ row.status_key }}">{{ row.status_label }}</span></td>
+            <td class="text-end">
+              <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-action-dots" type="button" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                  <li><button type="button" class="dropdown-item js-stock-quick" data-movement="IN" data-product-id="{{ p.id }}"><i class="bi bi-box-arrow-in-down me-2"></i>Nhập hàng</button></li>
+                  <li><button type="button" class="dropdown-item js-stock-quick" data-movement="OUT" data-product-id="{{ p.id }}"><i class="bi bi-box-arrow-up me-2"></i>Xuất hàng</button></li>
+                </ul>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="11" class="text-center text-muted py-5">Không có dữ liệu tồn kho</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% set active_pagination = pagination %}
+    {% endif %}
+
+    <div class="table-footer">
+      {% if active_pagination.total > 0 %}
+      {% set start = (active_pagination.page - 1) * active_pagination.per_page + 1 %}
+      {% set end = [active_pagination.page * active_pagination.per_page, active_pagination.total]|min %}
+      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ active_pagination.total }} {% if filters.tab == 'history' %}giao dịch{% else %}sản phẩm{% endif %}</span>
+      {% else %}
+      <span>Chưa có dữ liệu</span>
+      {% endif %}
+      <div class="table-footer-right">
+        {% if active_pagination.pages > 1 %}
+        <nav>
+          <ul class="pagination pagination-custom mb-0">
+            <li class="page-item {% if not active_pagination.has_prev %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('stock', page=active_pagination.prev_num, **list_args) if active_pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
+            </li>
+            {% for pg in active_pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+            {% if pg %}
+            <li class="page-item {% if pg == active_pagination.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('stock', page=pg, **list_args) }}">{{ pg }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            {% endfor %}
+            <li class="page-item {% if not active_pagination.has_next %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('stock', page=active_pagination.next_num, **list_args) if active_pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
+            </li>
+          </ul>
+        </nav>
+        {% endif %}
+        <form method="get" class="per-page-select per-page-footer">
+          {% for key, val in list_args.items() %}
+          {% if val %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
+          {% endfor %}
+          <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+            <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+          </select>
+          <span>/ trang</span>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% macro stock_movement_hidden_fields() %}
+<input type="hidden" name="_tab" value="{{ filters.tab }}">
+<input type="hidden" name="_product_id" value="{{ filters.product_id }}">
+<input type="hidden" name="_movement_type" value="{{ filters.movement_type }}">
+<input type="hidden" name="_method" value="{{ filters.method }}">
+<input type="hidden" name="_warehouse" value="{{ filters.warehouse }}">
+<input type="hidden" name="_date_from" value="{{ filters.date_from }}">
+<input type="hidden" name="_date_to" value="{{ filters.date_to }}">
+<input type="hidden" name="_q" value="{{ filters.q }}">
+<input type="hidden" name="_status" value="{{ filters.status }}">
+<input type="hidden" name="_page" value="{{ pagination.page }}">
+<input type="hidden" name="_per_page" value="{{ per_page }}">
+{% endmacro %}
+
+<div class="modal fade stock-page-modal" id="stockInModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('stock') }}">
+        <input type="hidden" name="movement_type" value="IN">
+        {{ stock_movement_hidden_fields() }}
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-box-arrow-in-down text-primary me-2"></i>Nhập hàng</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label-custom">Sản phẩm <span class="text-danger">*</span></label>
+            <select name="product_id" class="form-select" required id="stockInProduct">
+              <option value="">Chọn sản phẩm</option>
+              {% for p in all_products %}
+              <option value="{{ p.id }}">{{ p.sku }} — {{ p.name }} (Tồn: {{ p.stock }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label-custom">Số lượng <span class="text-danger">*</span></label>
+              <input type="number" name="qty" class="form-control" min="1" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label-custom">Lý do nhập</label>
+              <select name="method" class="form-select">
+                {% for m in stock_in_methods %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label-custom">Kho</label>
+              <select name="warehouse" class="form-select">
+                {% for w in warehouses %}
+                <option value="{{ w }}">{{ w }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label-custom">Mã chứng từ</label>
+              <input type="text" name="ref_code" class="form-control" placeholder="VD: PN-001">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Ghi chú</label>
+              <input type="text" name="note" class="form-control" placeholder="Ghi chú thêm">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Xác nhận nhập</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade stock-page-modal" id="stockOutModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('stock') }}">
+        <input type="hidden" name="movement_type" value="OUT">
+        {{ stock_movement_hidden_fields() }}
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-box-arrow-up text-danger me-2"></i>Xuất hàng</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label-custom">Sản phẩm <span class="text-danger">*</span></label>
+            <select name="product_id" class="form-select" required id="stockOutProduct">
+              <option value="">Chọn sản phẩm</option>
+              {% for p in all_products %}
+              <option value="{{ p.id }}">{{ p.sku }} — {{ p.name }} (Tồn: {{ p.stock }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label-custom">Số lượng <span class="text-danger">*</span></label>
+              <input type="number" name="qty" class="form-control" min="1" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label-custom">Lý do xuất</label>
+              <select name="method" class="form-select">
+                {% for m in stock_out_methods %}
+                <option value="{{ m }}" {% if m == 'Bán hàng' %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label-custom">Kho</label>
+              <select name="warehouse" class="form-select">
+                {% for w in warehouses %}
+                <option value="{{ w }}">{{ w }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label-custom">Mã chứng từ</label>
+              <input type="text" name="ref_code" class="form-control" placeholder="VD: PX-001">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Ghi chú</label>
+              <input type="text" name="note" class="form-control" placeholder="Ghi chú thêm">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-danger">Xác nhận xuất</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/stock.js') }}"></script>
+{% endblock %}

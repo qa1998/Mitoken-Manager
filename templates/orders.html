@@ -1,4 +1,6 @@
 {% extends 'base.html' %}
+{% from 'partials/order_options_menu.html' import order_options_dropdown %}
+{% from 'partials/order_status_cell.html' import order_status_cell %}
 {% block content %}
 
 <div class="order-page">
@@ -42,8 +44,8 @@
         <div class="col-md-2">
           <label class="form-label-custom">Trạng thái</label>
           <select name="status" class="form-select">
-            <option value="">Chọn trạng thái</option>
-            {% for s in order_statuses %}
+            <option value="">Tất cả</option>
+            {% for s in order_filter_statuses %}
             <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
             {% endfor %}
           </select>
@@ -63,8 +65,8 @@
     </form>
   </div>
 
-  <div class="row g-3 order-stat-row">
-    <div class="col">
+  <div class="row g-3 order-stat-row order-stat-row-4">
+    <div class="col-md-3 col-6">
       <div class="order-stat-card">
         <div class="order-stat-icon stat-blue"><i class="bi bi-bag-check"></i></div>
         <div>
@@ -74,17 +76,7 @@
         </div>
       </div>
     </div>
-    <div class="col">
-      <div class="order-stat-card">
-        <div class="order-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
-        <div>
-          <div class="order-stat-label">Đã chốt</div>
-          <div class="order-stat-value">{{ stats.won }}</div>
-          <div class="order-stat-hint">{{ stats.won_pct }}%</div>
-        </div>
-      </div>
-    </div>
-    <div class="col">
+    <div class="col-md-3 col-6">
       <div class="order-stat-card">
         <div class="order-stat-icon stat-orange"><i class="bi bi-hourglass-split"></i></div>
         <div>
@@ -94,17 +86,17 @@
         </div>
       </div>
     </div>
-    <div class="col">
+    <div class="col-md-3 col-6">
       <div class="order-stat-card">
-        <div class="order-stat-icon stat-purple"><i class="bi bi-truck"></i></div>
+        <div class="order-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
         <div>
-          <div class="order-stat-label">Đang giao</div>
-          <div class="order-stat-value">{{ stats.delivering }}</div>
-          <div class="order-stat-hint">{{ stats.delivering_pct }}%</div>
+          <div class="order-stat-label">Hoàn thành</div>
+          <div class="order-stat-value">{{ stats.completed }}</div>
+          <div class="order-stat-hint">{{ stats.completed_pct }}%</div>
         </div>
       </div>
     </div>
-    <div class="col">
+    <div class="col-md-3 col-6">
       <div class="order-stat-card">
         <div class="order-stat-icon stat-red"><i class="bi bi-x-circle"></i></div>
         <div>
@@ -156,8 +148,10 @@
             <td class="text-nowrap">{{ o.created_at.strftime('%d/%m/%Y') if o.created_at else '—' }}</td>
             <td class="text-end fw-semibold money text-nowrap">{{ o.total|money }}</td>
             <td class="text-end text-nowrap">{{ o.paid_amount|money }}</td>
-            <td class="text-end fw-semibold text-nowrap">{{ order_balance(o)|money }}</td>
-            <td><span class="order-status-badge status-{{ order_status_key(st) }}">{{ st }}</span></td>
+            <td class="text-end fw-semibold text-nowrap">
+              {% if st == 'Đã hủy' %}<span class="text-muted">—</span>{% else %}{{ order_balance(o)|money }}{% endif %}
+            </td>
+            <td>{{ order_status_cell(o, st) }}</td>
             <td>
               {% if pay == '—' %}
               <span class="text-muted">—</span>
@@ -166,34 +160,7 @@
               {% endif %}
             </td>
             <td class="text-end order-col-actions">
-              <div class="order-action-btns">
-                <a href="{{ url_for('order_preview', oid=o.id) }}" class="btn btn-light btn-order-action" title="Xem"><i class="bi bi-eye"></i></a>
-                <a href="{{ url_for('order_preview', oid=o.id) }}" target="_blank" class="btn btn-light btn-order-action" title="In"><i class="bi bi-printer"></i></a>
-                <div class="dropdown position-static">
-                  <button class="btn btn-light btn-order-action" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Tùy chọn"><i class="bi bi-three-dots-vertical"></i></button>
-                  <ul class="dropdown-menu dropdown-menu-end shadow-sm order-options-menu">
-                    {% for s in order_statuses %}
-                    {% if s != st %}
-                    <li>
-                      <form method="post" action="{{ url_for('update_order_status', oid=o.id) }}">
-                        <input type="hidden" name="status" value="{{ s }}">
-                        <input type="hidden" name="_page" value="{{ pagination.page }}">
-                        <button type="submit" class="dropdown-item">Đặt: {{ s }}</button>
-                      </form>
-                    </li>
-                    {% endif %}
-                    {% endfor %}
-                    {% if pay != '—' and pay != 'Đã thanh toán' %}
-                    <li><hr class="dropdown-divider"></li>
-                    <li>
-                      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#paymentOrder{{ o.id }}">
-                        <i class="bi bi-cash-coin me-2"></i>Ghi nhận thanh toán
-                      </button>
-                    </li>
-                    {% endif %}
-                  </ul>
-                </div>
-              </div>
+              {{ order_options_dropdown(o, st, pay, pagination.page) }}
             </td>
           </tr>
           {% else %}
@@ -260,14 +227,8 @@
             <label class="form-label-custom">Tổng tiền (đ)</label>
             <input type="number" name="total" class="form-control" min="0" step="1000" required>
           </div>
-          <div class="mb-0">
-            <label class="form-label-custom">Trạng thái</label>
-            <select name="status" class="form-select">
-              {% for s in order_statuses %}
-              <option value="{{ s }}" {% if s == 'Chờ xác nhận' %}selected{% endif %}>{{ s }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          <input type="hidden" name="status" value="Đang xử lý">
+          <p class="small-muted mb-0">Đơn mới sẽ ở trạng thái <strong>Đang xử lý</strong>.</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
@@ -279,11 +240,39 @@
 </div>
 
 {% for o in orders %}
+{% set st_row = effective_order_status(o) %}
+{% if 'Hoàn thành' in order_next_statuses(st_row) %}
+<div class="modal fade order-page-modal" id="completeOrder{{ o.id }}" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('complete_order', oid=o.id) }}" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title">Hoàn thành đơn {{ o.order_code }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-3">Bắt buộc upload <strong>ảnh biên bản nhận hàng</strong> có chữ ký người nhận hàng trước khi chốt hoàn thành.</p>
+          <input type="hidden" name="_page" value="{{ pagination.page }}">
+          <div class="mb-0">
+            <label class="form-label-custom">Ảnh biên bản nhận hàng <span class="text-danger">*</span></label>
+            <input type="file" name="handover_scan" class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required>
+            <div class="form-text">JPG, PNG hoặc WEBP — tối đa 10MB</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-success"><i class="bi bi-check-circle me-1"></i> Xác nhận hoàn thành</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% if order_payment_status(o) not in ('—', 'Đã thanh toán') %}
 <div class="modal fade order-page-modal" id="paymentOrder{{ o.id }}" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-sm">
     <div class="modal-content">
-      <form method="post" action="{{ url_for('add_payment', oid=o.id) }}">
+      <form method="post" action="{{ url_for('add_payment', oid=o.id) }}" enctype="multipart/form-data">
         <div class="modal-header">
           <h5 class="modal-title">Ghi nhận thanh toán</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -295,13 +284,18 @@
             <label class="form-label-custom">Số tiền</label>
             <input type="number" name="amount" class="form-control" min="1" required>
           </div>
-          <div class="mb-0">
+          <div class="mb-3">
             <label class="form-label-custom">Phương thức</label>
             <select name="method" class="form-select">
               <option>Chuyển khoản</option>
               <option>Tiền mặt</option>
               <option>Thẻ</option>
             </select>
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Ảnh xác nhận đã nhận tiền <span class="text-danger">*</span></label>
+            <input type="file" name="payment_receipt" class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required>
+            <div class="form-text">JPG, PNG hoặc WEBP — tối đa 10MB</div>
           </div>
         </div>
         <div class="modal-footer">

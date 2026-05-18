@@ -212,11 +212,16 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .order-code-link:hover{text-decoration:underline}
 .order-customer-name{font-weight:600;color:#0f172a;max-width:260px}
 .order-status-badge{display:inline-block;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
-.order-status-badge.status-pending{background:#ffedd5;color:#c2410c}
 .order-status-badge.status-processing{background:#dbeafe;color:#1d4ed8}
-.order-status-badge.status-delivering{background:#ede9fe;color:#6d28d9}
-.order-status-badge.status-won{background:#dcfce7;color:#15803d}
+.order-status-badge.status-completed{background:#dcfce7;color:#15803d}
 .order-status-badge.status-cancelled{background:#fee2e2;color:#b91c1c}
+.order-status-cell{display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.btn-order-handover-icon{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #e2e8f0;color:#2563eb;background:#fff;flex-shrink:0}
+.btn-order-handover-icon:hover{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.btn-order-handover-icon i{font-size:16px}
+.order-stat-row-4 .col-md-3{flex:0 0 auto;width:25%}
+@media (max-width:992px){.order-stat-row-4 .col-md-3{width:50%}}
+@media (max-width:576px){.order-stat-row-4 .col-md-3{width:100%}}
 .order-payment-badge{display:inline-block;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
 .order-payment-badge.payment-paid{background:#dcfce7;color:#15803d}
 .order-payment-badge.payment-partial{background:#dbeafe;color:#1d4ed8}
@@ -229,10 +234,14 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .order-list-table-wrap .order-table{margin-bottom:0}
 .order-list-table-wrap .order-table thead th{position:static}
 .order-list-table-wrap .order-table tbody td{overflow:visible}
-.order-list-table-wrap .order-col-actions{white-space:nowrap}
-.order-list-table-wrap .dropdown-menu{z-index:1080;min-width:220px}
-.order-options-menu .dropdown-item{display:flex;align-items:center;padding:10px 14px;font-size:14px;border-radius:8px}
-.order-options-menu form{margin:0}
+.order-list-table-wrap .order-col-actions{white-space:nowrap;width:72px}
+.order-options-dropdown{display:inline-flex}
+.order-list-table-wrap .order-options-dropdown .dropdown-menu{z-index:1080;min-width:220px;padding:6px}
+.order-options-menu .dropdown-item{display:flex;align-items:center;padding:10px 14px;font-size:14px;border-radius:8px;width:100%}
+.order-options-menu .dropdown-item i{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.order-options-menu form{margin:0;width:100%}
+.order-options-menu .dropdown-divider{margin:6px 0}
+.btn-order-options{min-width:36px}
 .order-table-card .table-footer{margin-top:18px;padding-top:18px;border-top:1px solid #f1f5f9}
 .order-preview-doc{padding:28px}
 .order-preview-total-box{background:#f8fafc;border-radius:12px;padding:16px;height:100%}
@@ -241,6 +250,75 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .order-preview-total-box .value{font-size:20px;font-weight:700;color:#0f172a}
 @media (max-width:1200px){.order-stat-row .col{flex:0 0 50%;max-width:50%}}
 @media (max-width:576px){.order-stat-row .col{flex:0 0 100%;max-width:100%}}
+
+/* Debt page */
+.debt-page{margin-bottom:24px}
+.page-header-icon-debt{background:linear-gradient(135deg,#0ea5e9,#2563eb)}
+.debt-header-card{margin-bottom:20px}
+.debt-layout{align-items:stretch}
+.debt-list-card{padding:20px;display:flex;flex-direction:column}
+.debt-list-toolbar{display:flex;gap:10px;margin-bottom:16px;align-items:center}
+.debt-search-form .form-control{height:42px}
+.btn-debt-filter{width:42px;height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:12px;flex-shrink:0}
+.debt-customer-table-wrap{flex:1;overflow:auto;border:1px solid #e2e8f0;border-radius:12px}
+.debt-customer-table thead th{font-size:12px;font-weight:600;color:#64748b;background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:12px 14px;white-space:nowrap}
+.debt-customer-table tbody td{padding:14px;border-bottom:1px solid #f1f5f9;vertical-align:middle;font-size:13px}
+.debt-customer-row{cursor:pointer;transition:background .12s}
+.debt-customer-row:hover{background:#f8fafc}
+.debt-customer-row.active{background:#eff6ff}
+.debt-customer-cell{display:flex;align-items:flex-start;gap:10px}
+.debt-avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.debt-avatar-lg{width:56px;height:56px;font-size:18px}
+.debt-customer-name{font-weight:600;color:#0f172a;font-size:14px;line-height:1.35}
+.debt-customer-phone{font-size:12px;color:#64748b;margin-top:2px}
+.debt-customer-side{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;flex-shrink:0}
+.debt-remaining-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.debt-order-count{font-size:11px;color:#94a3b8;white-space:nowrap}
+.debt-status-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.debt-status-badge.status-owing{background:#ffedd5;color:#c2410c}
+.debt-status-badge.status-paid{background:#dcfce7;color:#15803d}
+.debt-status-badge.status-overdue{background:#fee2e2;color:#b91c1c}
+.text-success-debt{color:#16a34a!important}
+.text-danger-debt{color:#dc2626!important}
+.debt-list-footer{margin-top:16px;padding-top:16px;border-top:1px solid #f1f5f9;flex-wrap:wrap}
+.debt-detail-card{padding:24px}
+.debt-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f1f5f9}
+.debt-detail-profile{display:flex;gap:16px;align-items:flex-start;min-width:0}
+.debt-detail-name{font-size:20px;font-weight:700;color:#0f172a}
+.debt-detail-contact{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#64748b}
+.debt-detail-contact span{display:inline-flex;align-items:flex-start;gap:8px}
+.debt-detail-contact i{color:#94a3b8;margin-top:2px}
+.debt-summary-row{margin-bottom:20px}
+.debt-summary-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;height:100%}
+.debt-summary-label{font-size:12px;color:#64748b;margin-bottom:6px}
+.debt-summary-value{font-size:18px;font-weight:700;color:#0f172a}
+.debt-detail-tabs{border-bottom:1px solid #e2e8f0;margin-bottom:0}
+.debt-detail-tabs .nav-link{border:0;border-radius:10px 10px 0 0;color:#64748b;font-weight:500;padding:12px 18px}
+.debt-detail-tabs .nav-link.active{color:#2563eb;background:transparent;border-bottom:2px solid #2563eb;margin-bottom:-1px}
+.debt-tab-content{padding-top:20px}
+.debt-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.debt-section-head h6{font-weight:600;color:#0f172a}
+.debt-orders-table thead th,.debt-payments-table thead th{font-size:12px;font-weight:600;color:#64748b;background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:12px;white-space:nowrap}
+.debt-orders-table tbody td,.debt-payments-table tbody td{padding:12px;font-size:13px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.debt-order-link{color:#2563eb;text-decoration:none;font-weight:500}
+.debt-order-link:hover{text-decoration:underline}
+.debt-pay-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.debt-pay-badge.paid{background:#dcfce7;color:#15803d}
+.debt-pay-badge.owing{background:#ffedd5;color:#c2410c}
+.debt-row-chevron{color:#94a3b8;font-size:18px;text-decoration:none}
+.debt-row-chevron:hover{color:#2563eb}
+.debt-payments-title{font-weight:600;color:#0f172a;margin-bottom:14px}
+.debt-payment-note{color:#64748b;font-size:13px;max-width:280px}
+.debt-detail-empty{min-height:420px}
+@media (max-width:991px){
+  .debt-customer-side.d-lg-flex{display:none!important}
+  .debt-customer-side.d-lg-none{display:flex!important}
+}
+@media print{
+  .debt-page .debt-list-card,.debt-page .debt-header-card .btn,.debt-page .no-print{display:none!important}
+  .debt-page .col-lg-8{flex:0 0 100%;max-width:100%}
+  .debt-page .debt-detail-card{box-shadow:none;border:1px solid #ccc}
+}
 
 /* Products page */
 .product-page{margin-bottom:24px}
@@ -336,6 +414,10 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .product-table-v2 .product-thumb{width:48px;height:48px;border-radius:10px}
 .product-table-v2 .btn-action-dots{width:36px;height:36px;padding:0;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#64748b}
 .product-list-card-v2 .table-footer{padding:14px 20px;border-top:1px solid #e2e8f0;background:#fff}
+.modal .category-picker{width:100%}
+.modal .category-picker-menu{z-index:2060}
+#createProductModal .modal-body,
+.product-page-modal .modal-body{overflow:visible}
 @media (max-width:992px){
 .product-filter-fields-row{grid-template-columns:1fr 1fr}
 .product-filter-submit-field{grid-column:1/-1}
@@ -448,6 +530,12 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .flash-alert{display:flex;align-items:center;gap:12px;border:0;border-radius:12px;padding:14px 44px 14px 16px;font-size:14px;font-weight:500;box-shadow:0 2px 8px rgba(15,23,42,.06)}
 .flash-alert-icon{font-size:20px;flex-shrink:0}
 .flash-alert-text{flex:1;line-height:1.45}
+.flash-alert-multiline{white-space:pre-line}
+.debt-allocate-preview li{padding:4px 0;font-size:13px}
+.btn-payment-receipt{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:8px}
+.debt-payment-alloc-list{margin-top:6px;padding-left:0;list-style:none;font-size:12px;color:#64748b}
+.debt-payment-alloc-list li{padding:2px 0}
+.debt-payment-alloc-list li span{font-weight:600}
 .flash-alert .btn-close{padding:16px}
 .flash-alert-success{background:#ecfdf5;color:#047857}
 .flash-alert-success .flash-alert-icon{color:#16a34a}
@@ -459,6 +547,28 @@ body{background:#f5f7fb;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sa
 .flash-alert-info .flash-alert-icon{color:#2563eb}
 .flash-alert-secondary{background:#f1f5f9;color:#475569}
 .flash-alert-secondary .flash-alert-icon{color:#64748b}
+
+.import-preview-summary{display:flex;flex-wrap:wrap;gap:8px}
+.import-summary-chip{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:999px;font-size:12px;font-weight:600;background:#f1f5f9;color:#475569}
+.import-summary-chip.chip-create{background:#ecfdf5;color:#047857}
+.import-summary-chip.chip-update{background:#eff6ff;color:#1d4ed8}
+.import-summary-chip.chip-skip{background:#f8fafc;color:#64748b}
+.import-summary-chip.chip-error{background:#fef2f2;color:#b91c1c}
+.import-preview-table-wrap{max-height:min(52vh,420px);overflow:auto;border:1px solid #e2e8f0;border-radius:12px}
+.import-preview-table{margin-bottom:0}
+.import-preview-table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;font-size:12px;white-space:nowrap}
+.import-preview-table td{font-size:13px;vertical-align:middle}
+.import-preview-row-muted{opacity:.72}
+.import-row-note{font-size:11px;color:#64748b;margin-top:2px}
+.import-action-badge{display:inline-block;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;white-space:nowrap}
+.import-action-badge.action-create{background:#dcfce7;color:#166534}
+.import-action-badge.action-update{background:#dbeafe;color:#1e40af}
+.import-action-badge.action-skip{background:#f1f5f9;color:#64748b}
+.import-action-badge.action-error{background:#fee2e2;color:#991b1b}
+.btn-import-row-remove{padding:2px 8px}
+/* Ẩn nút admin: thêm class d-none vào .product-admin-tool trong products.html */
+.product-admin-tool .btn-outline-danger{border-color:#fecaca;color:#dc2626}
+.product-admin-tool .btn-outline-danger:hover{background:#fef2f2;border-color:#f87171;color:#b91c1c}
 
 @media print{
   body:not(.quote-print-page) *{visibility:hidden}

@@ -1,0 +1,27 @@
+{% macro product_category_picker(categories, selected='', empty_label='Chọn danh mục') %}
+<div class="category-picker">
+  <input type="hidden" name="category" value="{{ selected }}">
+  <button type="button" class="category-picker-btn {% if not selected %}text-muted{% endif %}">
+    <i class="bi bi-tag picker-leading-icon"></i>
+    <span class="category-picker-label">{{ selected or empty_label }}</span>
+    <i class="bi bi-chevron-down cat-chevron"></i>
+  </button>
+  <div class="category-picker-menu">
+    <div class="px-2 py-2 border-bottom">
+      <input type="text" class="form-control form-control-sm category-search" placeholder="Tìm danh mục..." autocomplete="off">
+    </div>
+    <div class="category-list">
+      <button type="button" class="category-item" data-value="">{{ empty_label }}</button>
+      {% for cat in categories %}
+      <button type="button" class="category-item" data-value="{{ cat.name }}">{{ cat.name }}</button>
+      {% endfor %}
+      {% if selected and selected not in categories|map(attribute='name')|list %}
+      <button type="button" class="category-item" data-value="{{ selected }}">{{ selected }}</button>
+      {% endif %}
+    </div>
+    <button type="button" class="category-create-link">
+      <i class="bi bi-plus-lg me-1"></i> Tạo danh mục mới
+    </button>
+  </div>
+</div>
+{% endmacro %}

@@ -1,0 +1,21 @@
+{% macro order_status_cell(order, st) %}
+<div class="order-status-cell">
+  <span class="order-status-badge status-{{ order_status_key(st) }}">{{ st }}</span>
+  {% if st == 'Đang xử lý' %}
+  <button type="button"
+          class="btn btn-light btn-order-handover-icon"
+          data-bs-toggle="modal"
+          data-bs-target="#completeOrder{{ order.id }}"
+          title="Upload biên bản nhận hàng có chữ ký">
+    <i class="bi bi-cloud-arrow-up"></i>
+  </button>
+  {% elif st == 'Hoàn thành' and order.handover_scan_path %}
+  <a href="{{ url_for('view_order_handover_scan', oid=order.id) }}"
+     target="_blank"
+     class="btn btn-light btn-order-handover-icon"
+     title="Xem biên bản nhận hàng">
+    <i class="bi bi-file-earmark-image"></i>
+  </a>
+  {% endif %}
+</div>
+{% endmacro %}

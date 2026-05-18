@@ -8,7 +8,8 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from urllib.request import urlopen
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response, session
 from werkzeug.utils import secure_filename
 from sqlalchemy import func, or_
 from flask_sqlalchemy import SQLAlchemy
@@ -18,6 +19,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / 'instance' / 'business.db'
+IMPORT_PREVIEW_DIR = BASE_DIR / 'instance' / 'import_previews'
+IMPORT_PREVIEW_SESSION_KEY = 'product_import_preview_id'
 OUTPUT_DIR = BASE_DIR / 'output'
 TEMPLATE_DOCX = BASE_DIR / 'templates_docx' / 'hop_dong_template.docx'
 TEMPLATE_QUOTE_SALE_CONTRACT = BASE_DIR / 'templates_docx' / 'hop_dong_mua_ban_bao_gia.docx'
@@ -26,6 +29,9 @@ QUOTE_DOCS_DIR = OUTPUT_DIR / 'quotes'
 PRODUCT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'products'
 COMPANY_LOGO_DIR = BASE_DIR / 'static' / 'uploads' / 'company'
 CONTRACT_SIGNED_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'contracts' / 'signed'
+ORDER_HANDOVER_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'orders' / 'handover'
+PAYMENT_RECEIPT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'payments' / 'receipts'
+ALLOWED_ORDER_HANDOVER_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 ALLOWED_CONTRACT_SCAN_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.pdf'}
 MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
@@ -144,6 +150,8 @@ class Order(db.Model):
     status = db.Column(db.String(40), default='Mới tạo')
     total = db.Column(db.Integer, default=0)
     paid_amount = db.Column(db.Integer, default=0)
+    handover_scan_path = db.Column(db.String(512), default='')
+    handover_scan_uploaded_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer = db.relationship('Customer')
     quote = db.relationship('Quote')
@@ -155,6 +163,9 @@ class Payment(db.Model):
     method = db.Column(db.String(80), default='Chuyển khoản')
     note = db.Column(db.String(255), default='')
     payment_date = db.Column(db.Date, default=date.today)
+    receipt_path = db.Column(db.String(512), default='')
+    receipt_uploaded_at = db.Column(db.DateTime, nullable=True)
+    batch_id = db.Column(db.String(64), default='')
     order = db.relationship('Order')
 
 class CompanyProfile(db.Model):
@@ -201,6 +212,7 @@ app.jinja_env.filters['money_plain'] = money_plain
 
 STATUS_FLASH_CATEGORIES = {
     'Đã chốt': 'success',
+    'Hoàn thành': 'success',
     'Chờ xác nhận': 'info',
     'Đang xử lý': 'info',
     'Đang giao': 'info',
@@ -243,6 +255,9 @@ def product_image_url(product):
         return url_for('static', filename=path)
     return None
 
+def product_is_active(product):
+    return bool(getattr(product, 'is_active', True))
+
 def quote_product_catalog(products):
     return [{
         'id': p.id,
@@ -252,7 +267,7 @@ def quote_product_catalog(products):
         'retail_price': p.retail_price or 0,
         'image_url': product_image_url(p) or '',
         'label': f'{p.sku} - {p.name}',
-    } for p in products]
+    } for p in products if product_is_active(p)]
 
 app.jinja_env.globals['product_image_url'] = product_image_url
 
@@ -452,7 +467,7 @@ def create_order_from_quote_record(quote):
         quote_id=quote.id,
         total=quote.total,
         paid_amount=0,
-        status='Chờ xác nhận',
+        status='Đang xử lý',
     )
     db.session.add(order)
     return order, True
@@ -536,19 +551,29 @@ def quote_sort_url(field, list_args, sort, order):
 
 app.jinja_env.globals['quote_sort_url'] = quote_sort_url
 
-ORDER_STATUSES = ['Chờ xác nhận', 'Đang xử lý', 'Đang giao', 'Đã chốt', 'Đã hủy']
+ORDER_STATUSES = ['Đang xử lý', 'Hoàn thành', 'Đã hủy']
+ORDER_FILTER_STATUSES = ORDER_STATUSES
 ORDER_STATUS_KEYS = {
-    'Chờ xác nhận': 'pending',
     'Đang xử lý': 'processing',
-    'Đang giao': 'delivering',
-    'Đã chốt': 'won',
+    'Hoàn thành': 'completed',
     'Đã hủy': 'cancelled',
-    'Mới tạo': 'pending',
 }
-ORDER_LEGACY_STATUS = {
-    'Mới tạo': 'Chờ xác nhận',
-    'Đã thanh toán': 'Đã chốt',
-    'Thanh toán 1 phần': 'Đã chốt',
+ORDER_LEGACY_STATUS_MAP = {
+    'Mới tạo': 'Đang xử lý',
+    'Chờ xác nhận': 'Đang xử lý',
+    'Đang giao': 'Đang xử lý',
+    'Đã chốt': 'Hoàn thành',
+    'Đã thanh toán': 'Hoàn thành',
+    'Thanh toán 1 phần': 'Hoàn thành',
+}
+ORDER_LEGACY_STATUS = ORDER_LEGACY_STATUS_MAP
+ORDER_STATUS_FILTER_VALUES = {
+    'Đang xử lý': ['Đang xử lý', 'Chờ xác nhận', 'Mới tạo', 'Đang giao'],
+    'Hoàn thành': ['Hoàn thành', 'Đã chốt', 'Đã thanh toán', 'Thanh toán 1 phần'],
+    'Đã hủy': ['Đã hủy'],
+}
+ORDER_ALLOWED_TRANSITIONS = {
+    'Đang xử lý': {'Hoàn thành', 'Đã hủy'},
 }
 PAYMENT_STATUS_KEYS = {
     'Đã thanh toán': 'paid',
@@ -558,10 +583,26 @@ PAYMENT_STATUS_KEYS = {
 }
 
 def effective_order_status(order):
-    raw = (order.status or 'Mới tạo').strip()
-    if raw in ORDER_LEGACY_STATUS:
-        return ORDER_LEGACY_STATUS[raw]
-    return raw if raw in ORDER_STATUSES else 'Chờ xác nhận'
+    raw = (order.status or 'Đang xử lý').strip()
+    if raw in ORDER_LEGACY_STATUS_MAP:
+        return ORDER_LEGACY_STATUS_MAP[raw]
+    return raw if raw in ORDER_STATUSES else 'Đang xử lý'
+
+def normalize_order_statuses():
+    changed = False
+    for order in Order.query.all():
+        raw = (order.status or '').strip()
+        if raw in ORDER_STATUSES:
+            continue
+        mapped = ORDER_LEGACY_STATUS_MAP.get(raw, 'Đang xử lý')
+        if order.status != mapped:
+            order.status = mapped
+            changed = True
+    if changed:
+        db.session.commit()
+
+def order_next_statuses(status):
+    return sorted(ORDER_ALLOWED_TRANSITIONS.get(status, set()))
 
 def order_payment_status(order):
     if effective_order_status(order) == 'Đã hủy':
@@ -575,39 +616,285 @@ def order_payment_status(order):
     return 'Chưa thanh toán'
 
 def order_status_key(status):
-    return ORDER_STATUS_KEYS.get(status or '', 'pending')
+    display = ORDER_LEGACY_STATUS_MAP.get(status, status)
+    return ORDER_STATUS_KEYS.get(display or '', 'processing')
 
 def order_payment_key(status):
     return PAYMENT_STATUS_KEYS.get(status or '', 'unpaid')
 
+def order_counts_toward_debt(order):
+    return effective_order_status(order) != 'Đã hủy'
+
 def order_balance(order):
+    if not order_counts_toward_debt(order):
+        return 0
     return max((order.total or 0) - (order.paid_amount or 0), 0)
+
+def total_outstanding_debt(query=None):
+    base = query if query is not None else Order.query
+    return sum(order_balance(o) for o in base.all())
+
+def debt_orders(query=None):
+    base = query if query is not None else Order.query
+    return [o for o in base.order_by(Order.created_at.desc()).all() if order_balance(o) > 0]
+
+def customer_prior_debt(customer_id, exclude_order_id=None):
+    """Công nợ còn lại của khách từ các đơn khác (không tính đơn đang xem)."""
+    q = Order.query.filter_by(customer_id=customer_id)
+    if exclude_order_id:
+        q = q.filter(Order.id != exclude_order_id)
+    return sum(order_balance(o) for o in q.all())
+
+DEBT_OVERDUE_DAYS = 30
+
+def customer_initials(name):
+    if not name:
+        return '?'
+    parts = [p for p in name.strip().split() if p]
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[-1][0]).upper()
+    return name.strip()[:2].upper()
+
+def customer_debt_aggregates():
+    agg = {}
+    for o in Order.query.order_by(Order.created_at.asc()).all():
+        if not order_counts_toward_debt(o):
+            continue
+        cid = o.customer_id
+        if cid not in agg:
+            agg[cid] = {
+                'total': 0, 'paid': 0, 'remaining': 0,
+                'order_count': 0, 'unpaid_count': 0,
+                'oldest_unpaid_at': None,
+            }
+        a = agg[cid]
+        a['total'] += o.total or 0
+        a['paid'] += o.paid_amount or 0
+        bal = order_balance(o)
+        a['remaining'] += bal
+        a['order_count'] += 1
+        if bal > 0:
+            a['unpaid_count'] += 1
+            created = o.created_at or datetime.utcnow()
+            if a['oldest_unpaid_at'] is None or created < a['oldest_unpaid_at']:
+                a['oldest_unpaid_at'] = created
+    return agg
+
+def customer_debt_status_from_agg(agg_row):
+    if not agg_row or agg_row.get('remaining', 0) <= 0:
+        return 'Đã thanh toán'
+    cutoff = datetime.utcnow() - timedelta(days=DEBT_OVERDUE_DAYS)
+    oldest = agg_row.get('oldest_unpaid_at')
+    if oldest and oldest < cutoff:
+        return 'Quá hạn'
+    return 'Còn nợ'
+
+def customer_debt_status_key(status):
+    return {'Còn nợ': 'owing', 'Đã thanh toán': 'paid', 'Quá hạn': 'overdue'}.get(status or '', 'owing')
+
+def customer_unpaid_orders_oldest_first(customer_id):
+    return [
+        o for o in Order.query.filter_by(customer_id=customer_id)
+        .order_by(Order.created_at.asc(), Order.id.asc()).all()
+        if order_counts_toward_debt(o) and order_balance(o) > 0
+    ]
+
+def customer_outstanding_balance(customer_id):
+    return sum(order_balance(o) for o in customer_unpaid_orders_oldest_first(customer_id))
+
+def apply_order_payment(order, amount, method='Chuyển khoản', note='',
+                        receipt_path='', receipt_uploaded_at=None, batch_id=''):
+    pay = min(parse_int(amount), order_balance(order))
+    if pay <= 0:
+        return None
+    p = Payment(
+        order_id=order.id,
+        amount=pay,
+        method=method or 'Chuyển khoản',
+        note=(note or '').strip(),
+        receipt_path=receipt_path or '',
+        receipt_uploaded_at=receipt_uploaded_at,
+        batch_id=batch_id or '',
+    )
+    order.paid_amount = min((order.paid_amount or 0) + pay, order.total or 0)
+    db.session.add(p)
+    return {'payment': p, 'amount': pay, 'order': order}
+
+def allocate_customer_payment(customer_id, amount, method='Chuyển khoản', note='',
+                              receipt_path='', receipt_uploaded_at=None):
+    """Phân bổ thanh toán vào các đơn còn nợ, đơn cũ nhất trước."""
+    pay_total = parse_int(amount)
+    if pay_total <= 0:
+        return []
+    batch_id = uuid.uuid4().hex
+    allocations = []
+    remaining = pay_total
+    user_note = (note or '').strip()
+    for o in customer_unpaid_orders_oldest_first(customer_id):
+        if remaining <= 0:
+            break
+        pay = min(remaining, order_balance(o))
+        if pay <= 0:
+            continue
+        p_note = user_note or 'Thanh toán công nợ tổng'
+        result = apply_order_payment(
+            o, pay, method, p_note,
+            receipt_path=receipt_path,
+            receipt_uploaded_at=receipt_uploaded_at,
+            batch_id=batch_id,
+        )
+        if result:
+            allocations.append(result)
+            remaining -= pay
+    if allocations:
+        db.session.commit()
+    return allocations
+
+def format_payment_allocation_lines(allocations):
+    return [f"{a['order'].order_code} +{money_plain(a['amount'])}đ" for a in allocations]
+
+def payment_group_key(payment):
+    if payment.batch_id:
+        return ('batch', payment.batch_id)
+    if payment.receipt_path and payment.receipt_uploaded_at:
+        return (
+            'receipt',
+            payment.receipt_path,
+            payment.receipt_uploaded_at.isoformat(),
+            (payment.note or '').strip(),
+            payment.payment_date.isoformat() if payment.payment_date else '',
+            payment.method or '',
+        )
+    return ('single', payment.id)
+
+def group_payments_for_display(payments):
+    """Gộp các dòng payment cùng lần phân bổ thành một dòng hiển thị."""
+    if not payments:
+        return []
+    buckets = {}
+    order_keys = []
+    for p in payments:
+        key = payment_group_key(p)
+        if key not in buckets:
+            buckets[key] = []
+            order_keys.append(key)
+        buckets[key].append(p)
+
+    groups = []
+    for key in order_keys:
+        items = buckets[key]
+        head = items[0]
+        if key[0] in ('batch', 'receipt') and len(items) > 1:
+            items_sorted = sorted(items, key=lambda x: (x.id,))
+            groups.append({
+                'kind': 'batch',
+                'payment_date': head.payment_date,
+                'method': head.method,
+                'note': head.note,
+                'total': sum(i.amount or 0 for i in items),
+                'receipt_pid': head.id,
+                'receipt_path': head.receipt_path,
+                'allocations': [
+                    {'order_code': i.order.order_code if i.order else '—', 'amount': i.amount or 0}
+                    for i in items_sorted
+                ],
+            })
+        else:
+            for p in items:
+                groups.append({
+                    'kind': 'single',
+                    'payment': p,
+                    'payment_date': p.payment_date,
+                    'method': p.method,
+                    'note': p.note,
+                    'total': p.amount or 0,
+                    'receipt_pid': p.id,
+                    'receipt_path': p.receipt_path,
+                })
+    return groups
+
+app.jinja_env.globals['group_payments_for_display'] = group_payments_for_display
+
+def build_debt_customer_rows(search_q=''):
+    agg = customer_debt_aggregates()
+    if not agg:
+        return []
+    query = Customer.query.filter(Customer.id.in_(agg.keys()))
+    if search_q:
+        like = f'%{search_q}%'
+        query = query.filter(or_(Customer.name.ilike(like), Customer.phone.ilike(like)))
+    rows = []
+    for c in query.all():
+        a = agg.get(c.id, {})
+        status = customer_debt_status_from_agg(a)
+        rows.append({
+            'customer': c,
+            'total': a.get('total', 0),
+            'paid': a.get('paid', 0),
+            'remaining': a.get('remaining', 0),
+            'order_count': a.get('order_count', 0),
+            'unpaid_count': a.get('unpaid_count', 0),
+            'status': status,
+            'status_key': customer_debt_status_key(status),
+        })
+    rows.sort(key=lambda r: (-r['remaining'], (r['customer'].name or '').lower()))
+    return rows
+
+class SimplePagination:
+    def __init__(self, items, page, per_page):
+        self.total = len(items)
+        self.per_page = max(per_page, 1)
+        self.page = max(page, 1)
+        self.pages = max(1, (self.total + self.per_page - 1) // self.per_page) if self.total else 1
+        if self.page > self.pages:
+            self.page = self.pages
+        start = (self.page - 1) * self.per_page
+        self.items = items[start:start + self.per_page]
+        self.has_prev = self.page > 1
+        self.has_next = self.page < self.pages
+        self.prev_num = self.page - 1
+        self.next_num = self.page + 1
+
+    def iter_pages(self, left_edge=1, right_edge=1, left_current=1, right_current=2):
+        last = 0
+        for num in range(1, self.pages + 1):
+            if (
+                num <= left_edge
+                or (self.page - left_current - 1 < num < self.page + right_current)
+                or num > self.pages - right_edge
+            ):
+                if last + 1 != num:
+                    yield None
+                yield num
+                last = num
+
+def debt_redirect(**extra):
+    args = {k: v for k, v in request.args.items() if v}
+    args.update({k: v for k, v in extra.items() if v is not None and v != ''})
+    return redirect(url_for('debt', **args))
 
 def order_stats(query=None):
     base = query if query is not None else Order.query
     total = base.count()
     if total == 0:
-        return {'total': 0, 'won': 0, 'processing': 0, 'delivering': 0, 'cancelled': 0,
-                'won_pct': 0, 'processing_pct': 0, 'delivering_pct': 0, 'cancelled_pct': 0}
-    counts = {'won': 0, 'processing': 0, 'delivering': 0, 'cancelled': 0}
+        return {'total': 0, 'processing': 0, 'completed': 0, 'cancelled': 0,
+                'processing_pct': 0, 'completed_pct': 0, 'cancelled_pct': 0}
+    counts = {'processing': 0, 'completed': 0, 'cancelled': 0}
     for o in base.all():
         st = effective_order_status(o)
-        if st == 'Đã chốt':
-            counts['won'] += 1
-        elif st in ('Chờ xác nhận', 'Đang xử lý'):
-            counts['processing'] += 1
-        elif st == 'Đang giao':
-            counts['delivering'] += 1
+        if st == 'Hoàn thành':
+            counts['completed'] += 1
         elif st == 'Đã hủy':
             counts['cancelled'] += 1
+        else:
+            counts['processing'] += 1
     def pct(n):
         return round(n * 1000 / total) / 10 if total else 0
     return {
         'total': total,
         **counts,
-        'won_pct': pct(counts['won']),
         'processing_pct': pct(counts['processing']),
-        'delivering_pct': pct(counts['delivering']),
+        'completed_pct': pct(counts['completed']),
         'cancelled_pct': pct(counts['cancelled']),
     }
 
@@ -625,11 +912,7 @@ def apply_order_filters(query, filters):
         query = query.filter(Order.customer_id == int(filters['customer_id']))
     if filters['status']:
         st = filters['status']
-        status_values = [st]
-        if st == 'Chờ xác nhận':
-            status_values.append('Mới tạo')
-        elif st == 'Đã chốt':
-            status_values.extend(['Đã thanh toán', 'Thanh toán 1 phần'])
+        status_values = ORDER_STATUS_FILTER_VALUES.get(st, [st])
         query = query.filter(Order.status.in_(status_values))
     date_from = parse_stock_date(filters['date_from'])
     date_to = parse_stock_date(filters['date_to'])
@@ -653,6 +936,10 @@ app.jinja_env.globals['order_payment_status'] = order_payment_status
 app.jinja_env.globals['order_status_key'] = order_status_key
 app.jinja_env.globals['order_payment_key'] = order_payment_key
 app.jinja_env.globals['order_balance'] = order_balance
+app.jinja_env.globals['customer_prior_debt'] = customer_prior_debt
+app.jinja_env.globals['customer_initials'] = customer_initials
+app.jinja_env.globals['customer_debt_status_key'] = customer_debt_status_key
+app.jinja_env.globals['order_next_statuses'] = order_next_statuses
 
 def apply_quote_sort(query, sort, order):
     col = getattr(Quote, sort)
@@ -698,6 +985,30 @@ def create_quote_from_form():
     status = 'Nháp' if is_draft else request.form.get('status', 'Mới tạo') or 'Mới tạo'
     valid_raw = request.form.get('valid_until', '').strip()
     valid_until = datetime.strptime(valid_raw, '%Y-%m-%d').date() if valid_raw else date.today() + timedelta(days=30)
+    line_items = []
+    stopped_names = []
+    for product_id, qty, price in zip(
+        request.form.getlist('product_id'),
+        request.form.getlist('qty'),
+        request.form.getlist('price'),
+    ):
+        if not product_id:
+            continue
+        p = Product.query.get(int(product_id))
+        if not p:
+            continue
+        if not product_is_active(p):
+            stopped_names.append(p.name or p.sku)
+            continue
+        qv = parse_int(qty, 1)
+        pv = parse_int(price, p.retail_price)
+        line_items.append((p, qv, pv, qv * pv))
+    if stopped_names:
+        names = ', '.join(stopped_names[:5])
+        extra = f' và {len(stopped_names) - 5} sản phẩm khác' if len(stopped_names) > 5 else ''
+        raise ValueError(f'Sản phẩm đã ngừng bán không thể thêm vào báo giá: {names}{extra}')
+    if not line_items:
+        raise ValueError('Vui lòng thêm ít nhất một sản phẩm đang bán vào báo giá')
     quote = Quote(
         quote_code=next_code('BG', Quote, 'quote_code'),
         customer_id=customer_id,
@@ -710,19 +1021,7 @@ def create_quote_from_form():
     db.session.add(quote)
     db.session.flush()
     subtotal = 0
-    for product_id, qty, price in zip(
-        request.form.getlist('product_id'),
-        request.form.getlist('qty'),
-        request.form.getlist('price'),
-    ):
-        if not product_id:
-            continue
-        p = Product.query.get(int(product_id))
-        if not p:
-            continue
-        qv = parse_int(qty, 1)
-        pv = parse_int(price, p.retail_price)
-        amount = qv * pv
+    for p, qv, pv, amount in line_items:
         subtotal += amount
         db.session.add(QuoteItem(
             quote_id=quote.id, product_id=p.id, product_name=p.name, sku=p.sku,
@@ -974,6 +1273,87 @@ def delete_contract_scan_file(scan_path):
     file_path = BASE_DIR / 'static' / scan_path
     if file_path.is_file():
         file_path.unlink(missing_ok=True)
+
+def ensure_order_columns():
+    from sqlalchemy import inspect, text
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('order')}
+    except Exception:
+        return
+    with db.engine.begin() as conn:
+        if 'handover_scan_path' not in cols:
+            conn.execute(text("ALTER TABLE \"order\" ADD COLUMN handover_scan_path VARCHAR(512) DEFAULT ''"))
+        if 'handover_scan_uploaded_at' not in cols:
+            conn.execute(text('ALTER TABLE "order" ADD COLUMN handover_scan_uploaded_at DATETIME'))
+
+def delete_order_handover_scan_file(scan_path):
+    delete_contract_scan_file(scan_path)
+
+def order_handover_scan_url(scan_path):
+    return contract_signed_scan_url(scan_path)
+
+app.jinja_env.globals['order_handover_scan_url'] = order_handover_scan_url
+
+def ensure_payment_columns():
+    from sqlalchemy import inspect, text
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('payment')}
+    except Exception:
+        return
+    with db.engine.begin() as conn:
+        if 'receipt_path' not in cols:
+            conn.execute(text("ALTER TABLE payment ADD COLUMN receipt_path VARCHAR(512) DEFAULT ''"))
+        if 'receipt_uploaded_at' not in cols:
+            conn.execute(text('ALTER TABLE payment ADD COLUMN receipt_uploaded_at DATETIME'))
+        if 'batch_id' not in cols:
+            conn.execute(text("ALTER TABLE payment ADD COLUMN batch_id VARCHAR(64) DEFAULT ''"))
+
+def save_payment_receipt(file_storage):
+    """Lưu ảnh xác nhận đã nhận tiền. Trả về đường dẫn tương đối hoặc None."""
+    if not file_storage or not file_storage.filename:
+        flash('Vui lòng upload ảnh xác nhận đã nhận tiền', 'warning')
+        return None
+    ext = Path(secure_filename(file_storage.filename)).suffix.lower()
+    if ext not in ALLOWED_ORDER_HANDOVER_EXTENSIONS:
+        flash('Ảnh phải là JPG, PNG hoặc WEBP', 'warning')
+        return None
+    data = file_storage.read()
+    file_storage.seek(0)
+    if len(data) > MAX_CONTRACT_SCAN_BYTES:
+        flash('File tối đa 10MB', 'warning')
+        return None
+    PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}{ext}'
+    rel_path = f'uploads/payments/receipts/{filename}'
+    file_storage.save(PAYMENT_RECEIPT_UPLOAD_DIR / filename)
+    return rel_path
+
+def payment_receipt_url(receipt_path):
+    return contract_signed_scan_url(receipt_path)
+
+app.jinja_env.globals['payment_receipt_url'] = payment_receipt_url
+
+def save_order_handover_scan(order, file_storage):
+    if not file_storage or not file_storage.filename:
+        flash('Vui lòng upload ảnh biên bản nhận hàng có chữ ký người nhận', 'warning')
+        return False
+    ext = Path(secure_filename(file_storage.filename)).suffix.lower()
+    if ext not in ALLOWED_ORDER_HANDOVER_EXTENSIONS:
+        flash('Ảnh phải là JPG, PNG hoặc WEBP', 'warning')
+        return False
+    data = file_storage.read()
+    file_storage.seek(0)
+    if len(data) > MAX_CONTRACT_SCAN_BYTES:
+        flash('File tối đa 10MB', 'warning')
+        return False
+    ORDER_HANDOVER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    delete_order_handover_scan_file(order.handover_scan_path)
+    filename = f'{order.id}_{uuid.uuid4().hex[:10]}{ext}'
+    rel_path = f'uploads/orders/handover/{filename}'
+    file_storage.save(ORDER_HANDOVER_UPLOAD_DIR / filename)
+    order.handover_scan_path = rel_path
+    order.handover_scan_uploaded_at = datetime.utcnow()
+    return True
 
 def contract_signed_scan_url(scan_path):
     if not scan_path:
@@ -1237,7 +1617,7 @@ def customer_transactions(customer_id, limit=50):
             'date': o.created_at,
             'amount': o.total,
             'status': o.status,
-            'url': url_for('order_preview_page', oid=o.id),
+            'url': url_for('order_preview', oid=o.id),
         })
     rows.sort(key=lambda r: r['date'] or datetime.min, reverse=True)
     return rows[:limit]
@@ -1339,7 +1719,7 @@ def dashboard():
         'products': Product.query.count(),
         'quotes': Quote.query.count(),
         'orders': Order.query.count(),
-        'debt': sum(max(o.total - o.paid_amount, 0) for o in Order.query.all()),
+        'debt': total_outstanding_debt(),
         'low_stock': Product.query.filter(Product.stock <= Product.low_stock).count(),
     }
     latest_quotes = Quote.query.order_by(Quote.created_at.desc()).limit(5).all()
@@ -1722,8 +2102,327 @@ def category_product_counts():
         counts[cat.id] = Product.query.filter_by(category=cat.name).count()
     return counts
 
+PRODUCT_IMPORT_FIELDS = [
+    ('sku', 'SKU'),
+    ('name', 'Tên sản phẩm'),
+    ('category', 'Danh mục'),
+    ('brand', 'Thương hiệu'),
+    ('model', 'Model'),
+    ('variant', 'Biến thể'),
+    ('unit', 'Đơn vị'),
+    ('warranty', 'Bảo hành'),
+    ('cost_price', 'Giá nhập'),
+    ('retail_price', 'Giá bán lẻ'),
+    ('dealer_price', 'Giá đại lý'),
+    ('project_price', 'Giá dự án'),
+    ('stock', 'Tồn kho'),
+    ('low_stock', 'Tồn tối thiểu'),
+    ('status', 'Trạng thái'),
+]
+
+PRODUCT_IMPORT_HEADER_ALIASES = {
+    'sku': {'sku', 'mã sku', 'ma sku', 'mã vạch', 'ma vach'},
+    'name': {'tên sản phẩm', 'ten san pham', 'tên', 'ten', 'name', 'sản phẩm'},
+    'category': {'danh mục', 'danh muc', 'category', 'loại'},
+    'brand': {'thương hiệu', 'thuong hieu', 'brand', 'hãng'},
+    'model': {'model', 'mẫu'},
+    'variant': {'biến thể', 'bien the', 'variant'},
+    'unit': {'đơn vị', 'don vi', 'unit', 'dvt'},
+    'warranty': {'bảo hành', 'bao hanh', 'warranty'},
+    'cost_price': {'giá nhập', 'gia nhap', 'cost', 'cost_price'},
+    'retail_price': {'giá bán lẻ', 'gia ban le', 'giá bán', 'retail', 'retail_price'},
+    'dealer_price': {'giá đại lý', 'gia dai ly', 'dealer', 'dealer_price'},
+    'project_price': {'giá dự án', 'gia du an', 'project', 'project_price'},
+    'stock': {'tồn kho', 'ton kho', 'stock', 'sl tồn'},
+    'low_stock': {'tồn tối thiểu', 'ton toi thieu', 'low_stock', 'tồn min'},
+    'status': {'trạng thái', 'trang thai', 'status'},
+}
+
+def normalize_import_header(value):
+    return (str(value or '').strip().lower().replace('_', ' '))
+
+def build_product_import_header_map(headers):
+    col_map = {}
+    for idx, raw in enumerate(headers):
+        key = normalize_import_header(raw)
+        if not key:
+            continue
+        for field, aliases in PRODUCT_IMPORT_HEADER_ALIASES.items():
+            if key in aliases or key == field:
+                col_map[field] = idx
+                break
+    return col_map
+
+def parse_import_active_status(value):
+    s = normalize_import_header(value)
+    if s in ('ngừng bán', 'ngung ban', 'stopped', '0', 'false', 'no', 'n'):
+        return False
+    if s in ('đang bán', 'dang ban', 'selling', '1', 'true', 'yes', 'y'):
+        return True
+    return True
+
+def ensure_category_name(name):
+    name = (name or '').strip()
+    if not name:
+        return
+    if not Category.query.filter_by(name=name).first():
+        db.session.add(Category(name=name))
+
+def read_product_import_sheet(file_storage):
+    filename = secure_filename(file_storage.filename or '')
+    ext = Path(filename).suffix.lower()
+    if ext == '.csv':
+        raw = file_storage.read()
+        if raw[:3] == b'\xef\xbb\xbf':
+            raw = raw[3:]
+        text = raw.decode('utf-8-sig', errors='replace')
+        reader = csv.reader(io.StringIO(text))
+        return [list(row) for row in reader]
+    if ext in ('.xlsx', '.xlsm'):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            raise ValueError('Thiếu thư viện openpyxl. Dùng file .csv hoặc cài: pip install openpyxl')
+        file_storage.seek(0)
+        wb = load_workbook(file_storage, read_only=True, data_only=True)
+        ws = wb.active
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            rows.append(['' if c is None else c for c in row])
+        wb.close()
+        return rows
+    raise ValueError('Chỉ hỗ trợ file Excel (.xlsx) hoặc CSV (.csv)')
+
+def product_row_from_import(row, col_map):
+    def cell(field, default=''):
+        idx = col_map.get(field)
+        if idx is None or idx >= len(row):
+            return default
+        val = row[idx]
+        if val is None:
+            return default
+        return str(val).strip()
+
+    return {
+        'sku': cell('sku'),
+        'name': cell('name'),
+        'category': cell('category'),
+        'brand': cell('brand'),
+        'model': cell('model'),
+        'variant': cell('variant'),
+        'unit': cell('unit', 'cái') or 'cái',
+        'warranty': cell('warranty'),
+        'cost_price': parse_int(cell('cost_price'), 0),
+        'retail_price': parse_int(cell('retail_price'), 0),
+        'dealer_price': parse_int(cell('dealer_price'), 0),
+        'project_price': parse_int(cell('project_price'), 0),
+        'stock': parse_int(cell('stock'), 0),
+        'low_stock': parse_int(cell('low_stock'), 5),
+        'is_active': parse_import_active_status(cell('status', 'Đang bán')),
+    }
+
+def build_product_import_preview(rows, update_existing=False):
+    if not rows:
+        raise ValueError('File trống')
+    header_row = rows[0]
+    col_map = build_product_import_header_map(header_row)
+    if 'sku' not in col_map or 'name' not in col_map:
+        raise ValueError('File phải có cột SKU và Tên sản phẩm (xem file mẫu)')
+    preview = []
+    seen_skus = set()
+    for line_no, raw_row in enumerate(rows[1:], start=2):
+        if not any(str(c).strip() for c in raw_row):
+            continue
+        data = product_row_from_import(raw_row, col_map)
+        sku = data['sku']
+        name = data['name']
+        row_id = uuid.uuid4().hex[:12]
+        if not sku and not name:
+            continue
+        if not sku:
+            preview.append({
+                'row_id': row_id, 'line_no': line_no, 'data': data,
+                'action': 'error', 'action_label': 'Lỗi', 'note': 'Thiếu SKU',
+                'importable': False,
+            })
+            continue
+        if not name:
+            preview.append({
+                'row_id': row_id, 'line_no': line_no, 'data': data,
+                'action': 'error', 'action_label': 'Lỗi', 'note': 'Thiếu tên sản phẩm',
+                'importable': False,
+            })
+            continue
+        sku_key = sku.lower()
+        if sku_key in seen_skus:
+            preview.append({
+                'row_id': row_id, 'line_no': line_no, 'data': data,
+                'action': 'error', 'action_label': 'Lỗi', 'note': 'SKU trùng trong file',
+                'importable': False,
+            })
+            continue
+        seen_skus.add(sku_key)
+        existing = Product.query.filter_by(sku=sku).first()
+        if existing:
+            if update_existing:
+                preview.append({
+                    'row_id': row_id, 'line_no': line_no, 'data': data,
+                    'action': 'update', 'action_label': 'Cập nhật', 'note': 'SKU đã có trong hệ thống',
+                    'importable': True,
+                })
+            else:
+                preview.append({
+                    'row_id': row_id, 'line_no': line_no, 'data': data,
+                    'action': 'skip', 'action_label': 'Bỏ qua', 'note': 'SKU đã tồn tại',
+                    'importable': False,
+                })
+            continue
+        preview.append({
+            'row_id': row_id, 'line_no': line_no, 'data': data,
+            'action': 'create', 'action_label': 'Thêm mới', 'note': '',
+            'importable': True,
+        })
+    if not preview:
+        raise ValueError('Không có dòng dữ liệu hợp lệ trong file')
+    return preview
+
+def import_product_data_list(items, update_existing=False):
+    created = updated = skipped = errors = 0
+    error_lines = []
+    for item in items:
+        data = item.get('data') or item
+        sku = data['sku']
+        name = data['name']
+        existing = Product.query.filter_by(sku=sku).first()
+        if existing:
+            if not update_existing:
+                skipped += 1
+                continue
+            existing.name = name
+            existing.category = data['category']
+            existing.brand = data['brand']
+            existing.model = data['model']
+            existing.variant = data['variant']
+            existing.unit = data['unit']
+            existing.warranty = data['warranty']
+            existing.cost_price = data['cost_price']
+            existing.retail_price = data['retail_price']
+            existing.dealer_price = data['dealer_price']
+            existing.project_price = data['project_price']
+            existing.stock = data['stock']
+            existing.low_stock = data['low_stock']
+            existing.is_active = data['is_active']
+            if data['category']:
+                ensure_category_name(data['category'])
+            updated += 1
+            continue
+        if data['category']:
+            ensure_category_name(data['category'])
+        db.session.add(Product(
+            sku=sku, name=name, category=data['category'], brand=data['brand'],
+            model=data['model'], variant=data['variant'], unit=data['unit'],
+            warranty=data['warranty'], cost_price=data['cost_price'],
+            retail_price=data['retail_price'], dealer_price=data['dealer_price'],
+            project_price=data['project_price'], stock=data['stock'],
+            low_stock=data['low_stock'], is_active=data['is_active'],
+        ))
+        created += 1
+    if created == 0 and updated == 0:
+        raise ValueError('Không có sản phẩm nào được import')
+    db.session.commit()
+    return {
+        'created': created, 'updated': updated, 'skipped': skipped,
+        'errors': errors, 'error_lines': error_lines[:8],
+    }
+
+def delete_all_products_data():
+    """Xóa toàn bộ sản phẩm và dữ liệu liên quan (danh mục, kho, báo giá chi tiết)."""
+    product_count = Product.query.count()
+    QuoteItem.query.delete()
+    StockMovement.query.delete()
+    PriceHistory.query.delete()
+    Product.query.delete()
+    Category.query.delete()
+    db.session.commit()
+    clear_product_import_session()
+    if PRODUCT_UPLOAD_DIR.exists():
+        for path in PRODUCT_UPLOAD_DIR.iterdir():
+            if path.is_file():
+                path.unlink()
+    return product_count
+
+def _import_preview_path(preview_id):
+    return IMPORT_PREVIEW_DIR / f'{preview_id}.json'
+
+def _cleanup_old_import_previews(max_age_seconds=3600):
+    if not IMPORT_PREVIEW_DIR.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for path in IMPORT_PREVIEW_DIR.glob('*.json'):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
+
+def clear_product_import_session():
+    preview_id = session.pop(IMPORT_PREVIEW_SESSION_KEY, None)
+    if preview_id:
+        path = _import_preview_path(preview_id)
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+def get_product_import_session():
+    preview_id = session.get(IMPORT_PREVIEW_SESSION_KEY)
+    if not preview_id:
+        return None
+    path = _import_preview_path(preview_id)
+    if not path.exists():
+        session.pop(IMPORT_PREVIEW_SESSION_KEY, None)
+        return None
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (json.JSONDecodeError, OSError):
+        clear_product_import_session()
+        return None
+
+def save_product_import_session(filename, update_existing, preview_rows):
+    IMPORT_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    clear_product_import_session()
+    preview_id = uuid.uuid4().hex
+    payload = {
+        'filename': filename,
+        'update_existing': update_existing,
+        'rows': preview_rows,
+    }
+    _import_preview_path(preview_id).write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding='utf-8',
+    )
+    session[IMPORT_PREVIEW_SESSION_KEY] = preview_id
+    _cleanup_old_import_previews()
+
+def import_products_from_rows(rows, update_existing=False):
+    preview = build_product_import_preview(rows, update_existing)
+    importable = [r for r in preview if r.get('importable')]
+    if not importable:
+        raise ValueError('Không có dòng hợp lệ để import')
+    return import_product_data_list(importable, update_existing)
+
+def redirect_after_category_manage():
+    """Quay lại trang sản phẩm và mở lại modal quản lý danh mục."""
+    ref = request.referrer or url_for('products')
+    parts = urlparse(ref)
+    qs = dict(parse_qsl(parts.query, keep_blank_values=True))
+    qs['category_modal'] = '1'
+    return redirect(urlunparse(parts._replace(query=urlencode(qs))))
+
 @app.route('/categories', methods=['POST'])
 def create_category():
+    keep_modal = request.form.get('_keep_modal') == '1'
     name = request.form.get('name', '').strip()
     if not name:
         flash('Vui lòng nhập tên danh mục', 'warning')
@@ -1733,6 +2432,8 @@ def create_category():
         db.session.add(Category(name=name))
         db.session.commit()
         flash('Đã tạo danh mục', 'success')
+    if keep_modal:
+        return redirect_after_category_manage()
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/categories/<int:cid>/delete', methods=['POST'])
@@ -1746,6 +2447,8 @@ def delete_category(cid):
         flash(f'Đã xóa danh mục "{name}". {affected} sản phẩm đã được bỏ danh mục.', 'warning')
     else:
         flash(f'Đã xóa danh mục "{name}"', 'warning')
+    if request.form.get('_keep_modal') == '1':
+        return redirect_after_category_manage()
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/products', methods=['GET', 'POST'])
@@ -1810,6 +2513,8 @@ def products():
         price_histories=price_histories,
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
+        import_preview_payload=get_product_import_session(),
+        show_import_preview=bool(request.args.get('import_preview')),
     )
 
 @app.route('/products/<int:pid>/update', methods=['POST'])
@@ -1872,6 +2577,113 @@ def products_export():
         headers={'Content-Disposition': 'attachment; filename=san-pham.csv'},
     )
 
+@app.route('/products/import/template')
+def products_import_template():
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+    except ImportError:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([label for _, label in PRODUCT_IMPORT_FIELDS])
+        writer.writerow([
+            'SP-001', 'Sản phẩm mẫu', 'Camera', 'DJI', '', '', 'cái', '12 tháng',
+            5000000, 8900000, 8500000, 8700000, 10, 5, 'Đang bán',
+        ])
+        return Response(
+            '\ufeff' + buf.getvalue(),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=mau-import-san-pham.csv'},
+        )
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'San pham'
+    headers = [label for _, label in PRODUCT_IMPORT_FIELDS]
+    ws.append(headers)
+    ws.append([
+        'SP-001', 'Sản phẩm mẫu', 'Camera', 'DJI', '', '', 'cái', '12 tháng',
+        5000000, 8900000, 8500000, 8700000, 10, 5, 'Đang bán',
+    ])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='E8F0FE')
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name='mau-import-san-pham.xlsx',
+    )
+
+@app.route('/products/import/preview', methods=['POST'])
+def products_import_preview():
+    ensure_product_columns()
+    file_storage = request.files.get('import_file')
+    if not file_storage or not file_storage.filename:
+        flash('Vui lòng chọn file Excel hoặc CSV', 'warning')
+        return redirect(url_for('products'))
+    update_existing = request.form.get('update_existing') == '1'
+    try:
+        rows = read_product_import_sheet(file_storage)
+        preview = build_product_import_preview(rows, update_existing=update_existing)
+        save_product_import_session(file_storage.filename, update_existing, preview)
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('products'))
+    except Exception as e:
+        flash(f'Không đọc được file: {e}', 'danger')
+        return redirect(url_for('products'))
+    return redirect(url_for('products', import_preview=1))
+
+@app.route('/products/import/confirm', methods=['POST'])
+def products_import_confirm():
+    ensure_product_columns()
+    payload = get_product_import_session()
+    if not payload:
+        flash('Phiên import đã hết hạn. Vui lòng tải file lại.', 'warning')
+        return redirect(url_for('products'))
+    selected_ids = set(request.form.getlist('import_row_id'))
+    update_existing = payload.get('update_existing', False)
+    to_import = [
+        r for r in payload.get('rows', [])
+        if r.get('row_id') in selected_ids and r.get('importable')
+    ]
+    if not to_import:
+        flash('Chưa chọn sản phẩm nào để import', 'warning')
+        return redirect(url_for('products', import_preview=1))
+    try:
+        result = import_product_data_list(to_import, update_existing=update_existing)
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('products', import_preview=1))
+    clear_product_import_session()
+    parts = []
+    if result['created']:
+        parts.append(f"thêm mới {result['created']}")
+    if result['updated']:
+        parts.append(f"cập nhật {result['updated']}")
+    msg = 'Đã import: ' + ', '.join(parts) + '.'
+    flash(msg, 'success')
+    return redirect(url_for('products'))
+
+@app.route('/products/import/cancel', methods=['POST'])
+def products_import_cancel():
+    clear_product_import_session()
+    return redirect(url_for('products'))
+
+@app.route('/products/delete-all', methods=['POST'])
+def products_delete_all():
+    ensure_product_columns()
+    count = Product.query.count()
+    if count == 0:
+        flash('Không có sản phẩm nào để xóa', 'info')
+        return redirect(url_for('products'))
+    deleted = delete_all_products_data()
+    flash(f'Đã xóa toàn bộ {deleted} sản phẩm và dữ liệu liên quan', 'success')
+    return redirect(url_for('products'))
+
 @app.route('/products/<int:pid>/toggle-active', methods=['POST'])
 def toggle_product_active(pid):
     ensure_product_columns()
@@ -1915,7 +2727,10 @@ def quotes():
     if request.method == 'POST':
         try:
             quote = create_quote_from_form()
-        except (ValueError, KeyError):
+        except ValueError as e:
+            flash(str(e) or 'Vui lòng kiểm tra lại thông tin báo giá', 'warning')
+            return redirect(url_for('quotes', tab='list'))
+        except KeyError:
             flash('Vui lòng kiểm tra lại thông tin báo giá', 'warning')
             return redirect(url_for('quotes', tab='list'))
         flash('Đã lưu nháp báo giá' if quote.status == 'Nháp' else 'Đã tạo báo giá',
@@ -1962,7 +2777,9 @@ def quotes():
         order=filters['order'],
         customers=Customer.query.order_by(Customer.name).all(),
         products=Product.query.order_by(Product.name).all(),
-        quote_catalog=quote_product_catalog(Product.query.order_by(Product.name).all()),
+        quote_catalog=quote_product_catalog(
+            Product.query.filter(Product.is_active.is_(True)).order_by(Product.name).all()
+        ),
         quote_filter_statuses=QUOTE_FILTER_STATUSES,
         quote_edit_statuses=QUOTE_FILTER_STATUSES,
         default_valid=(date.today() + timedelta(days=30)).isoformat(),
@@ -2178,12 +2995,12 @@ def download_contract(cid):
 
 @app.route('/orders', methods=['GET', 'POST'])
 def orders():
+    ensure_order_columns()
+    normalize_order_statuses()
     if request.method == 'POST':
         customer_id = int(request.form['customer_id'])
         total = parse_int(request.form.get('total'))
-        status = request.form.get('status', 'Chờ xác nhận').strip() or 'Chờ xác nhận'
-        if status not in ORDER_STATUSES:
-            status = 'Chờ xác nhận'
+        status = 'Đang xử lý'
         order = Order(
             order_code=next_code('DH', Order, 'order_code'),
             customer_id=customer_id,
@@ -2217,7 +3034,7 @@ def orders():
         export_args=export_args,
         per_page=per_page,
         customers=Customer.query.order_by(Customer.name).all(),
-        order_statuses=ORDER_STATUSES,
+        order_filter_statuses=ORDER_FILTER_STATUSES,
     )
 
 @app.route('/orders/export')
@@ -2246,37 +3063,143 @@ def orders_export():
 
 @app.route('/orders/<int:oid>/status', methods=['POST'])
 def update_order_status(oid):
+    ensure_order_columns()
+    normalize_order_statuses()
     o = Order.query.get_or_404(oid)
     new_status = request.form.get('status', '').strip()
-    if new_status in ORDER_STATUSES:
+    current = effective_order_status(o)
+    allowed = ORDER_ALLOWED_TRANSITIONS.get(current, set())
+    if new_status == 'Hoàn thành':
+        flash('Vui lòng upload biên bản nhận hàng có chữ ký để hoàn thành đơn', 'warning')
+        return orders_redirect(page=request.form.get('_page', 1, type=int))
+    if new_status in allowed:
         o.status = new_status
         db.session.commit()
         flash_status_updated(new_status)
+    elif new_status in ORDER_STATUSES:
+        flash('Không thể chuyển trạng thái đơn hàng theo hướng này', 'warning')
     return orders_redirect(page=request.form.get('_page', 1, type=int))
+
+@app.route('/orders/<int:oid>/complete', methods=['POST'])
+def complete_order(oid):
+    ensure_order_columns()
+    normalize_order_statuses()
+    o = Order.query.get_or_404(oid)
+    current = effective_order_status(o)
+    if 'Hoàn thành' not in ORDER_ALLOWED_TRANSITIONS.get(current, set()):
+        flash('Không thể hoàn thành đơn hàng ở trạng thái hiện tại', 'warning')
+        return orders_redirect(page=request.form.get('_page', 1, type=int))
+    if not save_order_handover_scan(o, request.files.get('handover_scan')):
+        return orders_redirect(page=request.form.get('_page', 1, type=int))
+    o.status = 'Hoàn thành'
+    db.session.commit()
+    flash('Đã hoàn thành đơn hàng và lưu biên bản nhận hàng', 'success')
+    return orders_redirect(page=request.form.get('_page', 1, type=int))
+
+@app.route('/orders/<int:oid>/handover-scan')
+def view_order_handover_scan(oid):
+    ensure_order_columns()
+    o = Order.query.get_or_404(oid)
+    if not o.handover_scan_path:
+        flash('Chưa có biên bản nhận hàng', 'warning')
+        return redirect(url_for('order_preview', oid=oid))
+    file_path = BASE_DIR / 'static' / o.handover_scan_path
+    if not file_path.is_file():
+        flash('Không tìm thấy file biên bản nhận hàng', 'danger')
+        return redirect(url_for('order_preview', oid=oid))
+    return send_file(file_path, mimetype=signed_scan_mimetype(file_path))
+
+@app.route('/payments/<int:pid>/receipt')
+def view_payment_receipt(pid):
+    ensure_payment_columns()
+    p = Payment.query.get_or_404(pid)
+    if not p.receipt_path:
+        flash('Chưa có ảnh xác nhận thanh toán', 'warning')
+        if p.order_id:
+            return redirect(url_for('order_preview', oid=p.order_id))
+        return redirect(url_for('debt'))
+    file_path = BASE_DIR / 'static' / p.receipt_path
+    if not file_path.is_file():
+        flash('Không tìm thấy file ảnh xác nhận', 'danger')
+        return redirect(url_for('debt'))
+    return send_file(file_path, mimetype=signed_scan_mimetype(file_path))
 
 @app.route('/orders/<int:oid>/payment', methods=['POST'])
 def add_payment(oid):
+    ensure_payment_columns()
     o = Order.query.get_or_404(oid)
+    page = request.form.get('_page', 1, type=int)
+    from_debt = request.form.get('_from') == 'debt'
+    if not order_counts_toward_debt(o):
+        flash('Đơn hàng đã hủy, không ghi nhận thanh toán / công nợ', 'warning')
+        if from_debt:
+            return debt_redirect(customer_id=request.form.get('customer_id') or o.customer_id, page=page)
+        return orders_redirect(page=page)
     amount = parse_int(request.form.get('amount'))
     if amount <= 0:
         flash('Số tiền không hợp lệ', 'danger')
-        return orders_redirect(page=request.form.get('_page', 1, type=int))
-    p = Payment(order_id=o.id, amount=amount, method=request.form.get('method', 'Chuyển khoản'), note=request.form.get('note', ''))
-    o.paid_amount = min((o.paid_amount or 0) + amount, o.total or 0)
-    db.session.add(p)
+        if from_debt:
+            return debt_redirect(customer_id=request.form.get('customer_id') or o.customer_id, page=page)
+        return orders_redirect(page=page)
+    receipt_path = save_payment_receipt(request.files.get('payment_receipt'))
+    if not receipt_path:
+        if from_debt:
+            return debt_redirect(customer_id=request.form.get('customer_id') or o.customer_id, page=page)
+        return orders_redirect(page=page)
+    receipt_at = datetime.utcnow()
+    result = apply_order_payment(
+        o, amount, request.form.get('method', 'Chuyển khoản'), request.form.get('note', ''),
+        receipt_path=receipt_path, receipt_uploaded_at=receipt_at,
+    )
+    if not result:
+        flash('Số tiền không hợp lệ hoặc đơn đã thanh toán đủ', 'danger')
+        if from_debt:
+            return debt_redirect(customer_id=request.form.get('customer_id') or o.customer_id, page=page)
+        return orders_redirect(page=page)
     db.session.commit()
-    flash('Đã ghi nhận thanh toán', 'success')
+    flash(f"Đã ghi nhận thanh toán {money(result['amount'])} cho {o.order_code}", 'success')
+    if from_debt:
+        return debt_redirect(
+            customer_id=request.form.get('customer_id') or o.customer_id,
+            page=request.form.get('_page', 1, type=int),
+        )
     return orders_redirect(page=request.form.get('_page', 1, type=int))
 
 @app.route('/orders/<int:oid>/preview')
 def order_preview(oid):
+    ensure_order_columns()
+    normalize_order_statuses()
     o = Order.query.get_or_404(oid)
+    quote = None
+    valid_until = None
+    if o.quote_id:
+        ensure_quote_columns()
+        quote = Quote.query.get(o.quote_id)
+        if quote:
+            valid_until = quote_valid_until(quote)
     return render_template(
         'order_preview_page.html',
         order=o,
+        quote=quote,
+        valid_until=valid_until,
         status=effective_order_status(o),
         payment=order_payment_status(o),
         balance=order_balance(o),
+    )
+
+@app.route('/orders/<int:oid>/print')
+def order_print(oid):
+    o = Order.query.get_or_404(oid)
+    if not o.quote_id:
+        flash('Đơn hàng không có báo giá liên kết', 'warning')
+        return redirect(url_for('order_preview', oid=oid))
+    ensure_quote_columns()
+    quote = Quote.query.get_or_404(o.quote_id)
+    return render_template(
+        'order_print.html',
+        order=o,
+        quote=quote,
+        valid_until=quote_valid_until(quote),
     )
 
 @app.route('/stock', methods=['GET', 'POST'])
@@ -2408,8 +3331,150 @@ def stock_export():
 
 @app.route('/debt')
 def debt():
-    orders = Order.query.filter(Order.total > Order.paid_amount).order_by(Order.created_at.desc()).all()
-    return render_template('debt.html', orders=orders)
+    ensure_payment_columns()
+    normalize_order_statuses()
+    search_q = request.args.get('q', '').strip()
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    order_page = request.args.get('order_page', 1, type=int)
+    per_page = min(max(per_page, 5), 50)
+    customer_id = request.args.get('customer_id', type=int)
+
+    all_rows = build_debt_customer_rows(search_q)
+    pagination = SimplePagination(all_rows, page, per_page)
+    list_args = {'q': search_q, 'per_page': per_page}
+    if customer_id:
+        list_args['customer_id'] = customer_id
+    if order_page > 1:
+        list_args['order_page'] = order_page
+
+    selected = None
+    selected_summary = None
+    customer_orders = []
+    order_pagination = None
+    payments = []
+
+    if customer_id:
+        selected = Customer.query.get(customer_id)
+    elif pagination.items:
+        selected = pagination.items[0]['customer']
+        customer_id = selected.id
+        list_args['customer_id'] = customer_id
+
+    if selected:
+        agg = customer_debt_aggregates().get(selected.id, {})
+        selected_summary = {
+            'total': agg.get('total', 0),
+            'paid': agg.get('paid', 0),
+            'remaining': agg.get('remaining', 0),
+            'unpaid_count': agg.get('unpaid_count', 0),
+            'order_count': agg.get('order_count', 0),
+            'status': customer_debt_status_from_agg(agg),
+            'status_key': customer_debt_status_key(customer_debt_status_from_agg(agg)),
+        }
+        orders_all = [
+            o for o in Order.query.filter_by(customer_id=selected.id)
+            .order_by(Order.created_at.desc()).all()
+            if order_counts_toward_debt(o)
+        ]
+        order_pagination = SimplePagination(orders_all, order_page, 8)
+        customer_orders = order_pagination.items
+        payments = (
+            Payment.query.join(Order)
+            .filter(Order.customer_id == selected.id)
+            .order_by(Payment.payment_date.desc(), Payment.id.desc())
+            .limit(20)
+            .all()
+        )
+
+    unpaid_orders = customer_unpaid_orders_oldest_first(selected.id) if selected else []
+    customer_outstanding = customer_outstanding_balance(selected.id) if selected else 0
+
+    return render_template(
+        'debt.html',
+        debt_rows=pagination.items,
+        pagination=pagination,
+        list_args=list_args,
+        per_page=per_page,
+        search_q=search_q,
+        selected=selected,
+        selected_summary=selected_summary,
+        customer_orders=customer_orders,
+        order_pagination=order_pagination,
+        payments=payments,
+        payment_groups=group_payments_for_display(payments) if payments else [],
+        unpaid_orders=unpaid_orders,
+        customer_outstanding=customer_outstanding,
+        customer_id=customer_id,
+    )
+
+@app.route('/debt/payment', methods=['POST'])
+def debt_allocate_payment():
+    ensure_payment_columns()
+    normalize_order_statuses()
+    customer_id = request.form.get('customer_id', type=int)
+    page = request.form.get('_page', 1, type=int)
+    if not customer_id:
+        flash('Không xác định được khách hàng', 'danger')
+        return debt_redirect(page=page)
+    Customer.query.get_or_404(customer_id)
+    amount = parse_int(request.form.get('amount'))
+    method = request.form.get('method', 'Chuyển khoản')
+    note = request.form.get('note', '')
+    outstanding = customer_outstanding_balance(customer_id)
+    if outstanding <= 0:
+        flash('Khách hàng không còn công nợ', 'warning')
+        return debt_redirect(customer_id=customer_id, page=page)
+    if amount <= 0:
+        flash('Số tiền không hợp lệ', 'danger')
+        return debt_redirect(customer_id=customer_id, page=page)
+    receipt_path = save_payment_receipt(request.files.get('payment_receipt'))
+    if not receipt_path:
+        return debt_redirect(customer_id=customer_id, page=page)
+    receipt_at = datetime.utcnow()
+    pay_amount = min(amount, outstanding)
+    if amount > outstanding:
+        flash(
+            f'Số tiền vượt tổng còn nợ ({money(outstanding)}). Chỉ phân bổ {money(pay_amount)}.',
+            'warning',
+        )
+    allocations = allocate_customer_payment(
+        customer_id, pay_amount, method, note,
+        receipt_path=receipt_path, receipt_uploaded_at=receipt_at,
+    )
+    if not allocations:
+        flash('Không thể phân bổ thanh toán', 'danger')
+        return debt_redirect(customer_id=customer_id, page=page)
+    lines = format_payment_allocation_lines(allocations)
+    total_paid = sum(a['amount'] for a in allocations)
+    flash(
+        f'Đã ghi nhận thanh toán {money(total_paid)}.\nPhân bổ thanh toán:\n' + '\n'.join(lines),
+        'success',
+    )
+    return debt_redirect(customer_id=customer_id, page=page)
+
+@app.route('/debt/export')
+def debt_export():
+    normalize_order_statuses()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Khách hàng', 'SĐT', 'Tổng công nợ', 'Đã thanh toán', 'Còn nợ', 'Số đơn', 'Trạng thái'])
+    for row in build_debt_customer_rows(request.args.get('q', '').strip()):
+        c = row['customer']
+        writer.writerow([
+            c.name,
+            c.phone or '',
+            row['total'],
+            row['paid'],
+            row['remaining'],
+            row['order_count'],
+            row['status'],
+        ])
+    return Response(
+        '\ufeff' + buf.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=cong-no.csv'},
+    )
 
 @app.cli.command('init-db')
 def init_db_command():
@@ -2478,7 +3543,11 @@ def init_db(seed=False):
     create_quote_doc_templates()
     db.create_all()
     ensure_contract_columns()
+    ensure_order_columns()
+    ensure_payment_columns()
     CONTRACT_SIGNED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    ORDER_HANDOVER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ensure_company_profile()
     if seed and Customer.query.count() == 0:
         c = Customer(name='CÔNG TY CP XĂNG DẦU DẦU KHÍ NINH BÌNH', tax_code='2700275814', address='Khu công nghiệp Ninh Phúc, Phường Đông Hoa Lư, Tỉnh Ninh Bình', phone='0229.3854065', representative='Ông Quách Trọng Phụng', position='Phó Giám đốc', bank_account='4830006372', bank_name='BIDV chi nhánh Ninh Bình')
@@ -2496,10 +3565,10 @@ def init_db(seed=False):
         customer = Customer.query.first()
         if customer:
             demo_orders = [
-                ('DH-2026-0001', 'Đã chốt', 17800000, 17800000),
-                ('DH-2026-0002', 'Chờ xác nhận', 5500000, 0),
+                ('DH-2026-0001', 'Hoàn thành', 17800000, 17800000),
+                ('DH-2026-0002', 'Đang xử lý', 5500000, 0),
                 ('DH-2026-0003', 'Đang xử lý', 12300000, 5000000),
-                ('DH-2026-0004', 'Đang giao', 8900000, 8900000),
+                ('DH-2026-0004', 'Hoàn thành', 8900000, 8900000),
                 ('DH-2026-0005', 'Đã hủy', 3200000, 0),
             ]
             for code, status, total, paid in demo_orders:

@@ -1,53 +1,61 @@
 {% extends 'base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/quote_print.css') }}" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-  <div>
-    <h3 class="mb-0">Đơn hàng {{ order.order_code }}</h3>
-    <p class="small-muted mb-0">{{ order.customer.name }} — {{ status }}</p>
-  </div>
-  <div class="d-flex gap-2">
-    <button type="button" class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer me-1"></i> In / PDF</button>
-    <a class="btn btn-secondary" href="{{ url_for('orders') }}">Quay lại</a>
+<div class="quote-preview-toolbar no-print">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h3 class="mb-1">Đơn hàng {{ order.order_code }}</h3>
+      <p class="small-muted mb-2">{{ order.customer.name }}</p>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="order-status-badge status-{{ order_status_key(status) }}">{{ status }}</span>
+        <span class="order-payment-badge payment-{{ order_payment_key(payment) }}">{{ payment }}</span>
+        {% if status != 'Đã hủy' %}
+        <span class="small-muted">Còn nợ: <strong class="money">{{ balance|money }}</strong></span>
+        {% endif %}
+      </div>
+      {% if order.quote %}
+      <p class="small-muted mb-0 mt-2">Từ báo giá: <a href="{{ url_for('quote_preview', qid=order.quote.id) }}">{{ order.quote.quote_code }}</a></p>
+      {% endif %}
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if quote %}
+      <a href="{{ url_for('order_print', oid=order.id) }}" target="_blank" class="btn btn-outline-primary">
+        <i class="bi bi-printer me-1"></i> In hóa đơn
+      </a>
+      {% endif %}
+      <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
+        <i class="bi bi-printer me-1"></i> In trang
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('orders') }}">Quay lại</a>
+    </div>
   </div>
 </div>
 
-<div class="panel-card order-preview-doc">
-  <div class="row g-4">
-    <div class="col-md-6">
-      <h6 class="text-muted text-uppercase small mb-2">Khách hàng</h6>
-      <p class="fw-semibold mb-1">{{ order.customer.name }}</p>
-      {% if order.customer.phone %}<p class="small-muted mb-0"><i class="bi bi-telephone me-1"></i>{{ order.customer.phone }}</p>{% endif %}
-    </div>
-    <div class="col-md-6 text-md-end">
-      <h6 class="text-muted text-uppercase small mb-2">Thông tin đơn</h6>
-      <p class="mb-1">Ngày tạo: <strong>{{ order.created_at.strftime('%d/%m/%Y') if order.created_at else '—' }}</strong></p>
-      <p class="mb-0">Trạng thái: <span class="order-status-badge status-{{ order_status_key(status) }}">{{ status }}</span></p>
-    </div>
+{% if order.handover_scan_path and status == 'Hoàn thành' %}
+<div class="panel-card mb-3 no-print">
+  <h6 class="mb-3"><i class="bi bi-clipboard-check me-2"></i>Biên bản nhận hàng đã ký</h6>
+  <div class="signed-scan-viewer-panel">
+    <img src="{{ order_handover_scan_url(order.handover_scan_path) }}" alt="Biên bản nhận hàng" class="signed-scan-image">
   </div>
-  <hr>
-  <div class="row g-3">
-    <div class="col-sm-4">
-      <div class="order-preview-total-box">
-        <div class="label">Tổng tiền</div>
-        <div class="value money">{{ order.total|money }}</div>
-      </div>
-    </div>
-    <div class="col-sm-4">
-      <div class="order-preview-total-box">
-        <div class="label">Đã trả</div>
-        <div class="value">{{ order.paid_amount|money }}</div>
-      </div>
-    </div>
-    <div class="col-sm-4">
-      <div class="order-preview-total-box highlight">
-        <div class="label">Còn nợ</div>
-        <div class="value money">{{ balance|money }}</div>
-      </div>
-    </div>
+  <p class="small-muted mt-2 mb-0">
+    Upload lúc {{ order.handover_scan_uploaded_at.strftime('%d/%m/%Y %H:%M') if order.handover_scan_uploaded_at else '—' }}
+    · <a href="{{ url_for('view_order_handover_scan', oid=order.id) }}" target="_blank">Mở ảnh gốc</a>
+  </p>
+</div>
+{% endif %}
+
+<div class="quote-preview-page-body">
+  {% if quote %}
+  {% with doc_kind='invoice' %}
+  {% include 'partials/quote_document.html' %}
+  {% endwith %}
+  {% else %}
+  <div class="panel-card text-center py-5">
+    <p class="text-muted mb-3">Đơn hàng này không liên kết báo giá nên chưa có hóa đơn bán hàng.</p>
+    <a href="{{ url_for('orders') }}" class="btn btn-secondary">Quay lại danh sách</a>
   </div>
-  <p class="mt-3 mb-0">Thanh toán: <span class="order-payment-badge payment-{{ order_payment_key(payment) }}">{{ payment }}</span></p>
-  {% if order.quote %}
-  <p class="small-muted mt-2 mb-0">Từ báo giá: {{ order.quote.quote_code }}</p>
   {% endif %}
 </div>
 {% endblock %}

@@ -12,7 +12,7 @@
   } %}
   <div class="alert alert-{{ cat }} alert-dismissible fade show flash-alert flash-alert-{{ cat }}" role="alert">
     <i class="bi {{ icons.get(cat, 'bi-info-circle-fill') }} flash-alert-icon"></i>
-    <span class="flash-alert-text">{{ message }}</span>
+    <span class="flash-alert-text flash-alert-multiline">{{ message }}</span>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Đóng"></button>
   </div>
   {% endfor %}

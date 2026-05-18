@@ -1,0 +1,50 @@
+{% macro order_options_dropdown(order, st, pay, page=1) %}
+<div class="dropdown order-options-dropdown position-static">
+  <button class="btn btn-light btn-order-action btn-order-options" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Tùy chọn">
+    <i class="bi bi-three-dots-vertical"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end shadow-sm order-options-menu">
+    <li>
+      <a class="dropdown-item" href="{{ url_for('order_preview', oid=order.id) }}">
+        <i class="bi bi-eye me-2"></i>Xem chi tiết
+      </a>
+    </li>
+    {% if order.quote_id %}
+    <li>
+      <a class="dropdown-item" href="{{ url_for('order_print', oid=order.id) }}" target="_blank">
+        <i class="bi bi-printer me-2"></i>In hóa đơn
+      </a>
+    </li>
+    {% endif %}
+    {% set next_statuses = order_next_statuses(st) %}
+    {% set show_payment = pay != '—' and pay != 'Đã thanh toán' %}
+    {% if next_statuses or show_payment %}
+    <li><hr class="dropdown-divider"></li>
+    {% for s in next_statuses %}
+    <li>
+      {% if s == 'Hoàn thành' %}
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#completeOrder{{ order.id }}">
+        <i class="bi bi-check-circle me-2"></i>Hoàn thành
+      </button>
+      {% else %}
+      <form method="post" action="{{ url_for('update_order_status', oid=order.id) }}">
+        <input type="hidden" name="status" value="{{ s }}">
+        <input type="hidden" name="_page" value="{{ page }}">
+        <button type="submit" class="dropdown-item text-danger">
+          <i class="bi bi-x-circle me-2"></i>{{ s }}
+        </button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+    {% if show_payment %}
+    <li>
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#paymentOrder{{ order.id }}">
+        <i class="bi bi-cash-coin me-2"></i>Ghi nhận thanh toán
+      </button>
+    </li>
+    {% endif %}
+    {% endif %}
+  </ul>
+</div>
+{% endmacro %}

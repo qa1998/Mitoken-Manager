@@ -92,7 +92,9 @@
     if (!list.children.length) {
       var empty = document.createElement('div');
       empty.className = 'quote-product-empty';
-      empty.textContent = 'Không tìm thấy sản phẩm';
+      empty.textContent = q
+        ? 'Không tìm thấy sản phẩm'
+        : 'Không có sản phẩm đang bán. Bật lại trạng thái bán tại trang Sản phẩm.';
       list.appendChild(empty);
     }
   }

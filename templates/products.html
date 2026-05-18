@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/product_thumb.html' import product_thumb %}
+{% from 'partials/product_category_picker.html' import product_category_picker %}
 {% block title %}Sản phẩm — Business Web{% endblock %}
 {% block content %}
 
@@ -22,6 +23,15 @@
       <a href="{{ url_for('products_export', **export_args) }}" class="btn btn-light btn-product-toolbar">
         <i class="bi bi-download me-2"></i>Export Excel
       </a>
+      <button type="button" class="btn btn-light btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#importProductModal">
+        <i class="bi bi-upload me-2"></i>Import Excel
+      </button>
+      <form method="post" action="{{ url_for('products_delete_all') }}" class="d-inline product-admin-tool"
+            id="productDeleteAllForm">
+        <button type="submit" class="btn btn-outline-danger btn-product-toolbar">
+          <i class="bi bi-trash me-2"></i>Xóa hết
+        </button>
+      </form>
       <button type="button" class="btn btn-primary btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#createProductModal">
         <i class="bi bi-plus-lg me-1"></i> Thêm sản phẩm
       </button>
@@ -234,12 +244,7 @@
             </div>
             <div class="col-md-6">
               <label class="form-label-custom">Danh mục</label>
-              <select name="category" class="form-select">
-                <option value="">— Chọn danh mục —</option>
-                {% for cat in categories %}
-                <option value="{{ cat.name }}">{{ cat.name }}</option>
-                {% endfor %}
-              </select>
+              {{ product_category_picker(categories) }}
             </div>
             <div class="col-md-6">
               <label class="form-label-custom">Thương hiệu</label>
@@ -290,6 +295,7 @@
       </div>
       <div class="modal-body">
         <form method="post" action="{{ url_for('create_category') }}" class="mb-4">
+          <input type="hidden" name="_keep_modal" value="1">
           <label class="form-label-custom">Thêm danh mục mới <span class="text-danger">*</span></label>
           <div class="d-flex gap-2">
             <input type="text" name="name" class="form-control" required placeholder="Nhập tên danh mục">
@@ -305,6 +311,7 @@
               <span class="small-muted">{{ category_counts.get(cat.id, 0) }} sản phẩm</span>
             </div>
             <form method="post" action="{{ url_for('delete_category', cid=cat.id) }}" class="m-0 category-delete-form" data-name="{{ cat.name }}" data-count="{{ category_counts.get(cat.id, 0) }}">
+              <input type="hidden" name="_keep_modal" value="1">
               <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa danh mục">
                 <i class="bi bi-trash"></i>
               </button>
@@ -318,6 +325,121 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade product-page-modal" id="importProductModal" tabindex="-1" aria-hidden="true"
+     data-show-preview="{% if show_import_preview and import_preview_payload %}1{% else %}0{% endif %}">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div id="importStepUpload" class="{% if show_import_preview and import_preview_payload %}d-none{% endif %}">
+        <form method="post" action="{{ url_for('products_import_preview') }}" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold">Import sản phẩm từ Excel</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-3">
+            Tải file mẫu, điền dữ liệu (mỗi dòng một sản phẩm), rồi upload để xem trước trước khi import.
+          </p>
+          <a href="{{ url_for('products_import_template') }}" class="btn btn-outline-primary btn-sm mb-3">
+            <i class="bi bi-file-earmark-excel me-1"></i> Tải file mẫu Excel
+          </a>
+          <div class="mb-3">
+            <label class="form-label-custom">Chọn file <span class="text-danger">*</span></label>
+            <input type="file" name="import_file" class="form-control" accept=".xlsx,.xlsm,.csv" required>
+            <div class="form-text">Cột bắt buộc: <strong>SKU</strong>, <strong>Tên sản phẩm</strong></div>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="update_existing" value="1" id="importUpdateExisting">
+            <label class="form-check-label" for="importUpdateExisting">
+              Cập nhật sản phẩm nếu SKU đã tồn tại
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-eye me-1"></i> Xem trước
+          </button>
+        </div>
+        </form>
+      </div>
+
+      {% if import_preview_payload %}
+      <div id="importStepPreview" class="{% if not show_import_preview %}d-none{% endif %}">
+        <form method="post" action="{{ url_for('products_import_confirm') }}" id="importConfirmForm">
+          <div class="modal-header">
+            <h5 class="modal-title fw-bold">Xem trước import</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small-muted mb-2">
+              File: <strong>{{ import_preview_payload.filename }}</strong>
+              · Bỏ tick hoặc <strong>Xóa</strong> dòng không muốn import.
+            </p>
+            <div class="import-preview-summary mb-3" id="importPreviewSummary"></div>
+            <div class="table-responsive import-preview-table-wrap">
+              <table class="table table-sm import-preview-table mb-0">
+                <thead>
+                  <tr>
+                    <th class="text-center" style="width:40px">
+                      <input type="checkbox" class="form-check-input" id="importSelectAll" checked>
+                    </th>
+                    <th>Dòng</th>
+                    <th>SKU</th>
+                    <th>Tên sản phẩm</th>
+                    <th>Danh mục</th>
+                    <th class="text-end">Giá bán</th>
+                    <th>Trạng thái</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="importPreviewBody">
+                  {% for row in import_preview_payload.rows %}
+                  {% set d = row.data %}
+                  <tr class="import-preview-row {% if not row.importable %}import-preview-row-muted{% endif %}"
+                      data-importable="{{ '1' if row.importable else '0' }}">
+                    <td class="text-center">
+                      {% if row.importable %}
+                      <input type="checkbox" class="form-check-input import-row-check" name="import_row_id"
+                             value="{{ row.row_id }}" checked>
+                      {% else %}
+                      <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ row.line_no }}</td>
+                    <td class="fw-semibold">{{ d.sku }}</td>
+                    <td>{{ d.name }}</td>
+                    <td>{{ d.category or '—' }}</td>
+                    <td class="text-end text-nowrap">{{ d.retail_price|money }}</td>
+                    <td>
+                      <span class="import-action-badge action-{{ row.action }}">{{ row.action_label }}</span>
+                      {% if row.note %}<div class="import-row-note">{{ row.note }}</div>{% endif %}
+                    </td>
+                    <td class="text-end">
+                      <button type="button" class="btn btn-sm btn-outline-danger btn-import-row-remove" title="Xóa dòng">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="submit" formaction="{{ url_for('products_import_cancel') }}" formmethod="post"
+                    class="btn btn-light" formnovalidate>Hủy import</button>
+            <button type="button" class="btn btn-outline-secondary" id="btnImportBackUpload">Chọn file khác</button>
+            <button type="submit" class="btn btn-primary" id="btnImportConfirm">
+              <i class="bi bi-check2-circle me-1"></i> Xác nhận import
+            </button>
+          </div>
+        </form>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>

@@ -1,5 +1,26 @@
 {% set q = quote %}
 {% set subtotal_net = [q.subtotal - q.discount, 0]|max %}
+{% set doc_kind = doc_kind|default('quote') %}
+{% if doc_kind == 'invoice' %}
+{% set doc_title = 'HÓA ĐƠN BÁN HÀNG' %}
+{% set doc_no_label = 'Số hóa đơn' %}
+{% set doc_no_value = order.order_code %}
+{% set doc_date_label = 'Ngày hóa đơn' %}
+{% set doc_date_value = order.created_at.strftime('%d/%m/%Y') if order.created_at else '—' %}
+{% set doc_third_label = 'Hiệu lực đến' %}
+{% set doc_third_value = valid_until.strftime('%d/%m/%Y') if valid_until else '—' %}
+{% set invoice_order_total = order.total if order else q.total %}
+{% set prior_debt = customer_prior_debt(q.customer_id, order.id) if order else 0 %}
+{% set invoice_grand_total = invoice_order_total + prior_debt %}
+{% else %}
+{% set doc_title = 'BÁO GIÁ' %}
+{% set doc_no_label = 'Số báo giá' %}
+{% set doc_no_value = q.quote_code %}
+{% set doc_date_label = 'Ngày báo giá' %}
+{% set doc_date_value = q.created_at.strftime('%d/%m/%Y') if q.created_at else '—' %}
+{% set doc_third_label = 'Hiệu lực đến' %}
+{% set doc_third_value = valid_until.strftime('%d/%m/%Y') %}
+{% endif %}
 <div class="quote-print-sheet quote-print-frame">
     <table class="quote-print-header-table" cellpadding="0" cellspacing="0">
       <tr>
@@ -23,11 +44,11 @@
           </div>
         </td>
         <td class="quote-print-header-right">
-          <h2 class="quote-print-title">BÁO GIÁ</h2>
+          <h2 class="quote-print-title">{{ doc_title }}</h2>
           <table class="quote-print-meta-table" cellpadding="0" cellspacing="0">
-            <tr><td>Số báo giá</td><td>: {{ q.quote_code }}</td></tr>
-            <tr><td>Ngày báo giá</td><td>: {{ q.created_at.strftime('%d/%m/%Y') if q.created_at else '—' }}</td></tr>
-            <tr><td>Hiệu lực đến</td><td>: {{ valid_until.strftime('%d/%m/%Y') }}</td></tr>
+            <tr><td>{{ doc_no_label }}</td><td>: {{ doc_no_value }}</td></tr>
+            <tr><td>{{ doc_date_label }}</td><td>: {{ doc_date_value }}</td></tr>
+            <tr><td>{{ doc_third_label }}</td><td>: {{ doc_third_value }}</td></tr>
           </table>
         </td>
       </tr>
@@ -83,11 +104,37 @@
           <td class="quote-print-summary-label">VAT ({{ q.vat_rate }}%)</td>
           <td class="col-amount">{{ q.vat_amount|money_plain }}</td>
         </tr>
+        {% if doc_kind == 'invoice' %}
+        <tr>
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">Tổng cộng đơn hàng (đã bao gồm VAT)</td>
+          <td class="col-amount"><strong>{{ invoice_order_total|money_plain }}</strong></td>
+        </tr>
+        {% if prior_debt > 0 %}
+        <tr>
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">Công nợ (các đơn trước)</td>
+          <td class="col-amount">{{ prior_debt|money_plain }}</td>
+        </tr>
+        <tr class="quote-print-grand">
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">Tổng phải thanh toán</td>
+          <td class="col-amount"><strong>{{ invoice_grand_total|money_plain }}</strong></td>
+        </tr>
+        {% else %}
+        <tr class="quote-print-grand">
+          <td colspan="5"></td>
+          <td class="quote-print-summary-label">Tổng cộng (đã bao gồm VAT)</td>
+          <td class="col-amount"><strong>{{ invoice_order_total|money_plain }}</strong></td>
+        </tr>
+        {% endif %}
+        {% else %}
         <tr class="quote-print-grand">
           <td colspan="5"></td>
           <td class="quote-print-summary-label">Tổng cộng (đã bao gồm VAT)</td>
           <td class="col-amount"><strong>{{ q.total|money_plain }}</strong></td>
         </tr>
+        {% endif %}
       </tfoot>
     </table>
 
@@ -96,7 +143,11 @@
         <td class="quote-print-footer-left">
           <h3 class="quote-print-notes-title">GHI CHÚ</h3>
           <ul>
+            {% if doc_kind == 'invoice' %}
+            <li>Hóa đơn trên chưa bao gồm VAT.</li>
+            {% else %}
             <li>Báo giá trên chưa bao gồm VAT.</li>
+            {% endif %}
             <li>Thuế VAT: {{ q.vat_rate }}%.</li>
             <li>Giá trên có thể thay đổi tùy theo thời điểm và số lượng đặt hàng.</li>
             {% if q.note %}<li>{{ q.note }}</li>{% endif %}

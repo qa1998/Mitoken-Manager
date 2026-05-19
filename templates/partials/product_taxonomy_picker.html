@@ -1,0 +1,35 @@
+{% macro product_taxonomy_picker(parent_categories, brands_list, selected_category_id=None, selected_brand_id=None) %}
+<div class="taxonomy-picker"
+     data-selected-category-id="{{ selected_category_id or '' }}"
+     data-selected-brand-id="{{ selected_brand_id or '' }}">
+  <div class="row g-2">
+    <div class="col-12">
+      <label class="form-label-custom small mb-1">Danh mục cha</label>
+      <select name="category_parent_id" class="form-select form-select-sm taxonomy-parent-select">
+        <option value="">— Chọn danh mục cha —</option>
+        {% for p in parent_categories %}
+        <option value="{{ p.id }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12">
+      <label class="form-label-custom small mb-1">Danh mục con</label>
+      <select name="category_id" class="form-select form-select-sm taxonomy-child-select">
+        <option value="">— Chọn danh mục con —</option>
+      </select>
+    </div>
+    <div class="col-12">
+      <label class="form-label-custom small mb-1">Thương hiệu</label>
+      <select name="brand_id" class="form-select form-select-sm taxonomy-brand-select">
+        <option value="">— Chọn thương hiệu —</option>
+        {% for b in brands_list %}
+        <option value="{{ b.id }}" data-category-id="{{ b.category_id or '' }}">{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <button type="button" class="btn btn-link btn-sm px-0 mt-1 taxonomy-manage-link category-create-link">
+    <i class="bi bi-folder2 me-1"></i>Quản lý danh mục &amp; thương hiệu
+  </button>
+</div>
+{% endmacro %}

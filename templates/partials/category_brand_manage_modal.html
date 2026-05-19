@@ -1,0 +1,158 @@
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">Danh mục &amp; thương hiệu</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs taxonomy-manage-tabs mb-3" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabCategoryTree" type="button">Danh mục</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabBrands" type="button">Thương hiệu</button>
+          </li>
+        </ul>
+
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="tabCategoryTree">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+              <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#importCategoryModal">
+                <i class="bi bi-upload me-1"></i> Import Excel
+              </button>
+              <a href="{{ url_for('categories_export') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-download me-1"></i> Export Excel
+              </a>
+            </div>
+            <div class="row g-3 mb-4">
+              <div class="col-md-6">
+                <form method="post" action="{{ url_for('create_category') }}">
+                  <input type="hidden" name="_keep_modal" value="1">
+                  <label class="form-label-custom">Thêm danh mục cha</label>
+                  <div class="d-flex gap-2">
+                    <input type="text" name="name" class="form-control" required placeholder="VD: Điện thoại">
+                    <button type="submit" class="btn btn-primary text-nowrap">Thêm</button>
+                  </div>
+                </form>
+              </div>
+              <div class="col-md-6">
+                <form method="post" action="{{ url_for('create_category') }}">
+                  <input type="hidden" name="_keep_modal" value="1">
+                  <label class="form-label-custom">Thêm danh mục con</label>
+                  <div class="d-flex gap-2 flex-wrap">
+                    <select name="parent_id" class="form-select" required style="min-width:140px">
+                      <option value="">Chọn danh mục cha</option>
+                      {% for p in parent_categories %}
+                      <option value="{{ p.id }}">{{ p.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <input type="text" name="name" class="form-control" required placeholder="VD: Smartphone">
+                    <button type="submit" class="btn btn-primary text-nowrap">Thêm</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <label class="form-label-custom">Cây danh mục (kiểu Shopee)</label>
+            <div class="category-tree-manage">
+              {% for node in category_tree %}
+              {% set parent = node.category %}
+              <div class="category-tree-parent">
+                <div class="category-manage-item category-tree-row">
+                  <div class="category-manage-info">
+                    <i class="bi bi-folder2 text-primary me-2"></i>
+                    <span class="fw-semibold">{{ parent.name }}</span>
+                    <span class="small-muted ms-2">{{ category_counts.get(parent.id, 0) }} SP</span>
+                  </div>
+                  <form method="post" action="{{ url_for('delete_category', cid=parent.id) }}" class="m-0 category-delete-form"
+                        data-name="{{ parent.name }}" data-count="{{ category_counts.get(parent.id, 0) }}">
+                    <input type="hidden" name="_keep_modal" value="1">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa"><i class="bi bi-trash"></i></button>
+                  </form>
+                </div>
+                {% if node.children %}
+                <div class="category-tree-children">
+                  {% for child_node in node.children %}
+                  {% set child = child_node.category %}
+                  <div class="category-manage-item category-tree-row category-tree-child">
+                    <div class="category-manage-info">
+                      <span class="category-tree-line"></span>
+                      <span>{{ child.name }}</span>
+                      <span class="small-muted ms-2">{{ category_counts.get(child.id, 0) }} SP</span>
+                    </div>
+                    <form method="post" action="{{ url_for('delete_category', cid=child.id) }}" class="m-0 category-delete-form"
+                          data-name="{{ parent.name }} &gt; {{ child.name }}" data-count="{{ category_counts.get(child.id, 0) }}">
+                      <input type="hidden" name="_keep_modal" value="1">
+                      <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa"><i class="bi bi-trash"></i></button>
+                    </form>
+                  </div>
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </div>
+              {% else %}
+              <p class="text-muted small mb-0">Chưa có danh mục. Thêm danh mục cha và danh mục con ở trên.</p>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="tab-pane fade" id="tabBrands">
+            <form method="post" action="{{ url_for('create_brand') }}" class="mb-4">
+              <input type="hidden" name="_keep_modal" value="1">
+              <label class="form-label-custom">Thêm thương hiệu</label>
+              <div class="row g-2 align-items-end">
+                <div class="col-md-5">
+                  <input type="text" name="name" class="form-control" required placeholder="VD: Samsung, DJI">
+                </div>
+                <div class="col-md-5">
+                  <select name="category_id" class="form-select">
+                    <option value="">Gắn danh mục (tùy chọn)</option>
+                    {% for p in parent_categories %}
+                    <option value="{{ p.id }}">{{ p.name }} (tất cả con)</option>
+                    {% endfor %}
+                    {% for node in category_tree %}
+                    {% for child_node in node.children %}
+                    <option value="{{ child_node.category.id }}">{{ node.category.name }} &gt; {{ child_node.category.name }}</option>
+                    {% endfor %}
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-md-2">
+                  <button type="submit" class="btn btn-primary w-100">Thêm</button>
+                </div>
+              </div>
+            </form>
+            <label class="form-label-custom">Danh sách thương hiệu</label>
+            <div class="brand-manage-list">
+              {% for b in brands_list %}
+              <div class="category-manage-item">
+                <div class="category-manage-info">
+                  <i class="bi bi-award text-warning me-2"></i>
+                  <span class="fw-semibold">{{ b.name }}</span>
+                  {% if b.category_id %}
+                  <span class="small-muted ms-2">{{ category_display_path(b.category_id) }}</span>
+                  {% else %}
+                  <span class="small-muted ms-2">Tất cả danh mục</span>
+                  {% endif %}
+                  <span class="small-muted ms-1">· {{ brand_counts.get(b.id, 0) }} SP</span>
+                </div>
+                <form method="post" action="{{ url_for('delete_brand', bid=b.id) }}" class="m-0 brand-delete-form"
+                      data-name="{{ b.name }}" data-count="{{ brand_counts.get(b.id, 0) }}">
+                  <input type="hidden" name="_keep_modal" value="1">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa"><i class="bi bi-trash"></i></button>
+                </form>
+              </div>
+              {% else %}
+              <p class="text-muted small mb-0">Chưa có thương hiệu</p>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>

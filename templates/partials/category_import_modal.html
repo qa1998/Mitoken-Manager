@@ -1,0 +1,115 @@
+<div class="modal fade" id="importCategoryModal" tabindex="-1" aria-hidden="true"
+     data-show-preview="{% if show_category_import_preview and category_import_preview_payload %}1{% else %}0{% endif %}">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div id="importCategoryStepUpload" class="{% if show_category_import_preview and category_import_preview_payload %}d-none{% endif %}">
+        <form method="post" action="{{ url_for('categories_import_preview') }}" enctype="multipart/form-data">
+          <div class="modal-header">
+            <h5 class="modal-title fw-bold">Import danh mục từ Excel</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small-muted mb-3">
+              Mỗi dòng: <strong>Danh mục cha</strong>, <strong>Danh mục con</strong> (tùy chọn), <strong>Thương hiệu</strong> (tùy chọn).
+            </p>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+              <a href="{{ url_for('categories_import_template') }}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-file-earmark-excel me-1"></i> File mẫu .xlsx
+              </a>
+              <a href="{{ url_for('categories_import_template', format='csv') }}" class="btn btn-outline-secondary btn-sm">File mẫu .csv</a>
+              <a href="{{ url_for('categories_export') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-download me-1"></i> Export danh mục hiện tại
+              </a>
+            </div>
+            <div class="import-format-hint small-muted mb-3">
+              <strong>Ví dụ:</strong> Điện thoại / Smartphone / Samsung<br>
+              Chỉ danh mục cha: điền cột <em>Danh mục cha</em>, để trống cột con.<br>
+              Có thể dùng cột <em>Danh mục</em> dạng <code>Cha &gt; Con</code> (file cũ).
+            </div>
+            <div class="mb-0">
+              <label class="form-label-custom">Chọn file <span class="text-danger">*</span></label>
+              <input type="file" name="import_file" class="form-control" accept=".xlsx,.xlsm,.csv" required>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-eye me-1"></i> Xem trước
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {% if category_import_preview_payload %}
+      <div id="importCategoryStepPreview" class="{% if not show_category_import_preview %}d-none{% endif %}">
+        <form method="post" action="{{ url_for('categories_import_confirm') }}" id="importCategoryConfirmForm">
+          <div class="modal-header">
+            <h5 class="modal-title fw-bold">Xem trước import danh mục</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small-muted mb-2">
+              File: <strong>{{ category_import_preview_payload.filename }}</strong>
+            </p>
+            <div class="import-preview-summary mb-3" id="importCategoryPreviewSummary"></div>
+            <div class="table-responsive import-preview-table-wrap">
+              <table class="table table-sm import-preview-table mb-0">
+                <thead>
+                  <tr>
+                    <th class="text-center" style="width:40px">
+                      <input type="checkbox" class="form-check-input" id="importCategorySelectAll" checked>
+                    </th>
+                    <th>Dòng</th>
+                    <th>DM cha</th>
+                    <th>DM con</th>
+                    <th>Thương hiệu</th>
+                    <th>Trạng thái</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="importCategoryPreviewBody">
+                  {% for row in category_import_preview_payload.rows %}
+                  {% set d = row.data %}
+                  <tr class="import-preview-row {% if not row.importable %}import-preview-row-muted{% endif %}"
+                      data-importable="{{ '1' if row.importable else '0' }}">
+                    <td class="text-center">
+                      {% if row.importable %}
+                      <input type="checkbox" class="form-check-input import-row-check" name="import_row_id"
+                             value="{{ row.row_id }}" checked>
+                      {% else %}
+                      <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ row.line_no }}</td>
+                    <td>{{ d.category_parent or '—' }}</td>
+                    <td>{{ d.category_child or '—' }}</td>
+                    <td>{{ d.brand or '—' }}</td>
+                    <td>
+                      <span class="import-action-badge action-{{ row.action }}">{{ row.action_label }}</span>
+                      {% if row.note %}<div class="import-row-note">{{ row.note }}</div>{% endif %}
+                    </td>
+                    <td class="text-end">
+                      <button type="button" class="btn btn-sm btn-outline-danger btn-import-row-remove" title="Xóa dòng">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="submit" formaction="{{ url_for('categories_import_cancel') }}" formmethod="post"
+                    class="btn btn-light" formnovalidate>Hủy import</button>
+            <button type="button" class="btn btn-outline-secondary" id="btnImportCategoryBackUpload">Chọn file khác</button>
+            <button type="submit" class="btn btn-primary" id="btnImportCategoryConfirm">
+              <i class="bi bi-check2-circle me-1"></i> Xác nhận import
+            </button>
+          </div>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>

@@ -21,6 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / 'instance' / 'business.db'
 IMPORT_PREVIEW_DIR = BASE_DIR / 'instance' / 'import_previews'
 IMPORT_PREVIEW_SESSION_KEY = 'product_import_preview_id'
+CATEGORY_IMPORT_SESSION_KEY = 'category_import_preview_id'
 OUTPUT_DIR = BASE_DIR / 'output'
 TEMPLATE_DOCX = BASE_DIR / 'templates_docx' / 'hop_dong_template.docx'
 TEMPLATE_QUOTE_SALE_CONTRACT = BASE_DIR / 'templates_docx' / 'hop_dong_mua_ban_bao_gia.docx'
@@ -62,8 +63,18 @@ class Customer(db.Model):
 
 class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(120), unique=True, nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
+    sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    parent = db.relationship('Category', remote_side=[id], backref=db.backref('children', lazy='dynamic'))
+
+class Brand(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    category = db.relationship('Category')
 
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -71,6 +82,10 @@ class Product(db.Model):
     name = db.Column(db.String(255), nullable=False)
     category = db.Column(db.String(120), default='')
     brand = db.Column(db.String(120), default='')
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
+    brand_id = db.Column(db.Integer, db.ForeignKey('brand.id'), nullable=True)
+    category_ref = db.relationship('Category', foreign_keys=[category_id])
+    brand_ref = db.relationship('Brand', foreign_keys=[brand_id])
     model = db.Column(db.String(120), default='')
     variant = db.Column(db.String(120), default='')
     unit = db.Column(db.String(40), default='cái')
@@ -233,6 +248,235 @@ def category_tag_class(name):
     return CATEGORY_TAG_CLASSES[sum(ord(c) for c in name) % len(CATEGORY_TAG_CLASSES)]
 
 app.jinja_env.globals['category_tag'] = category_tag_class
+
+def ensure_category_brand_schema():
+    from sqlalchemy import inspect, text
+    ensure_product_columns()
+    insp = inspect(db.engine)
+    tables = set(insp.get_table_names())
+    if 'brand' not in tables:
+        Brand.__table__.create(db.engine)
+    if 'category' in tables:
+        cols = {c['name'] for c in insp.get_columns('category')}
+        with db.engine.begin() as conn:
+            if 'parent_id' not in cols:
+                conn.execute(text('ALTER TABLE category ADD COLUMN parent_id INTEGER'))
+            if 'sort_order' not in cols:
+                conn.execute(text('ALTER TABLE category ADD COLUMN sort_order INTEGER DEFAULT 0'))
+    if 'product' in tables:
+        cols = {c['name'] for c in insp.get_columns('product')}
+        with db.engine.begin() as conn:
+            if 'category_id' not in cols:
+                conn.execute(text('ALTER TABLE product ADD COLUMN category_id INTEGER'))
+            if 'brand_id' not in cols:
+                conn.execute(text('ALTER TABLE product ADD COLUMN brand_id INTEGER'))
+    migrate_product_taxonomy_ids()
+
+def migrate_product_taxonomy_ids():
+    for product in Product.query.all():
+        changed = False
+        if product.category and not product.category_id:
+            cid = find_category_id_by_path(product.category)
+            if cid:
+                product.category_id = cid
+                changed = True
+        if product.brand and not product.brand_id:
+            brand = Brand.query.filter_by(name=product.brand).first()
+            if not brand:
+                brand = Brand(name=product.brand)
+                db.session.add(brand)
+                db.session.flush()
+            product.brand_id = brand.id
+            changed = True
+        if changed:
+            sync_product_taxonomy_strings(product)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+def category_display_path(category_id):
+    if not category_id:
+        return ''
+    cat = Category.query.get(category_id)
+    if not cat:
+        return ''
+    if cat.parent_id:
+        parent = Category.query.get(cat.parent_id)
+        if parent:
+            return f'{parent.name} > {cat.name}'
+    return cat.name
+
+def product_category_path(product):
+    if getattr(product, 'category_id', None):
+        return category_display_path(product.category_id)
+    return product.category or ''
+
+def product_brand_name(product):
+    if getattr(product, 'brand_id', None):
+        brand = Brand.query.get(product.brand_id)
+        if brand:
+            return brand.name
+    return product.brand or ''
+
+def parent_categories():
+    return Category.query.filter(Category.parent_id.is_(None)).order_by(Category.sort_order, Category.name).all()
+
+def child_categories(parent_id):
+    if not parent_id:
+        return []
+    return Category.query.filter_by(parent_id=parent_id).order_by(Category.sort_order, Category.name).all()
+
+def build_category_tree():
+    all_cats = Category.query.order_by(Category.sort_order, Category.name).all()
+    by_parent = {}
+    for cat in all_cats:
+        by_parent.setdefault(cat.parent_id, []).append(cat)
+
+    def walk(parent_id=None):
+        nodes = []
+        for cat in by_parent.get(parent_id, []):
+            nodes.append({'category': cat, 'children': walk(cat.id)})
+        return nodes
+
+    return walk(None)
+
+def category_name_exists(name, parent_id=None):
+    q = Category.query.filter(Category.name == name)
+    if parent_id:
+        q = q.filter_by(parent_id=parent_id)
+    else:
+        q = q.filter(Category.parent_id.is_(None))
+    return q.first() is not None
+
+def find_category_id_by_path(path):
+    path = (path or '').strip()
+    if not path:
+        return None
+    if '>' in path:
+        parts = [p.strip() for p in path.split('>') if p.strip()]
+        if len(parts) >= 2:
+            parent = Category.query.filter(Category.parent_id.is_(None), Category.name == parts[0]).first()
+            if not parent:
+                return None
+            child = Category.query.filter_by(parent_id=parent.id, name=parts[-1]).first()
+            return child.id if child else None
+    cat = Category.query.filter(Category.name == path).first()
+    return cat.id if cat else None
+
+def sync_product_taxonomy_strings(product):
+    product.category = category_display_path(product.category_id) if product.category_id else ''
+    if product.brand_id:
+        brand = Brand.query.get(product.brand_id)
+        product.brand = brand.name if brand else ''
+    elif not product.brand:
+        product.brand = ''
+
+def assign_product_taxonomy_from_form(product):
+    child_id = request.form.get('category_id', type=int)
+    parent_id = request.form.get('category_parent_id', type=int)
+    if child_id:
+        product.category_id = child_id
+    elif parent_id:
+        product.category_id = parent_id
+    else:
+        legacy = request.form.get('category', '').strip()
+        product.category_id = find_category_id_by_path(legacy) if legacy else None
+    brand_id = request.form.get('brand_id', type=int)
+    if brand_id:
+        product.brand_id = brand_id
+    else:
+        legacy_brand = request.form.get('brand', '').strip()
+        if legacy_brand:
+            brand = Brand.query.filter_by(name=legacy_brand).first()
+            if not brand:
+                brand = Brand(name=legacy_brand)
+                db.session.add(brand)
+                db.session.flush()
+            product.brand_id = brand.id
+        else:
+            product.brand_id = None
+    sync_product_taxonomy_strings(product)
+
+def ensure_category_from_path(path):
+    path = (path or '').strip()
+    if not path:
+        return None
+    existing = find_category_id_by_path(path)
+    if existing:
+        return existing
+    if '>' in path:
+        parts = [p.strip() for p in path.split('>') if p.strip()]
+        parent_name, child_name = parts[0], parts[-1]
+        parent = category_name_exists(parent_name, None) and Category.query.filter(
+            Category.parent_id.is_(None), Category.name == parent_name
+        ).first()
+        if not parent:
+            parent = Category(name=parent_name)
+            db.session.add(parent)
+            db.session.flush()
+        child = Category.query.filter_by(parent_id=parent.id, name=child_name).first()
+        if not child:
+            child = Category(name=child_name, parent_id=parent.id)
+            db.session.add(child)
+            db.session.flush()
+        return child.id
+    if not category_name_exists(path, None):
+        cat = Category(name=path)
+        db.session.add(cat)
+        db.session.flush()
+        return cat.id
+    return Category.query.filter(Category.parent_id.is_(None), Category.name == path).first().id
+
+def ensure_brand_name(name, category_id=None):
+    name = (name or '').strip()
+    if not name:
+        return None
+    brand = Brand.query.filter_by(name=name).first()
+    if not brand:
+        brand = Brand(name=name, category_id=category_id)
+        db.session.add(brand)
+        db.session.flush()
+    elif category_id and not brand.category_id:
+        brand.category_id = category_id
+    return brand.id
+
+def brands_for_category(category_id):
+    q = Brand.query.order_by(Brand.name)
+    if not category_id:
+        return q.all()
+    cat = Category.query.get(category_id)
+    if not cat:
+        return q.all()
+    scope_ids = {category_id}
+    if cat.parent_id:
+        scope_ids.add(cat.parent_id)
+    else:
+        scope_ids.update(c.id for c in Category.query.filter_by(parent_id=cat.id))
+    return q.filter(or_(Brand.category_id.is_(None), Brand.category_id.in_(scope_ids))).all()
+
+def brands_catalog_json():
+    return [
+        {'id': b.id, 'name': b.name, 'category_id': b.category_id}
+        for b in Brand.query.order_by(Brand.name).all()
+    ]
+
+def categories_catalog_json():
+    parents = parent_categories()
+    children = {}
+    for p in parents:
+        children[str(p.id)] = [
+            {'id': c.id, 'name': c.name, 'path': category_display_path(c.id)}
+            for c in child_categories(p.id)
+        ]
+    return {
+        'parents': [{'id': p.id, 'name': p.name} for p in parents],
+        'children': children,
+    }
+
+app.jinja_env.globals['product_category_path'] = product_category_path
+app.jinja_env.globals['product_brand_name'] = product_brand_name
+app.jinja_env.globals['category_display_path'] = category_display_path
 
 def ensure_product_columns():
     from sqlalchemy import inspect, text
@@ -1085,8 +1329,8 @@ def product_barcode(product):
     return product.sku or ''
 
 def product_brand_options():
-    rows = db.session.query(Product.brand).filter(Product.brand != '').distinct().order_by(Product.brand).all()
-    return [r[0] for r in rows if r[0]]
+    ensure_category_brand_schema()
+    return [b.name for b in Brand.query.order_by(Brand.name).all()]
 
 app.jinja_env.globals['product_inventory_level'] = product_inventory_level
 app.jinja_env.globals['product_sale_status'] = product_sale_status
@@ -2023,6 +2267,9 @@ def product_filters_from_request():
     return {
         'category': request.args.get('category', '').strip(),
         'brand': request.args.get('brand', '').strip(),
+        'category_parent_id': request.args.get('category_parent_id', type=int),
+        'category_id': request.args.get('category_id', type=int),
+        'brand_id': request.args.get('brand_id', type=int),
         'status': request.args.get('status', '').strip(),
         'q': request.args.get('q', '').strip(),
     }
@@ -2038,9 +2285,17 @@ def apply_product_filters(query, filters):
             Product.brand.ilike(like),
             Product.model.ilike(like),
         ))
-    if filters.get('category'):
+    if filters.get('category_id'):
+        query = query.filter(Product.category_id == filters['category_id'])
+    elif filters.get('category_parent_id'):
+        child_ids = [c.id for c in Category.query.filter_by(parent_id=filters['category_parent_id'])]
+        child_ids.append(filters['category_parent_id'])
+        query = query.filter(Product.category_id.in_(child_ids))
+    elif filters.get('category'):
         query = query.filter(Product.category == filters['category'])
-    if filters.get('brand'):
+    if filters.get('brand_id'):
+        query = query.filter(Product.brand_id == filters['brand_id'])
+    elif filters.get('brand'):
         query = query.filter(Product.brand == filters['brand'])
     st = filters.get('status', '')
     if st == 'selling':
@@ -2083,8 +2338,7 @@ app.jinja_env.globals['price_type_label'] = price_type_label
 
 def apply_product_form(product):
     product.name = request.form.get('name', '').strip()
-    product.category = request.form.get('category', '')
-    product.brand = request.form.get('brand', '')
+    assign_product_taxonomy_from_form(product)
     product.model = request.form.get('model', '')
     product.variant = request.form.get('variant', '')
     product.unit = request.form.get('unit', 'cái') or 'cái'
@@ -2099,13 +2353,25 @@ def apply_product_form(product):
 def category_product_counts():
     counts = {}
     for cat in Category.query.all():
-        counts[cat.id] = Product.query.filter_by(category=cat.name).count()
+        path = category_display_path(cat.id)
+        counts[cat.id] = Product.query.filter(
+            or_(Product.category_id == cat.id, Product.category == path, Product.category == cat.name)
+        ).count()
+    return counts
+
+def brand_product_counts():
+    counts = {}
+    for brand in Brand.query.all():
+        counts[brand.id] = Product.query.filter(
+            or_(Product.brand_id == brand.id, Product.brand == brand.name)
+        ).count()
     return counts
 
 PRODUCT_IMPORT_FIELDS = [
     ('sku', 'SKU'),
     ('name', 'Tên sản phẩm'),
-    ('category', 'Danh mục'),
+    ('category_parent', 'Danh mục cha'),
+    ('category_child', 'Danh mục con'),
     ('brand', 'Thương hiệu'),
     ('model', 'Model'),
     ('variant', 'Biến thể'),
@@ -2120,9 +2386,17 @@ PRODUCT_IMPORT_FIELDS = [
     ('status', 'Trạng thái'),
 ]
 
+PRODUCT_IMPORT_SAMPLE_ROW = [
+    'SP-001', 'Sản phẩm mẫu', 'Điện thoại', 'Smartphone', 'Samsung',
+    'A53', '6/128 Đen', 'cái', '12 tháng',
+    5000000, 8900000, 8500000, 8700000, 10, 5, 'Đang bán',
+]
+
 PRODUCT_IMPORT_HEADER_ALIASES = {
     'sku': {'sku', 'mã sku', 'ma sku', 'mã vạch', 'ma vach'},
     'name': {'tên sản phẩm', 'ten san pham', 'tên', 'ten', 'name', 'sản phẩm'},
+    'category_parent': {'danh mục cha', 'danh muc cha', 'category parent', 'nhóm danh mục', 'ngành hàng'},
+    'category_child': {'danh mục con', 'danh muc con', 'category child', 'loại sản phẩm'},
     'category': {'danh mục', 'danh muc', 'category', 'loại'},
     'brand': {'thương hiệu', 'thuong hieu', 'brand', 'hãng'},
     'model': {'model', 'mẫu'},
@@ -2162,11 +2436,7 @@ def parse_import_active_status(value):
     return True
 
 def ensure_category_name(name):
-    name = (name or '').strip()
-    if not name:
-        return
-    if not Category.query.filter_by(name=name).first():
-        db.session.add(Category(name=name))
+    ensure_category_from_path(name)
 
 def read_product_import_sheet(file_storage):
     filename = secure_filename(file_storage.filename or '')
@@ -2193,6 +2463,35 @@ def read_product_import_sheet(file_storage):
         return rows
     raise ValueError('Chỉ hỗ trợ file Excel (.xlsx) hoặc CSV (.csv)')
 
+def product_category_parts(product):
+    """Tách danh mục cha / con để export Excel."""
+    if getattr(product, 'category_id', None):
+        cat = Category.query.get(product.category_id)
+        if cat and cat.parent_id:
+            parent = Category.query.get(cat.parent_id)
+            return (parent.name if parent else '', cat.name)
+        if cat:
+            return (cat.name, '')
+    path = (product.category or '').strip()
+    if '>' in path:
+        parts = [p.strip() for p in path.split('>') if p.strip()]
+        if len(parts) >= 2:
+            return (parts[0], parts[-1])
+    return (path, '')
+
+def resolve_import_category_path(data):
+    """Gộp danh mục từ cột cha/con hoặc cột danh mục gộp (Cha > Con)."""
+    parent = (data.get('category_parent') or '').strip()
+    child = (data.get('category_child') or '').strip()
+    combined = (data.get('category') or '').strip()
+    if parent and child:
+        return f'{parent} > {child}'
+    if child and not parent:
+        return child
+    if parent and not child:
+        return parent
+    return combined
+
 def product_row_from_import(row, col_map):
     def cell(field, default=''):
         idx = col_map.get(field)
@@ -2203,9 +2502,11 @@ def product_row_from_import(row, col_map):
             return default
         return str(val).strip()
 
-    return {
+    raw = {
         'sku': cell('sku'),
         'name': cell('name'),
+        'category_parent': cell('category_parent'),
+        'category_child': cell('category_child'),
         'category': cell('category'),
         'brand': cell('brand'),
         'model': cell('model'),
@@ -2220,6 +2521,74 @@ def product_row_from_import(row, col_map):
         'low_stock': parse_int(cell('low_stock'), 5),
         'is_active': parse_import_active_status(cell('status', 'Đang bán')),
     }
+    path = resolve_import_category_path(raw)
+    raw['category'] = path
+    parts = path.split('>') if path and '>' in path else []
+    if len(parts) >= 2 and not raw['category_parent']:
+        raw['category_parent'] = parts[0].strip()
+        raw['category_child'] = parts[-1].strip()
+    elif path and not raw['category_parent'] and not raw['category_child']:
+        raw['category_parent'] = path
+    return raw
+
+def product_to_export_row(product):
+    parent_name, child_name = product_category_parts(product)
+    _, sale_label = product_sale_status(product)
+    return [
+        product.sku,
+        product.name,
+        parent_name,
+        child_name,
+        product_brand_name(product),
+        product.model or '',
+        product.variant or '',
+        product.unit or 'cái',
+        product.warranty or '',
+        product.cost_price or 0,
+        product.retail_price or 0,
+        product.dealer_price or 0,
+        product.project_price or 0,
+        product.stock or 0,
+        product.low_stock or 5,
+        sale_label,
+    ]
+
+def product_import_field_labels():
+    return [label for _, label in PRODUCT_IMPORT_FIELDS]
+
+def build_products_xlsx_bytes(rows):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'San pham'
+    headers = product_import_field_labels()
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    header_fill = PatternFill('solid', fgColor='E8F0FE')
+    header_font = Font(bold=True)
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+    ws.freeze_panes = 'A2'
+    from openpyxl.utils import get_column_letter
+    widths = [14, 28, 16, 18, 14, 12, 14, 8, 12, 12, 12, 12, 12, 8, 10, 12]
+    for idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+def build_products_csv_text(rows):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(product_import_field_labels())
+    for row in rows:
+        writer.writerow(row)
+    return '\ufeff' + buf.getvalue()
 
 def build_product_import_preview(rows, update_existing=False):
     if not rows:
@@ -2286,6 +2655,19 @@ def build_product_import_preview(rows, update_existing=False):
         raise ValueError('Không có dòng dữ liệu hợp lệ trong file')
     return preview
 
+def _apply_import_taxonomy(product, data):
+    category_path = resolve_import_category_path(data)
+    if category_path:
+        product.category_id = ensure_category_from_path(category_path)
+    else:
+        product.category_id = None
+    brand_name = (data.get('brand') or '').strip()
+    if brand_name:
+        product.brand_id = ensure_brand_name(brand_name, product.category_id)
+    else:
+        product.brand_id = None
+    sync_product_taxonomy_strings(product)
+
 def import_product_data_list(items, update_existing=False):
     created = updated = skipped = errors = 0
     error_lines = []
@@ -2299,8 +2681,6 @@ def import_product_data_list(items, update_existing=False):
                 skipped += 1
                 continue
             existing.name = name
-            existing.category = data['category']
-            existing.brand = data['brand']
             existing.model = data['model']
             existing.variant = data['variant']
             existing.unit = data['unit']
@@ -2312,20 +2692,19 @@ def import_product_data_list(items, update_existing=False):
             existing.stock = data['stock']
             existing.low_stock = data['low_stock']
             existing.is_active = data['is_active']
-            if data['category']:
-                ensure_category_name(data['category'])
+            _apply_import_taxonomy(existing, data)
             updated += 1
             continue
-        if data['category']:
-            ensure_category_name(data['category'])
-        db.session.add(Product(
-            sku=sku, name=name, category=data['category'], brand=data['brand'],
+        p = Product(
+            sku=sku, name=name,
             model=data['model'], variant=data['variant'], unit=data['unit'],
             warranty=data['warranty'], cost_price=data['cost_price'],
             retail_price=data['retail_price'], dealer_price=data['dealer_price'],
             project_price=data['project_price'], stock=data['stock'],
             low_stock=data['low_stock'], is_active=data['is_active'],
-        ))
+        )
+        _apply_import_taxonomy(p, data)
+        db.session.add(p)
         created += 1
     if created == 0 and updated == 0:
         raise ValueError('Không có sản phẩm nào được import')
@@ -2342,6 +2721,7 @@ def delete_all_products_data():
     StockMovement.query.delete()
     PriceHistory.query.delete()
     Product.query.delete()
+    Brand.query.delete()
     Category.query.delete()
     db.session.commit()
     clear_product_import_session()
@@ -2412,47 +2792,495 @@ def import_products_from_rows(rows, update_existing=False):
         raise ValueError('Không có dòng hợp lệ để import')
     return import_product_data_list(importable, update_existing)
 
-def redirect_after_category_manage():
+def redirect_after_category_manage(category_import_preview=False):
     """Quay lại trang sản phẩm và mở lại modal quản lý danh mục."""
     ref = request.referrer or url_for('products')
     parts = urlparse(ref)
     qs = dict(parse_qsl(parts.query, keep_blank_values=True))
     qs['category_modal'] = '1'
+    if category_import_preview:
+        qs['category_import_preview'] = '1'
     return redirect(urlunparse(parts._replace(query=urlencode(qs))))
+
+CATEGORY_IMPORT_FIELDS = [
+    ('category_parent', 'Danh mục cha'),
+    ('category_child', 'Danh mục con'),
+    ('brand', 'Thương hiệu'),
+]
+
+CATEGORY_IMPORT_SAMPLE_ROWS = [
+    ['Điện thoại', 'Smartphone', 'Samsung'],
+    ['Điện thoại', 'Tablet', 'Apple'],
+    ['Điện thoại', 'Phụ kiện điện thoại', ''],
+    ['Camera', 'Action camera', 'DJI'],
+    ['Camera', 'Máy ảnh', 'Sony'],
+    ['Laptop', '', 'Asus'],
+]
+
+CATEGORY_IMPORT_HEADER_ALIASES = {
+    'category_parent': {'danh mục cha', 'danh muc cha', 'nhóm', 'ngành hàng', 'parent'},
+    'category_child': {'danh mục con', 'danh muc con', 'loại', 'child'},
+    'brand': {'thương hiệu', 'thuong hieu', 'brand', 'hãng'},
+    'category': {'danh mục', 'danh muc', 'category'},
+}
+
+def build_category_import_header_map(headers):
+    col_map = {}
+    for idx, raw in enumerate(headers):
+        key = normalize_import_header(raw)
+        if not key:
+            continue
+        for field, aliases in CATEGORY_IMPORT_HEADER_ALIASES.items():
+            if key in aliases or key == field:
+                col_map[field] = idx
+                break
+    return col_map
+
+def category_row_from_import(row, col_map):
+    def cell(field, default=''):
+        idx = col_map.get(field)
+        if idx is None or idx >= len(row):
+            return default
+        val = row[idx]
+        if val is None:
+            return default
+        return str(val).strip()
+
+    data = {
+        'category_parent': cell('category_parent'),
+        'category_child': cell('category_child'),
+        'brand': cell('brand'),
+    }
+    combined = cell('category')
+    if combined and not data['category_parent'] and not data['category_child']:
+        if '>' in combined:
+            parts = [p.strip() for p in combined.split('>') if p.strip()]
+            data['category_parent'] = parts[0]
+            data['category_child'] = parts[-1] if len(parts) > 1 else ''
+        else:
+            data['category_parent'] = combined
+    return data
+
+def _category_import_notes(parent_name, child_name, brand_name, parent_exists, child_exists, brand_exists):
+    parts = []
+    if parent_name and not parent_exists:
+        parts.append(f'Thêm danh mục cha: {parent_name}')
+    if child_name and not child_exists:
+        parts.append(f'Thêm danh mục con: {child_name}')
+    if brand_name and not brand_exists:
+        parts.append(f'Thêm thương hiệu: {brand_name}')
+    if not parts:
+        return 'Đã có đủ trong hệ thống'
+    return ' · '.join(parts)
+
+def build_category_import_preview(rows):
+    if not rows:
+        raise ValueError('File trống')
+    col_map = build_category_import_header_map(rows[0])
+    if 'category_parent' not in col_map and 'category' not in col_map:
+        raise ValueError('File phải có cột Danh mục cha (xem file mẫu)')
+    preview = []
+    for line_no, raw_row in enumerate(rows[1:], start=2):
+        if not any(str(c).strip() for c in raw_row):
+            continue
+        data = category_row_from_import(raw_row, col_map)
+        parent_name = data['category_parent']
+        child_name = data['category_child']
+        brand_name = data['brand']
+        row_id = uuid.uuid4().hex[:12]
+        if not parent_name and not child_name and not brand_name:
+            continue
+        if child_name and not parent_name:
+            preview.append({
+                'row_id': row_id, 'line_no': line_no, 'data': data,
+                'action': 'error', 'action_label': 'Lỗi',
+                'note': 'Có danh mục con nhưng thiếu danh mục cha',
+                'importable': False,
+            })
+            continue
+        if brand_name and not parent_name and not child_name:
+            preview.append({
+                'row_id': row_id, 'line_no': line_no, 'data': data,
+                'action': 'error', 'action_label': 'Lỗi',
+                'note': 'Thương hiệu cần gắn với danh mục cha hoặc con',
+                'importable': False,
+            })
+            continue
+        parent = None
+        if parent_name:
+            parent = Category.query.filter(
+                Category.parent_id.is_(None), Category.name == parent_name
+            ).first()
+        child = None
+        if parent and child_name:
+            child = Category.query.filter_by(parent_id=parent.id, name=child_name).first()
+        scope_id = child.id if child else (parent.id if parent else None)
+        brand = Brand.query.filter_by(name=brand_name).first() if brand_name else None
+        parent_exists = parent is not None
+        child_exists = child is not None if child_name else True
+        brand_exists = brand is not None if brand_name else True
+        will_create = (
+            (parent_name and not parent_exists)
+            or (child_name and not child_exists)
+            or (brand_name and not brand_exists)
+        )
+        if not will_create:
+            preview.append({
+                'row_id': row_id, 'line_no': line_no, 'data': data,
+                'action': 'skip', 'action_label': 'Bỏ qua',
+                'note': _category_import_notes(
+                    parent_name, child_name, brand_name,
+                    parent_exists, child_exists, brand_exists,
+                ),
+                'importable': False,
+            })
+            continue
+        preview.append({
+            'row_id': row_id, 'line_no': line_no, 'data': data,
+            'action': 'create', 'action_label': 'Thêm mới',
+            'note': _category_import_notes(
+                parent_name, child_name, brand_name,
+                parent_exists, child_exists, brand_exists,
+            ),
+            'importable': True,
+        })
+    if not preview:
+        raise ValueError('Không có dòng dữ liệu hợp lệ trong file')
+    return preview
+
+def apply_category_import_row(data):
+    created = {'parent': 0, 'child': 0, 'brand': 0}
+    parent_name = (data.get('category_parent') or '').strip()
+    child_name = (data.get('category_child') or '').strip()
+    brand_name = (data.get('brand') or '').strip()
+    parent_id = child_id = None
+    if parent_name:
+        parent = Category.query.filter(
+            Category.parent_id.is_(None), Category.name == parent_name
+        ).first()
+        if not parent:
+            parent = Category(name=parent_name)
+            db.session.add(parent)
+            db.session.flush()
+            created['parent'] += 1
+        parent_id = parent.id
+    if child_name:
+        child = Category.query.filter_by(parent_id=parent_id, name=child_name).first()
+        if not child:
+            child = Category(name=child_name, parent_id=parent_id)
+            db.session.add(child)
+            db.session.flush()
+            created['child'] += 1
+        child_id = child.id
+    scope_id = child_id or parent_id
+    if brand_name:
+        brand = Brand.query.filter_by(name=brand_name).first()
+        if not brand:
+            db.session.add(Brand(name=brand_name, category_id=scope_id))
+            created['brand'] += 1
+        elif scope_id and not brand.category_id:
+            brand.category_id = scope_id
+    return created
+
+def import_category_data_list(items):
+    totals = {'parent': 0, 'child': 0, 'brand': 0}
+    for item in items:
+        data = item.get('data') or item
+        row_created = apply_category_import_row(data)
+        for k in totals:
+            totals[k] += row_created[k]
+    if sum(totals.values()) == 0:
+        raise ValueError('Không có danh mục/thương hiệu mới nào được import')
+    db.session.commit()
+    return totals
+
+def clear_category_import_session():
+    preview_id = session.pop(CATEGORY_IMPORT_SESSION_KEY, None)
+    if preview_id:
+        path = _import_preview_path(f'cat_{preview_id}')
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+def get_category_import_session():
+    preview_id = session.get(CATEGORY_IMPORT_SESSION_KEY)
+    if not preview_id:
+        return None
+    path = _import_preview_path(f'cat_{preview_id}')
+    if not path.exists():
+        session.pop(CATEGORY_IMPORT_SESSION_KEY, None)
+        return None
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (json.JSONDecodeError, OSError):
+        clear_category_import_session()
+        return None
+
+def save_category_import_session(filename, preview_rows):
+    IMPORT_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    clear_category_import_session()
+    preview_id = uuid.uuid4().hex
+    payload = {'filename': filename, 'rows': preview_rows}
+    _import_preview_path(f'cat_{preview_id}').write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding='utf-8',
+    )
+    session[CATEGORY_IMPORT_SESSION_KEY] = preview_id
+    _cleanup_old_import_previews()
+
+def category_import_field_labels():
+    return [label for _, label in CATEGORY_IMPORT_FIELDS]
+
+def build_category_import_xlsx_bytes(rows):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Danh muc'
+    headers = category_import_field_labels()
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='E8F0FE')
+        cell.alignment = Alignment(horizontal='center')
+    ws.freeze_panes = 'A2'
+    for idx, width in enumerate([18, 20, 16], start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+def build_category_import_csv_text(rows):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(category_import_field_labels())
+    for row in rows:
+        writer.writerow(row)
+    return '\ufeff' + buf.getvalue()
+
+def taxonomy_export_rows():
+    rows = []
+    seen_brands = set()
+    for parent in parent_categories():
+        rows.append([parent.name, '', ''])
+        for child in child_categories(parent.id):
+            brand_names = [
+                b.name for b in Brand.query.filter_by(category_id=child.id).order_by(Brand.name)
+            ]
+            if brand_names:
+                for bn in brand_names:
+                    rows.append([parent.name, child.name, bn])
+                    seen_brands.add(bn)
+            else:
+                rows.append([parent.name, child.name, ''])
+        for brand in Brand.query.filter_by(category_id=parent.id).order_by(Brand.name):
+            if brand.name not in seen_brands:
+                rows.append([parent.name, '', brand.name])
+                seen_brands.add(brand.name)
+    for brand in Brand.query.filter(Brand.category_id.is_(None)).order_by(Brand.name):
+        if brand.name not in seen_brands:
+            rows.append(['', '', brand.name])
+    return rows
 
 @app.route('/categories', methods=['POST'])
 def create_category():
+    ensure_category_brand_schema()
     keep_modal = request.form.get('_keep_modal') == '1'
     name = request.form.get('name', '').strip()
+    parent_id = request.form.get('parent_id', type=int)
     if not name:
         flash('Vui lòng nhập tên danh mục', 'warning')
-    elif Category.query.filter_by(name=name).first():
-        flash('Danh mục đã tồn tại', 'danger')
+    elif category_name_exists(name, parent_id):
+        flash('Tên danh mục đã tồn tại trong nhóm này', 'danger')
+    elif parent_id and not Category.query.get(parent_id):
+        flash('Danh mục cha không hợp lệ', 'danger')
     else:
-        db.session.add(Category(name=name))
+        db.session.add(Category(name=name, parent_id=parent_id))
         db.session.commit()
-        flash('Đã tạo danh mục', 'success')
+        label = 'danh mục con' if parent_id else 'danh mục cha'
+        flash(f'Đã tạo {label}', 'success')
     if keep_modal:
         return redirect_after_category_manage()
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/categories/<int:cid>/delete', methods=['POST'])
 def delete_category(cid):
+    ensure_category_brand_schema()
     cat = Category.query.get_or_404(cid)
     name = cat.name
-    affected = Product.query.filter_by(category=name).update({Product.category: ''})
+    children = Category.query.filter_by(parent_id=cat.id).count()
+    if children:
+        flash(f'Không thể xóa "{name}" vì còn {children} danh mục con', 'danger')
+        if request.form.get('_keep_modal') == '1':
+            return redirect_after_category_manage()
+        return redirect(request.referrer or url_for('products'))
+    path = category_display_path(cat.id)
+    affected = Product.query.filter(
+        or_(Product.category_id == cat.id, Product.category == path, Product.category == cat.name)
+    ).update({Product.category_id: None, Product.category: ''})
+    Brand.query.filter_by(category_id=cat.id).update({Brand.category_id: None})
     db.session.delete(cat)
     db.session.commit()
     if affected:
         flash(f'Đã xóa danh mục "{name}". {affected} sản phẩm đã được bỏ danh mục.', 'warning')
     else:
-        flash(f'Đã xóa danh mục "{name}"', 'warning')
+        flash(f'Đã xóa danh mục "{name}"', 'success')
     if request.form.get('_keep_modal') == '1':
         return redirect_after_category_manage()
     return redirect(request.referrer or url_for('products'))
 
+@app.route('/brands', methods=['POST'])
+def create_brand():
+    ensure_category_brand_schema()
+    keep_modal = request.form.get('_keep_modal') == '1'
+    name = request.form.get('name', '').strip()
+    category_id = request.form.get('category_id', type=int)
+    if not name:
+        flash('Vui lòng nhập tên thương hiệu', 'warning')
+    elif Brand.query.filter_by(name=name).first():
+        flash('Thương hiệu đã tồn tại', 'danger')
+    else:
+        db.session.add(Brand(name=name, category_id=category_id or None))
+        db.session.commit()
+        flash('Đã tạo thương hiệu', 'success')
+    if keep_modal:
+        return redirect_after_category_manage()
+    return redirect(request.referrer or url_for('products'))
+
+@app.route('/brands/<int:bid>/delete', methods=['POST'])
+def delete_brand(bid):
+    ensure_category_brand_schema()
+    brand = Brand.query.get_or_404(bid)
+    name = brand.name
+    affected = Product.query.filter(
+        or_(Product.brand_id == brand.id, Product.brand == name)
+    ).update({Product.brand_id: None, Product.brand: ''})
+    db.session.delete(brand)
+    db.session.commit()
+    if affected:
+        flash(f'Đã xóa thương hiệu "{name}". {affected} sản phẩm đã được bỏ thương hiệu.', 'warning')
+    else:
+        flash(f'Đã xóa thương hiệu "{name}"', 'success')
+    if request.form.get('_keep_modal') == '1':
+        return redirect_after_category_manage()
+    return redirect(request.referrer or url_for('products'))
+
+@app.route('/categories/export')
+def categories_export():
+    ensure_category_brand_schema()
+    rows = taxonomy_export_rows()
+    fmt = (request.args.get('format') or 'xlsx').lower()
+    if fmt == 'csv':
+        return Response(
+            build_category_import_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=danh-muc.csv'},
+        )
+    try:
+        buf = build_category_import_xlsx_bytes(rows)
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='danh-muc.xlsx',
+        )
+    except ImportError:
+        return Response(
+            build_category_import_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=danh-muc.csv'},
+        )
+
+@app.route('/categories/import/template')
+def categories_import_template():
+    ensure_category_brand_schema()
+    rows = list(CATEGORY_IMPORT_SAMPLE_ROWS)
+    fmt = (request.args.get('format') or 'xlsx').lower()
+    if fmt == 'csv':
+        return Response(
+            build_category_import_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=mau-import-danh-muc.csv'},
+        )
+    try:
+        buf = build_category_import_xlsx_bytes(rows)
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='mau-import-danh-muc.xlsx',
+        )
+    except ImportError:
+        return Response(
+            build_category_import_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=mau-import-danh-muc.csv'},
+        )
+
+@app.route('/categories/import/preview', methods=['POST'])
+def categories_import_preview():
+    ensure_category_brand_schema()
+    file_storage = request.files.get('import_file')
+    if not file_storage or not file_storage.filename:
+        flash('Vui lòng chọn file Excel hoặc CSV', 'warning')
+        return redirect_after_category_manage()
+    try:
+        rows = read_product_import_sheet(file_storage)
+        preview = build_category_import_preview(rows)
+        save_category_import_session(file_storage.filename, preview)
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return redirect_after_category_manage()
+    except Exception as e:
+        flash(f'Không đọc được file: {e}', 'danger')
+        return redirect_after_category_manage()
+    return redirect_after_category_manage(category_import_preview=True)
+
+@app.route('/categories/import/confirm', methods=['POST'])
+def categories_import_confirm():
+    ensure_category_brand_schema()
+    payload = get_category_import_session()
+    if not payload:
+        flash('Phiên import đã hết hạn. Vui lòng tải file lại.', 'warning')
+        return redirect_after_category_manage()
+    selected_ids = set(request.form.getlist('import_row_id'))
+    to_import = [
+        r for r in payload.get('rows', [])
+        if r.get('row_id') in selected_ids and r.get('importable')
+    ]
+    if not to_import:
+        flash('Chưa chọn dòng nào để import', 'warning')
+        return redirect_after_category_manage(category_import_preview=True)
+    try:
+        totals = import_category_data_list(to_import)
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return redirect_after_category_manage(category_import_preview=True)
+    clear_category_import_session()
+    parts = []
+    if totals['parent']:
+        parts.append(f"{totals['parent']} danh mục cha")
+    if totals['child']:
+        parts.append(f"{totals['child']} danh mục con")
+    if totals['brand']:
+        parts.append(f"{totals['brand']} thương hiệu")
+    flash('Đã import: ' + ', '.join(parts), 'success')
+    return redirect_after_category_manage()
+
+@app.route('/categories/import/cancel', methods=['POST'])
+def categories_import_cancel():
+    clear_category_import_session()
+    return redirect_after_category_manage()
+
 @app.route('/products', methods=['GET', 'POST'])
 def products():
+    ensure_category_brand_schema()
     ensure_product_image_column()
     if request.method == 'POST':
         sku = request.form.get('sku', '').strip()
@@ -2464,13 +3292,14 @@ def products():
             flash('SKU đã tồn tại', 'danger')
             return redirect(url_for('products'))
         p = Product(
-            sku=sku, name=name, category=request.form.get('category', ''), brand=request.form.get('brand', ''),
+            sku=sku, name=name,
             warranty=request.form.get('warranty', ''),
             cost_price=parse_int(request.form.get('cost_price')),
             retail_price=parse_int(request.form.get('retail_price')),
             project_price=parse_int(request.form.get('project_price')),
             stock=parse_int(request.form.get('stock')),
         )
+        assign_product_taxonomy_from_form(p)
         db.session.add(p)
         db.session.flush()
         if not save_product_image(p, request.files.get('image')):
@@ -2486,10 +3315,8 @@ def products():
     query = apply_product_filters(Product.query, filters)
     pagination = query.order_by(Product.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     categories = Category.query.order_by(Category.name).all()
-    if not categories:
-        for cat_name in ['Camera', 'Điện thoại', 'Laptop', 'Phụ kiện', 'Âm thanh', 'Thiết bị thông minh']:
-            db.session.add(Category(name=cat_name))
-        db.session.commit()
+    if not parent_categories():
+        seed_product_taxonomy()
         categories = Category.query.order_by(Category.name).all()
     list_args = {k: v for k, v in filters.items() if v}
     list_args['per_page'] = per_page
@@ -2505,20 +3332,29 @@ def products():
         products=pagination.items,
         categories=categories,
         category_counts=category_product_counts(),
+        brand_counts=brand_product_counts(),
+        category_tree=build_category_tree(),
+        parent_categories=parent_categories(),
+        brands_list=Brand.query.order_by(Brand.name).all(),
         filters=filters,
         per_page=per_page,
         list_args=list_args,
         export_args=export_args,
         brands=product_brand_options(),
+        taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
+        brands_catalog_json=json.dumps(brands_catalog_json(), ensure_ascii=False),
         price_histories=price_histories,
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
         import_preview_payload=get_product_import_session(),
         show_import_preview=bool(request.args.get('import_preview')),
+        category_import_preview_payload=get_category_import_session(),
+        show_category_import_preview=bool(request.args.get('category_import_preview')),
     )
 
 @app.route('/products/<int:pid>/update', methods=['POST'])
 def update_product(pid):
+    ensure_category_brand_schema()
     ensure_product_image_column()
     p = Product.query.get_or_404(pid)
     sku = request.form.get('sku', '').strip()
@@ -2553,73 +3389,61 @@ def update_price(pid):
 
 @app.route('/products/export')
 def products_export():
-    ensure_product_columns()
+    ensure_category_brand_schema()
     filters = product_filters_from_request()
     query = apply_product_filters(Product.query, filters).order_by(Product.created_at.desc())
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(['SKU', 'Tên sản phẩm', 'Danh mục', 'Thương hiệu', 'Tồn kho', 'Giá bán lẻ', 'Giá dự án', 'Trạng thái'])
-    for p in query.all():
-        sale_key, sale_label = product_sale_status(p)
-        writer.writerow([
-            p.sku,
-            p.name,
-            p.category or '',
-            p.brand or '',
-            p.stock,
-            p.retail_price,
-            p.project_price,
-            sale_label,
-        ])
-    return Response(
-        '\ufeff' + buf.getvalue(),
-        mimetype='text/csv; charset=utf-8',
-        headers={'Content-Disposition': 'attachment; filename=san-pham.csv'},
-    )
+    rows = [product_to_export_row(p) for p in query.all()]
+    fmt = (request.args.get('format') or 'xlsx').lower()
+    if fmt == 'csv':
+        return Response(
+            build_products_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=san-pham.csv'},
+        )
+    try:
+        buf = build_products_xlsx_bytes(rows)
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='san-pham.xlsx',
+        )
+    except ImportError:
+        return Response(
+            build_products_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=san-pham.csv'},
+        )
 
 @app.route('/products/import/template')
 def products_import_template():
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill
-    except ImportError:
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow([label for _, label in PRODUCT_IMPORT_FIELDS])
-        writer.writerow([
-            'SP-001', 'Sản phẩm mẫu', 'Camera', 'DJI', '', '', 'cái', '12 tháng',
-            5000000, 8900000, 8500000, 8700000, 10, 5, 'Đang bán',
-        ])
+    ensure_category_brand_schema()
+    rows = [PRODUCT_IMPORT_SAMPLE_ROW]
+    fmt = (request.args.get('format') or 'xlsx').lower()
+    if fmt == 'csv':
         return Response(
-            '\ufeff' + buf.getvalue(),
+            build_products_csv_text(rows),
             mimetype='text/csv; charset=utf-8',
             headers={'Content-Disposition': 'attachment; filename=mau-import-san-pham.csv'},
         )
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'San pham'
-    headers = [label for _, label in PRODUCT_IMPORT_FIELDS]
-    ws.append(headers)
-    ws.append([
-        'SP-001', 'Sản phẩm mẫu', 'Camera', 'DJI', '', '', 'cái', '12 tháng',
-        5000000, 8900000, 8500000, 8700000, 10, 5, 'Đang bán',
-    ])
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill('solid', fgColor='E8F0FE')
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return send_file(
-        buf,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name='mau-import-san-pham.xlsx',
-    )
+    try:
+        buf = build_products_xlsx_bytes(rows)
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='mau-import-san-pham.xlsx',
+        )
+    except ImportError:
+        return Response(
+            build_products_csv_text(rows),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=mau-import-san-pham.csv'},
+        )
 
 @app.route('/products/import/preview', methods=['POST'])
 def products_import_preview():
-    ensure_product_columns()
+    ensure_category_brand_schema()
     file_storage = request.files.get('import_file')
     if not file_storage or not file_storage.filename:
         flash('Vui lòng chọn file Excel hoặc CSV', 'warning')
@@ -2639,7 +3463,7 @@ def products_import_preview():
 
 @app.route('/products/import/confirm', methods=['POST'])
 def products_import_confirm():
-    ensure_product_columns()
+    ensure_category_brand_schema()
     payload = get_product_import_session()
     if not payload:
         flash('Phiên import đã hết hạn. Vui lòng tải file lại.', 'warning')
@@ -3533,6 +4357,37 @@ def create_template_docx():
     table.rows[0].cells[1].text = 'ĐẠI DIỆN BÊN B'
     doc.save(TEMPLATE_DOCX)
 
+def seed_product_taxonomy():
+    tree = {
+        'Điện thoại': ['Smartphone', 'Tablet', 'Phụ kiện điện thoại'],
+        'Camera': ['Action camera', 'Máy ảnh', 'Phụ kiện camera'],
+        'Laptop': ['Laptop gaming', 'Laptop văn phòng', 'Phụ kiện laptop'],
+        'Phụ kiện': ['Tai nghe', 'Sạc & cáp', 'Ốp lưng'],
+        'Âm thanh': ['Loa', 'Micro', 'Amply'],
+        'Thiết bị thông minh': ['Smartwatch', 'Nhà thông minh'],
+    }
+    brand_map = {
+        'Samsung': 'Điện thoại',
+        'Apple': 'Điện thoại',
+        'DJI': 'Camera',
+        'Sony': 'Camera',
+        'Asus': 'Laptop',
+        'JBL': 'Âm thanh',
+    }
+    parent_by_name = {}
+    for parent_name, children in tree.items():
+        parent = Category(name=parent_name)
+        db.session.add(parent)
+        db.session.flush()
+        parent_by_name[parent_name] = parent
+        for child_name in children:
+            db.session.add(Category(name=child_name, parent_id=parent.id))
+    db.session.flush()
+    for brand_name, parent_name in brand_map.items():
+        parent = parent_by_name.get(parent_name)
+        db.session.add(Brand(name=brand_name, category_id=parent.id if parent else None))
+    db.session.commit()
+
 def init_db(seed=False):
     DB_PATH.parent.mkdir(exist_ok=True)
     PRODUCT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -3549,18 +4404,24 @@ def init_db(seed=False):
     ORDER_HANDOVER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ensure_company_profile()
+    ensure_category_brand_schema()
     if seed and Customer.query.count() == 0:
         c = Customer(name='CÔNG TY CP XĂNG DẦU DẦU KHÍ NINH BÌNH', tax_code='2700275814', address='Khu công nghiệp Ninh Phúc, Phường Đông Hoa Lư, Tỉnh Ninh Bình', phone='0229.3854065', representative='Ông Quách Trọng Phụng', position='Phó Giám đốc', bank_account='4830006372', bank_name='BIDV chi nhánh Ninh Bình')
         db.session.add(c)
-    if seed and Category.query.count() == 0:
-        for cat_name in ['Camera', 'Điện thoại', 'Laptop', 'Phụ kiện', 'Âm thanh', 'Thiết bị thông minh']:
-            db.session.add(Category(name=cat_name))
+    if seed and not parent_categories():
+        seed_product_taxonomy()
     if seed and Product.query.count() == 0:
-        products = [
-            Product(sku='A53-128-BLK', name='Samsung A53 6/128 Đen', category='Điện thoại', brand='Samsung', model='A53', variant='6/128 Đen', retail_price=5000000, project_price=4800000, stock=10, warranty='12 tháng'),
-            Product(sku='DJI-A4-COMBO', name='DJI Action 4 Adventure Combo', category='Camera', brand='DJI', model='Action 4', variant='Adventure Combo', retail_price=8900000, project_price=8500000, stock=3, warranty='12 tháng'),
+        phone_cat = find_category_id_by_path('Điện thoại > Smartphone') or find_category_id_by_path('Điện thoại')
+        cam_cat = find_category_id_by_path('Camera > Action camera') or find_category_id_by_path('Camera')
+        samsung = Brand.query.filter_by(name='Samsung').first()
+        dji = Brand.query.filter_by(name='DJI').first()
+        demos = [
+            Product(sku='A53-128-BLK', name='Samsung A53 6/128 Đen', category_id=phone_cat, brand_id=samsung.id if samsung else None, model='A53', variant='6/128 Đen', retail_price=5000000, project_price=4800000, stock=10, warranty='12 tháng'),
+            Product(sku='DJI-A4-COMBO', name='DJI Action 4 Adventure Combo', category_id=cam_cat, brand_id=dji.id if dji else None, model='Action 4', variant='Adventure Combo', retail_price=8900000, project_price=8500000, stock=3, warranty='12 tháng'),
         ]
-        db.session.add_all(products)
+        for p in demos:
+            sync_product_taxonomy_strings(p)
+        db.session.add_all(demos)
     if seed and Order.query.count() == 0:
         customer = Customer.query.first()
         if customer:

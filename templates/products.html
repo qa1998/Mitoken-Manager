@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/product_thumb.html' import product_thumb %}
-{% from 'partials/product_category_picker.html' import product_category_picker %}
+{% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% block title %}Sản phẩm — Business Web{% endblock %}
 {% block content %}
 
@@ -18,11 +18,18 @@
     </div>
     <div class="product-page-actions">
       <button type="button" class="btn btn-light btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#categoryModal">
-        <i class="bi bi-folder2 me-2"></i>Quản lý danh mục
+        <i class="bi bi-folder2 me-2"></i>Danh mục &amp; thương hiệu
       </button>
-      <a href="{{ url_for('products_export', **export_args) }}" class="btn btn-light btn-product-toolbar">
-        <i class="bi bi-download me-2"></i>Export Excel
-      </a>
+      <div class="btn-group">
+        <a href="{{ url_for('products_export', **export_args) }}" class="btn btn-light btn-product-toolbar">
+          <i class="bi bi-download me-2"></i>Export Excel
+        </a>
+        <button type="button" class="btn btn-light btn-product-toolbar dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><a class="dropdown-item" href="{{ url_for('products_export', format='xlsx', **export_args) }}">Tải .xlsx</a></li>
+          <li><a class="dropdown-item" href="{{ url_for('products_export', format='csv', **export_args) }}">Tải .csv</a></li>
+        </ul>
+      </div>
       <button type="button" class="btn btn-light btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#importProductModal">
         <i class="bi bi-upload me-2"></i>Import Excel
       </button>
@@ -49,20 +56,28 @@
       </div>
       <div class="product-filter-fields-row">
         <div class="product-filter-field">
-          <label class="product-filter-label">Danh mục</label>
-          <select name="category" class="form-select">
+          <label class="product-filter-label">Danh mục cha</label>
+          <select name="category_parent_id" class="form-select product-filter-parent">
             <option value="">Tất cả</option>
-            {% for cat in categories %}
-            <option value="{{ cat.name }}" {% if filters.category == cat.name %}selected{% endif %}>{{ cat.name }}</option>
+            {% for p in parent_categories %}
+            <option value="{{ p.id }}" {% if filters.category_parent_id == p.id %}selected{% endif %}>{{ p.name }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="product-filter-field">
-          <label class="product-filter-label">Thương hiệu</label>
-          <select name="brand" class="form-select">
+          <label class="product-filter-label">Danh mục con</label>
+          <select name="category_id" class="form-select product-filter-child"
+                  data-selected="{{ filters.category_id or '' }}">
             <option value="">Tất cả</option>
-            {% for b in brands %}
-            <option value="{{ b }}" {% if filters.brand == b %}selected{% endif %}>{{ b }}</option>
+          </select>
+        </div>
+        <div class="product-filter-field">
+          <label class="product-filter-label">Thương hiệu</label>
+          <select name="brand_id" class="form-select product-filter-brand">
+            <option value="">Tất cả</option>
+            {% for b in brands_list %}
+            <option value="{{ b.id }}" data-category-id="{{ b.category_id or '' }}"
+              {% if filters.brand_id == b.id %}selected{% endif %}>{{ b.name }}</option>
             {% endfor %}
           </select>
         </div>
@@ -113,11 +128,12 @@
               </div>
             </td>
             <td>
-              {% if p.category %}
-              <span class="category-tag {{ category_tag(p.category) }}">{{ p.category }}</span>
+              {% set cat_path = product_category_path(p) %}
+              {% if cat_path %}
+              <span class="category-tag {{ category_tag(cat_path) }}">{{ cat_path }}</span>
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
-            <td>{{ p.brand or '—' }}</td>
+            <td>{{ product_brand_name(p) or '—' }}</td>
             <td class="money product-price-td">{{ p.retail_price|money }}</td>
             <td>{{ p.warranty or '—' }}</td>
             <td>
@@ -242,13 +258,9 @@
               <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
               <input type="text" name="name" class="form-control" required placeholder="Nhập tên sản phẩm">
             </div>
-            <div class="col-md-6">
-              <label class="form-label-custom">Danh mục</label>
-              {{ product_category_picker(categories) }}
-            </div>
-            <div class="col-md-6">
-              <label class="form-label-custom">Thương hiệu</label>
-              <input type="text" name="brand" class="form-control" placeholder="VD: Samsung, DJI">
+            <div class="col-12">
+              <label class="form-label-custom">Danh mục &amp; thương hiệu</label>
+              {{ product_taxonomy_picker(parent_categories, brands_list) }}
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Tồn kho</label>
@@ -286,48 +298,8 @@
   </div>
 </div>
 
-<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title fw-bold">Quản lý danh mục</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <form method="post" action="{{ url_for('create_category') }}" class="mb-4">
-          <input type="hidden" name="_keep_modal" value="1">
-          <label class="form-label-custom">Thêm danh mục mới <span class="text-danger">*</span></label>
-          <div class="d-flex gap-2">
-            <input type="text" name="name" class="form-control" required placeholder="Nhập tên danh mục">
-            <button type="submit" class="btn btn-primary text-nowrap">Thêm</button>
-          </div>
-        </form>
-        <label class="form-label-custom">Danh sách danh mục</label>
-        <div class="category-manage-list">
-          {% for cat in categories %}
-          <div class="category-manage-item">
-            <div class="category-manage-info">
-              <span class="category-tag {{ category_tag(cat.name) }}">{{ cat.name }}</span>
-              <span class="small-muted">{{ category_counts.get(cat.id, 0) }} sản phẩm</span>
-            </div>
-            <form method="post" action="{{ url_for('delete_category', cid=cat.id) }}" class="m-0 category-delete-form" data-name="{{ cat.name }}" data-count="{{ category_counts.get(cat.id, 0) }}">
-              <input type="hidden" name="_keep_modal" value="1">
-              <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa danh mục">
-                <i class="bi bi-trash"></i>
-              </button>
-            </form>
-          </div>
-          {% else %}
-          <p class="text-muted small mb-0">Chưa có danh mục</p>
-          {% endfor %}
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
-      </div>
-    </div>
-  </div>
-</div>
+{% include 'partials/category_brand_manage_modal.html' %}
+{% include 'partials/category_import_modal.html' %}
 
 <div class="modal fade product-page-modal" id="importProductModal" tabindex="-1" aria-hidden="true"
      data-show-preview="{% if show_import_preview and import_preview_payload %}1{% else %}0{% endif %}">
@@ -343,13 +315,20 @@
           <p class="small-muted mb-3">
             Tải file mẫu, điền dữ liệu (mỗi dòng một sản phẩm), rồi upload để xem trước trước khi import.
           </p>
-          <a href="{{ url_for('products_import_template') }}" class="btn btn-outline-primary btn-sm mb-3">
-            <i class="bi bi-file-earmark-excel me-1"></i> Tải file mẫu Excel
-          </a>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <a href="{{ url_for('products_import_template') }}" class="btn btn-outline-primary btn-sm">
+              <i class="bi bi-file-earmark-excel me-1"></i> File mẫu .xlsx
+            </a>
+            <a href="{{ url_for('products_import_template', format='csv') }}" class="btn btn-outline-secondary btn-sm">File mẫu .csv</a>
+          </div>
+          <div class="import-format-hint small-muted mb-3">
+            <strong>Bắt buộc:</strong> SKU, Tên sản phẩm.<br>
+            <strong>Danh mục:</strong> cột <em>Danh mục cha</em> + <em>Danh mục con</em>, hoặc cột <em>Danh mục</em> dạng <code>Cha &gt; Con</code>.<br>
+            Export và import dùng cùng định dạng cột.
+          </div>
           <div class="mb-3">
             <label class="form-label-custom">Chọn file <span class="text-danger">*</span></label>
             <input type="file" name="import_file" class="form-control" accept=".xlsx,.xlsm,.csv" required>
-            <div class="form-text">Cột bắt buộc: <strong>SKU</strong>, <strong>Tên sản phẩm</strong></div>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="update_existing" value="1" id="importUpdateExisting">
@@ -390,7 +369,9 @@
                     <th>Dòng</th>
                     <th>SKU</th>
                     <th>Tên sản phẩm</th>
-                    <th>Danh mục</th>
+                    <th>DM cha</th>
+                    <th>DM con</th>
+                    <th>Thương hiệu</th>
                     <th class="text-end">Giá bán</th>
                     <th>Trạng thái</th>
                     <th></th>
@@ -412,7 +393,9 @@
                     <td>{{ row.line_no }}</td>
                     <td class="fw-semibold">{{ d.sku }}</td>
                     <td>{{ d.name }}</td>
-                    <td>{{ d.category or '—' }}</td>
+                    <td>{{ d.category_parent or '—' }}</td>
+                    <td>{{ d.category_child or '—' }}</td>
+                    <td>{{ d.brand or '—' }}</td>
                     <td class="text-end text-nowrap">{{ d.retail_price|money }}</td>
                     <td>
                       <span class="import-action-badge action-{{ row.action }}">{{ row.action_label }}</span>
@@ -443,6 +426,9 @@
     </div>
   </div>
 </div>
+
+<script id="taxonomyCatalogData" type="application/json">{{ taxonomy_catalog_json|safe }}</script>
+<script id="brandsCatalogData" type="application/json">{{ brands_catalog_json|safe }}</script>
 
 {% endblock %}
 {% block extra_js %}

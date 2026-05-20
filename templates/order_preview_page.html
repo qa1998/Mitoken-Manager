@@ -29,6 +29,12 @@
         <i class="bi bi-printer me-1"></i> In trang
       </button>
       <a class="btn btn-secondary" href="{{ url_for('orders') }}">Quay lại</a>
+      <form method="post" action="{{ url_for('delete_order', oid=order.id) }}" class="d-inline order-delete-form" data-code="{{ order.order_code }}">
+        <input type="hidden" name="_from" value="preview">
+        <button type="submit" class="btn btn-outline-danger">
+          <i class="bi bi-trash me-1"></i> Xóa hóa đơn
+        </button>
+      </form>
     </div>
   </div>
 </div>
@@ -58,4 +64,7 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/orders.js') }}"></script>
 {% endblock %}

@@ -95,7 +95,7 @@
             </div>
             {% else %}—{% endif %}
           </td>
-          <td class="text-end">
+          <td class="text-end table-actions-cell">
             <div class="dropdown">
               <button class="btn btn-outline-secondary btn-action-dots" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-three-dots-vertical"></i>
@@ -109,6 +109,19 @@
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}" data-hub-tab="history"><i class="bi bi-clock-history me-2"></i>Lịch sử giao dịch</button></li>
                 <li><hr class="dropdown-divider"></li>
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editModal{{ c.id }}"><i class="bi bi-pencil me-2"></i>Cập nhật</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <form method="post" action="{{ url_for('delete_customer', cid=c.id) }}" class="m-0 customer-delete-form" data-name="{{ c.name }}">
+                    <input type="hidden" name="_q" value="{{ q }}">
+                    <input type="hidden" name="_page" value="{{ pagination.page }}">
+                    <input type="hidden" name="_per_page" value="{{ per_page }}">
+                    <input type="hidden" name="_sort" value="{{ sort }}">
+                    <input type="hidden" name="_order" value="{{ order }}">
+                    <button type="submit" class="dropdown-item text-danger">
+                      <i class="bi bi-trash me-2"></i>Xóa khách hàng
+                    </button>
+                  </form>
+                </li>
               </ul>
             </div>
           </td>

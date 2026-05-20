@@ -124,4 +124,15 @@ document.addEventListener('DOMContentLoaded', function () {
       }, 400);
     });
   });
+
+  document.querySelectorAll('.customer-delete-form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      var name = form.getAttribute('data-name') || 'khách hàng này';
+      var msg =
+        'Xóa khách hàng "' +
+        name +
+        '"?\n\nToàn bộ báo giá, đơn hàng, hợp đồng và thanh toán liên quan cũng sẽ bị xóa. Thao tác không thể hoàn tác.';
+      if (!confirm(msg)) e.preventDefault();
+    });
+  });
 });

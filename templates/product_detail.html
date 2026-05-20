@@ -1,0 +1,240 @@
+{% extends 'base.html' %}
+{% block title %}{{ p.name }} — Chi tiết sản phẩm{% endblock %}
+{% block content %}
+
+{% set imgs = product_image_urls(p) %}
+{% set sale_key, sale_label = product_list_status(p) %}
+{% set cat_path = product_category_path(p) %}
+{% set brand_name = product_brand_name(p) %}
+{% set stock_low = p.stock <= p.low_stock %}
+
+<div class="product-detail-page">
+  <div class="product-detail-topbar">
+    <div class="product-detail-topbar-left">
+      <a href="{{ url_for('products') }}" class="btn btn-light btn-product-detail-back" aria-label="Quay lại">
+        <i class="bi bi-arrow-left"></i>
+      </a>
+      <h1 class="product-detail-topbar-title">Chi tiết sản phẩm</h1>
+    </div>
+    <div class="product-detail-topbar-actions">
+      <button type="button" class="btn btn-light btn-product-detail-edit js-open-product-modal" data-modal-target="#productEdit{{ p.id }}">
+        <i class="bi bi-pencil me-2"></i>Chỉnh sửa
+      </button>
+      <div class="dropdown">
+        <button class="btn btn-light btn-product-detail-more" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-three-dots"></i>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
+          <li>
+            <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
+              <i class="bi bi-tag me-2"></i>Sửa giá
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productStock{{ p.id }}">
+              <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPriceHistory{{ p.id }}">
+              <i class="bi bi-clock-history me-2"></i>Lịch sử giá
+            </button>
+          </li>
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <form method="post" action="{{ url_for('toggle_product_active', pid=p.id) }}" class="m-0">
+              <input type="hidden" name="_from_detail" value="1">
+              <input type="hidden" name="_pid" value="{{ p.id }}">
+              <button type="submit" class="dropdown-item text-danger">
+                <i class="bi bi-power me-2"></i>{% if p.is_active %}Ngừng bán{% else %}Bật bán lại{% endif %}
+              </button>
+            </form>
+          </li>
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <form method="post" action="{{ url_for('delete_product', pid=p.id) }}" class="m-0 product-delete-form" data-name="{{ p.name }}">
+              <input type="hidden" name="_from_detail" value="1">
+              <button type="submit" class="dropdown-item text-danger">
+                <i class="bi bi-trash me-2"></i>Xóa sản phẩm
+              </button>
+            </form>
+          </li>
+        </ul>
+      </div>
+      <a href="{{ url_for('products') }}" class="btn btn-primary btn-product-detail-back-list">Quay lại danh sách</a>
+    </div>
+  </div>
+
+  <div class="panel-card product-detail-card">
+    <div class="row g-4 g-xl-5">
+      <div class="col-lg-5">
+        <div class="product-detail-gallery"{% if imgs %} data-images='{{ imgs|tojson }}'{% endif %}>
+          <div class="product-detail-main-image">
+            {% if imgs %}
+            <img src="{{ imgs[0] }}" alt="{{ p.name }}" id="productDetailMainImg">
+            {% else %}
+            <div class="product-detail-no-image">
+              <i class="bi bi-image"></i>
+              <span>Chưa có ảnh</span>
+            </div>
+            {% endif %}
+          </div>
+          {% if imgs %}
+          <div class="product-detail-thumbs" data-count="{{ imgs|length }}">
+            {% for url in imgs %}
+            <button type="button"
+                    class="product-detail-thumb{% if loop.first %} is-active{% endif %}"
+                    data-index="{{ loop.index0 }}"
+                    aria-label="Ảnh {{ loop.index }}">
+              <img src="{{ url }}" alt="">
+            </button>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+        <section class="product-detail-section">
+          <h3 class="product-detail-section-title">Mô tả sản phẩm</h3>
+          <p class="product-detail-text product-detail-empty-text">Chưa có mô tả sản phẩm.</p>
+        </section>
+
+        <section class="product-detail-section">
+          <h3 class="product-detail-section-title">Tính năng nổi bật</h3>
+          <p class="product-detail-text product-detail-empty-text mb-0">Chưa có thông tin tính năng.</p>
+        </section>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="product-detail-summary">
+          <h2 class="product-detail-name">{{ p.name }}</h2>
+          <div class="product-detail-badges">
+            <span class="product-detail-badge status-{{ sale_key }}">{{ sale_label }}</span>
+            {% if brand_name %}
+            <span class="product-detail-badge badge-genuine">Chính hãng</span>
+            {% endif %}
+            {% if stock_low and p.stock > 0 %}
+            <span class="product-detail-badge badge-warning">Tồn thấp</span>
+            {% elif p.stock <= 0 %}
+            <span class="product-detail-badge badge-danger">Hết hàng</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="product-detail-info-grid">
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">SKU</span>
+            <span class="product-detail-info-value">{{ p.sku }}</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Danh mục</span>
+            <span class="product-detail-info-value">{{ cat_path or '—' }}</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Thương hiệu</span>
+            <span class="product-detail-info-value">{{ brand_name or '—' }}</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Model</span>
+            <span class="product-detail-info-value">{{ p.model or '—' }}</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Biến thể</span>
+            <span class="product-detail-info-value">{{ p.variant or '—' }}</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Đơn vị</span>
+            <span class="product-detail-info-value">{{ p.unit or 'cái' }}</span>
+          </div>
+          <div class="product-detail-info-item product-detail-info-item-wide">
+            <span class="product-detail-info-label">Bảo hành</span>
+            <span class="product-detail-info-value">
+              {% if p.warranty %}
+              <i class="bi bi-shield-check text-primary me-1"></i>{{ p.warranty }}
+              {% else %}—{% endif %}
+            </span>
+          </div>
+        </div>
+
+        <section class="product-detail-block">
+          <h3 class="product-detail-block-title">Giá</h3>
+          <div class="row g-3 product-detail-metric-row">
+            <div class="col-md-4">
+              <div class="product-detail-metric">
+                <span class="product-detail-metric-label">Giá bán lẻ</span>
+                <span class="product-detail-metric-value price-retail">{{ p.retail_price|money }}</span>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="product-detail-metric">
+                <span class="product-detail-metric-label">Giá đại lý</span>
+                <span class="product-detail-metric-value price-dealer">{{ p.dealer_price|money }}</span>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="product-detail-metric">
+                <span class="product-detail-metric-label">Giá dự án</span>
+                <span class="product-detail-metric-value price-project">{{ p.project_price|money }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="product-detail-block">
+          <h3 class="product-detail-block-title">Tồn kho</h3>
+          <div class="row g-3 product-detail-metric-row">
+            <div class="col-md-4">
+              <div class="product-detail-metric">
+                <span class="product-detail-metric-label">Tồn kho hiện tại</span>
+                <span class="product-detail-metric-value stock-current{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">{{ p.stock }}</span>
+                <span class="product-detail-metric-unit">{{ p.unit or 'cái' }}</span>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="product-detail-metric">
+                <span class="product-detail-metric-label">Tồn tối thiểu</span>
+                <span class="product-detail-metric-value">{{ p.low_stock }}</span>
+                <span class="product-detail-metric-unit">{{ p.unit or 'cái' }}</span>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="product-detail-metric">
+                <span class="product-detail-metric-label">Tồn khả dụng</span>
+                <span class="product-detail-metric-value">{{ p.stock }}</span>
+                <span class="product-detail-metric-unit">{{ p.unit or 'cái' }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="product-detail-block product-detail-block-last">
+          <h3 class="product-detail-block-title">Thông tin khác</h3>
+          <div class="product-detail-meta-grid">
+            <div class="product-detail-meta-item">
+              <span class="product-detail-meta-label">Ngày tạo</span>
+              <span class="product-detail-meta-value">
+                {% if p.created_at %}{{ p.created_at.strftime('%d/%m/%Y %H:%M') }}{% else %}—{% endif %}
+              </span>
+            </div>
+            <div class="product-detail-meta-item">
+              <span class="product-detail-meta-label">Giá nhập</span>
+              <span class="product-detail-meta-value">{{ p.cost_price|money }}</span>
+            </div>
+            <div class="product-detail-meta-item">
+              <span class="product-detail-meta-label">Mã vạch</span>
+              <span class="product-detail-meta-value">{{ product_barcode(p) or '—' }}</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% include 'partials/product_modals.html' %}
+
+<script id="taxonomyCatalogData" type="application/json">{{ taxonomy_catalog_json|safe }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/products.js') }}"></script>
+{% endblock %}

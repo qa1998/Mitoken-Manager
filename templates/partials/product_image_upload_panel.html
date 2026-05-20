@@ -1,0 +1,59 @@
+{% macro product_image_upload_panel(product=none, editable=false) %}
+{% set imgs = product_image_urls(product) if product else [] %}
+{% set paths = product_image_paths(product) if product else [] %}
+{% set existing_count = paths|length %}
+{% set slots_left = max_product_images - existing_count %}
+{% set show_actions = editable and imgs|length > 0 %}
+<div class="product-images-panel" data-max-images="{{ max_product_images }}" data-existing-count="{{ existing_count }}">
+  <label class="form-label-custom mb-1">Ảnh sản phẩm</label>
+  <div class="product-images-counter small-muted mb-2">
+    {{ existing_count }}/{{ max_product_images }} ảnh{% if slots_left > 0 %} — còn thêm được {{ slots_left }} ảnh{% else %} — đã đủ tối đa{% endif %}
+  </div>
+  <div class="product-images-layout">
+    <div class="product-images-left-col">
+      <div class="product-images-strip">
+        <div class="product-images-strip-scroll">
+          {% if editable and imgs %}
+          {% for url in imgs %}
+          <div class="product-image-thumb-wrap{% if loop.first %} is-selected{% endif %}" data-existing="1" data-index="{{ loop.index0 }}">
+            <button type="button" class="product-image-thumb" aria-label="Ảnh {{ loop.index }}">
+              <img src="{{ url }}" alt="">
+            </button>
+            <input type="checkbox" name="remove_image_idx" value="{{ loop.index0 }}" class="product-image-remove-check visually-hidden" tabindex="-1" aria-label="Đánh dấu xóa ảnh {{ loop.index }}">
+          </div>
+          {% endfor %}
+          {% endif %}
+          <div class="product-images-new-strip"></div>
+          <button type="button" class="product-image-slot-placeholder{% if slots_left <= 0 and existing_count >= max_product_images %} d-none{% endif %}" aria-label="Thêm ảnh">
+            <span class="product-image-slot-placeholder-inner">
+              <span class="product-image-slot-placeholder-plus">+</span><span class="product-image-slot-placeholder-num">{{ slots_left if (editable and imgs) else max_product_images }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+      <div class="product-images-actions-bar"{% if not show_actions %} hidden{% endif %}>
+        <button type="button" class="btn btn-sm btn-primary product-image-replace-btn">
+          <i class="bi bi-cloud-upload me-1"></i>Thay đổi ảnh
+        </button>
+        <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none product-image-delete-btn">
+          <i class="bi bi-trash me-1"></i>Xóa
+        </button>
+      </div>
+    </div>
+    <label class="product-images-dropzone{% if slots_left <= 0 and existing_count >= max_product_images %} is-disabled{% endif %}">
+      <input type="file"
+             name="images"
+             class="product-images-file-input"
+             accept="image/jpeg,image/png,image/webp,image/*"
+             multiple="multiple"
+             data-max-images="{{ max_product_images }}">
+      <i class="bi bi-cloud-arrow-up product-images-dropzone-icon"></i>
+      <span class="product-images-dropzone-title">Kéo thả ảnh vào đây hoặc chọn tệp từ máy tính</span>
+      <span class="product-images-dropzone-formats">JPG, PNG, WEBP tối đa 5MB mỗi ảnh</span>
+    </label>
+  </div>
+  <p class="product-images-hint small-muted mb-0 mt-2">
+    Chọn tối đa {{ max_product_images }} ảnh, mỗi ảnh tối đa 5MB. Bấm &quot;Xóa&quot; trên ảnh đang chọn để gỡ trước khi lưu.
+  </p>
+</div>
+{% endmacro %}

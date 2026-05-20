@@ -5,6 +5,7 @@ import uuid
 import csv
 import io
 from datetime import datetime, date, timedelta
+from types import SimpleNamespace
 from decimal import Decimal
 from pathlib import Path
 from urllib.request import urlopen
@@ -13,7 +14,6 @@ from flask import Flask, render_template, request, redirect, url_for, flash, sen
 from werkzeug.utils import secure_filename
 from sqlalchemy import func, or_
 from flask_sqlalchemy import SQLAlchemy
-from markupsafe import escape
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -30,12 +30,16 @@ QUOTE_DOCS_DIR = OUTPUT_DIR / 'quotes'
 PRODUCT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'products'
 COMPANY_LOGO_DIR = BASE_DIR / 'static' / 'uploads' / 'company'
 CONTRACT_SIGNED_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'contracts' / 'signed'
+CONTRACT_DRAFT_SESSION_KEY = 'contract_draft_doc_path'
+TEMP_DOC_DIR = BASE_DIR / 'instance' / 'temp_docs'
+DOCX_MIMETYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ORDER_HANDOVER_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'orders' / 'handover'
 PAYMENT_RECEIPT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'payments' / 'receipts'
 ALLOWED_ORDER_HANDOVER_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 ALLOWED_CONTRACT_SCAN_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.pdf'}
 MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_PRODUCT_IMAGES = 5
 MAX_CONTRACT_SCAN_BYTES = 10 * 1024 * 1024
 
 app = Flask(__name__)
@@ -97,6 +101,7 @@ class Product(db.Model):
     stock = db.Column(db.Integer, default=0)
     low_stock = db.Column(db.Integer, default=5)
     image_path = db.Column(db.String(255), default='')
+    image_paths = db.Column(db.Text, default='')
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -487,33 +492,91 @@ def ensure_product_columns():
     with db.engine.begin() as conn:
         if 'image_path' not in cols:
             conn.execute(text('ALTER TABLE product ADD COLUMN image_path VARCHAR(255) DEFAULT ""'))
+        if 'image_paths' not in cols:
+            conn.execute(text('ALTER TABLE product ADD COLUMN image_paths TEXT DEFAULT ""'))
         if 'is_active' not in cols:
             conn.execute(text('ALTER TABLE product ADD COLUMN is_active BOOLEAN DEFAULT 1'))
+    _migrate_product_image_paths()
+
+def _migrate_product_image_paths():
+    rows = Product.query.filter(
+        Product.image_path != '',
+        or_(Product.image_paths == '', Product.image_paths.is_(None)),
+    ).all()
+    if not rows:
+        return
+    for p in rows:
+        sync_product_images(p, [p.image_path])
+    db.session.commit()
 
 def ensure_product_image_column():
     ensure_product_columns()
 
+def product_image_paths(product):
+    if not product:
+        return []
+    paths = []
+    raw = getattr(product, 'image_paths', '') or ''
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                paths = [p for p in parsed if p]
+        except json.JSONDecodeError:
+            paths = []
+    if not paths and getattr(product, 'image_path', ''):
+        paths = [product.image_path]
+    return paths[:MAX_PRODUCT_IMAGES]
+
+def product_image_urls(product):
+    return [url_for('static', filename=path) for path in product_image_paths(product)]
+
+def sync_product_images(product, paths):
+    clean = [p for p in paths if p][:MAX_PRODUCT_IMAGES]
+    product.image_paths = json.dumps(clean, ensure_ascii=False)
+    product.image_path = clean[0] if clean else ''
+
 def product_image_url(product):
-    path = getattr(product, 'image_path', '') if product else ''
-    if path:
-        return url_for('static', filename=path)
+    paths = product_image_paths(product)
+    if paths:
+        return url_for('static', filename=paths[0])
     return None
 
 def product_is_active(product):
     return bool(getattr(product, 'is_active', True))
 
+def product_spec_short(product):
+    parts = [x for x in (product.model or '', product.variant or '') if x]
+    return ' - '.join(parts) if parts else ''
+
 def quote_product_catalog(products):
-    return [{
-        'id': p.id,
-        'sku': p.sku,
-        'name': p.name,
-        'unit': p.unit or 'cái',
-        'retail_price': p.retail_price or 0,
-        'image_url': product_image_url(p) or '',
-        'label': f'{p.sku} - {p.name}',
-    } for p in products if product_is_active(p)]
+    items = []
+    for p in products:
+        if not product_is_active(p):
+            continue
+        status_key, status_label = product_inventory_level(p)
+        items.append({
+            'id': p.id,
+            'sku': p.sku,
+            'name': p.name,
+            'spec': product_spec_short(p),
+            'unit': p.unit or 'cái',
+            'stock': p.stock or 0,
+            'low_stock': p.low_stock or 5,
+            'stock_status': status_key,
+            'stock_label': status_label,
+            'retail_price': p.retail_price or 0,
+            'dealer_price': p.dealer_price or 0,
+            'project_price': p.project_price or 0,
+            'image_url': product_image_url(p) or '',
+            'label': f'{p.sku} - {p.name}',
+        })
+    return items
 
 app.jinja_env.globals['product_image_url'] = product_image_url
+app.jinja_env.globals['product_image_urls'] = product_image_urls
+app.jinja_env.globals['product_image_paths'] = product_image_paths
+app.jinja_env.globals['max_product_images'] = MAX_PRODUCT_IMAGES
 
 def delete_product_image_file(image_path):
     if not image_path:
@@ -522,26 +585,62 @@ def delete_product_image_file(image_path):
     if file_path.is_file():
         file_path.unlink(missing_ok=True)
 
-def save_product_image(product, file_storage):
+def delete_all_product_image_files(product):
+    for path in product_image_paths(product):
+        delete_product_image_file(path)
+    sync_product_images(product, [])
+
+def _save_product_image_file(product, file_storage):
     if not file_storage or not file_storage.filename:
-        return True
+        return None
     ext = Path(secure_filename(file_storage.filename)).suffix.lower()
     if ext not in ALLOWED_IMAGE_EXTENSIONS:
         flash('Ảnh phải là JPG, PNG, WEBP hoặc GIF', 'warning')
         return False
     data = file_storage.read()
-    size = len(data)
     file_storage.seek(0)
-    if size > MAX_PRODUCT_IMAGE_BYTES:
+    if len(data) > MAX_PRODUCT_IMAGE_BYTES:
         flash('Ảnh tối đa 5MB', 'warning')
         return False
     PRODUCT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    delete_product_image_file(product.image_path)
-    filename = f'{product.id}_{uuid.uuid4().hex[:10]}{ext}'
+    pid = product.id or 0
+    filename = f'{pid}_{uuid.uuid4().hex[:10]}{ext}'
     rel_path = f'uploads/products/{filename}'
     file_storage.save(PRODUCT_UPLOAD_DIR / filename)
-    product.image_path = rel_path
+    return rel_path
+
+def save_product_images(product, file_storages):
+    uploads = [f for f in (file_storages or []) if f and f.filename]
+    if not uploads:
+        return True
+    current = product_image_paths(product)
+    slots = MAX_PRODUCT_IMAGES - len(current)
+    if slots <= 0:
+        flash(f'Mỗi sản phẩm tối đa {MAX_PRODUCT_IMAGES} ảnh', 'warning')
+        return False
+    if len(uploads) > slots:
+        flash(f'Chỉ thêm được {slots} ảnh nữa (tối đa {MAX_PRODUCT_IMAGES} ảnh)', 'warning')
+        uploads = uploads[:slots]
+    for file_storage in uploads:
+        rel_path = _save_product_image_file(product, file_storage)
+        if rel_path is False:
+            return False
+        if rel_path:
+            current.append(rel_path)
+    sync_product_images(product, current)
     return True
+
+def save_product_image(product, file_storage):
+    return save_product_images(product, [file_storage] if file_storage and file_storage.filename else [])
+
+def remove_product_images(product, indices):
+    paths = product_image_paths(product)
+    if not paths or not indices:
+        return
+    for idx in sorted({int(i) for i in indices if str(i).isdigit()}, reverse=True):
+        if 0 <= idx < len(paths):
+            delete_product_image_file(paths.pop(idx))
+    sync_product_images(product, paths)
 
 QUOTE_STATUSES = ['Nháp', 'Mới tạo', 'Đã chốt', 'Đã hủy']
 QUOTE_FILTER_STATUSES = ['Mới tạo', 'Đã chốt', 'Đã hủy']
@@ -1221,6 +1320,72 @@ def quotes_redirect(**extra):
     f.update(extra)
     return redirect(url_for('quotes', **{k: v for k, v in f.items() if v}))
 
+def build_quote_preview_from_form():
+    customer_id = request.form.get('customer_id', type=int)
+    customer = Customer.query.get(customer_id) if customer_id else None
+    if not customer:
+        customer = SimpleNamespace(name='Chưa chọn khách hàng', phone='', address='')
+
+    vat_rate = parse_int(request.form.get('vat_rate'), 0)
+    discount = parse_int(request.form.get('discount'), 0)
+    note = (request.form.get('note') or '').strip()
+    valid_raw = request.form.get('valid_until', '').strip()
+    try:
+        valid_until = datetime.strptime(valid_raw, '%Y-%m-%d').date() if valid_raw else date.today() + timedelta(days=30)
+    except ValueError:
+        valid_until = date.today() + timedelta(days=30)
+
+    line_discounts = request.form.getlist('line_discount')
+    items = []
+    subtotal = 0
+    for idx, (product_id, qty, price) in enumerate(zip(
+        request.form.getlist('product_id'),
+        request.form.getlist('qty'),
+        request.form.getlist('price'),
+    )):
+        if not product_id:
+            continue
+        p = Product.query.get(int(product_id))
+        if not p:
+            continue
+        line_disc = 0.0
+        if idx < len(line_discounts):
+            try:
+                line_disc = float(line_discounts[idx] or 0)
+            except (TypeError, ValueError):
+                line_disc = 0.0
+        qv = max(parse_int(qty, 1), 1)
+        pv = parse_int(price, 0)
+        amount = round(qv * pv * (1 - line_disc / 100))
+        subtotal += amount
+        unit_price = round(pv * (1 - line_disc / 100)) if line_disc else pv
+        items.append(SimpleNamespace(
+            product_name=p.name,
+            sku=p.sku,
+            unit=p.unit or 'cái',
+            qty=qv,
+            price=unit_price,
+            amount=amount,
+            product=p,
+        ))
+
+    after_discount = max(subtotal - discount, 0)
+    vat_amount = round(after_discount * vat_rate / 100)
+    total = after_discount + vat_amount
+    quote = SimpleNamespace(
+        quote_code='BG-NHÁP',
+        created_at=datetime.now(),
+        customer=customer,
+        vat_rate=vat_rate,
+        discount=discount,
+        subtotal=subtotal,
+        vat_amount=vat_amount,
+        total=total,
+        note=note,
+        items=items,
+    )
+    return quote, valid_until
+
 def create_quote_from_form():
     customer_id = int(request.form['customer_id'])
     vat_rate = parse_int(request.form.get('vat_rate'), 10)
@@ -1459,6 +1624,10 @@ def parse_int(value, default=0):
     return int(str(value).replace('.', '').replace(',', '').strip())
 
 def replace_docx_text(doc, mapping):
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
     def replace_in_paragraph(paragraph):
         full = ''.join(run.text for run in paragraph.runs)
         changed = False
@@ -1473,16 +1642,160 @@ def replace_docx_text(doc, mapping):
                 paragraph.runs[0].text = full
             else:
                 paragraph.add_run(full)
-    for p in doc.paragraphs:
-        replace_in_paragraph(p)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    replace_in_paragraph(p)
+
+    def walk(element):
+        if element.tag == qn('w:p'):
+            replace_in_paragraph(Paragraph(element, doc))
+        elif element.tag == qn('w:tbl'):
+            table = Table(element, doc)
+            for row in table.rows:
+                for cell in row.cells:
+                    for child in cell._tc:
+                        walk(child)
+        elif element.tag == qn('w:sdt'):
+            content = element.find(qn('w:sdtContent'))
+            if content is not None:
+                for child in content:
+                    walk(child)
+        else:
+            for child in element:
+                walk(child)
+
+    for child in doc.element.body:
+        walk(child)
+
+PARTY_TABLE_COLS = (1350, 4875, 3270)
+PARTY_TABLE_WIDTH = sum(PARTY_TABLE_COLS)
+PARTY_ROW_SPANS = (1, 2, 1, 2, 2, 2)
+
+def _iter_doc_tables(doc):
+    from docx.oxml.ns import qn
+    from docx.table import Table
+
+    def walk(element):
+        if element.tag == qn('w:tbl'):
+            yield Table(element, doc)
+        elif element.tag == qn('w:sdt'):
+            content = element.find(qn('w:sdtContent'))
+            if content is not None:
+                for child in content:
+                    yield from walk(child)
+        else:
+            for child in element:
+                yield from walk(child)
+
+    for child in doc.element.body:
+        yield from walk(child)
+
+def _is_party_info_table(table):
+    if len(table.rows) != 6 or len(table.columns) != 3:
+        return False
+    labels = [row.cells[0].text.strip().lower() for row in table.rows]
+    return (
+        labels[0].startswith('đại diện')
+        and labels[1].startswith('địa chỉ')
+        and labels[2].startswith('điện thoại')
+        and labels[5].startswith('mst')
+        and (labels[3].startswith('số tk') or labels[3].startswith('tài khoản'))
+    )
+
+def _ensure_tbl_fixed_layout(tbl):
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    tblPr = tbl.tblPr
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl.insert(0, tblPr)
+
+    layout = tblPr.find(qn('w:tblLayout'))
+    if layout is None:
+        layout = OxmlElement('w:tblLayout')
+        tblPr.append(layout)
+    layout.set(qn('w:type'), 'fixed')
+
+    tblW = tblPr.find(qn('w:tblW'))
+    if tblW is None:
+        tblW = OxmlElement('w:tblW')
+        tblPr.append(tblW)
+    tblW.set(qn('w:w'), str(PARTY_TABLE_WIDTH))
+    tblW.set(qn('w:type'), 'dxa')
+
+    tblGrid = tbl.find(qn('w:tblGrid'))
+    if tblGrid is None:
+        tblGrid = OxmlElement('w:tblGrid')
+        tbl.insert(list(tbl).index(tblPr) + 1, tblGrid)
+    for child in list(tblGrid):
+        if child.tag == qn('w:tblGridChange'):
+            tblGrid.remove(child)
+    for gc in list(tblGrid.findall(qn('w:gridCol'))):
+        tblGrid.remove(gc)
+    for width in PARTY_TABLE_COLS:
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), str(width))
+        tblGrid.append(gc)
+
+def _set_cell_width(tc, width, span=1):
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    tcPr = tc.find(qn('w:tcPr'))
+    if tcPr is None:
+        tcPr = OxmlElement('w:tcPr')
+        tc.insert(0, tcPr)
+
+    tcW = tcPr.find(qn('w:tcW'))
+    if tcW is None:
+        tcW = OxmlElement('w:tcW')
+        tcPr.append(tcW)
+    tcW.set(qn('w:w'), str(width))
+    tcW.set(qn('w:type'), 'dxa')
+
+    gs = tcPr.find(qn('w:gridSpan'))
+    if span > 1:
+        if gs is None:
+            gs = OxmlElement('w:gridSpan')
+            tcPr.append(gs)
+        gs.set(qn('w:val'), str(span))
+    elif gs is not None:
+        tcPr.remove(gs)
+
+def _normalize_party_value_cell(cell):
+    text = cell.text.strip()
+    if not text:
+        return
+    cell.text = ': ' + text.lstrip(': ').strip()
+
+def _normalize_party_info_table(table):
+    w0, w1, w2 = PARTY_TABLE_COLS
+    _ensure_tbl_fixed_layout(table._tbl)
+
+    for ri, row in enumerate(table.rows):
+        cells = row.cells
+        if len(cells) == 3:
+            _set_cell_width(cells[0]._tc, w0, 1)
+            _set_cell_width(cells[1]._tc, w1, 1)
+            _set_cell_width(cells[2]._tc, w2, 1)
+            if ri == 0:
+                _normalize_party_value_cell(cells[1])
+        elif len(cells) == 2:
+            _set_cell_width(cells[0]._tc, w0, 1)
+            _set_cell_width(cells[1]._tc, w1 + w2, PARTY_ROW_SPANS[ri])
+            if ri > 0:
+                _normalize_party_value_cell(cells[1])
+        cells[0].text = cells[0].text.strip()
+
+def normalize_contract_party_tables(doc):
+    changed = False
+    for table in _iter_doc_tables(doc):
+        if _is_party_info_table(table):
+            _normalize_party_info_table(table)
+            changed = True
+    return changed
 
 def contract_mapping(customer, code, signed, expired):
     is_company = getattr(customer, 'customer_type', 'company') != 'individual'
+    company = get_company_profile()
     return {
         '{{SO_HOP_DONG}}': code,
         '{{NGAY_KY}}': signed.strftime('%d/%m/%Y'),
@@ -1494,6 +1807,14 @@ def contract_mapping(customer, code, signed, expired):
         '{{SO_TK_A}}': customer.bank_account,
         '{{NGAN_HANG_A}}': customer.bank_name,
         '{{MST_A}}': customer.tax_code if is_company else (customer.id_card or ''),
+        '{{TEN_BEN_B}}': company['name'],
+        '{{DAI_DIEN_B}}': company.get('director_name') or '',
+        '{{CHUC_VU_B}}': company.get('director') or 'Giám đốc',
+        '{{DIA_CHI_B}}': company.get('address') or '',
+        '{{DIEN_THOAI_B}}': company.get('phone') or '',
+        '{{SO_TK_B}}': company.get('bank_account') or '',
+        '{{NGAN_HANG_B}}': company.get('bank_name') or '',
+        '{{MST_B}}': company.get('tax_code') or '',
         '{{NGAY_HET_HIEU_LUC}}': expired.strftime('%d/%m/%Y') if expired else '',
     }
 
@@ -1660,6 +1981,57 @@ def save_contract_docx(doc, code):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out_path)
     return out_path
+
+def _cleanup_temp_docs(max_age_seconds=3600):
+    if not TEMP_DOC_DIR.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for path in TEMP_DOC_DIR.glob('*.docx'):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
+
+def save_temp_docx(doc, prefix='preview'):
+    TEMP_DOC_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_temp_docs()
+    path = TEMP_DOC_DIR / f'{prefix}_{uuid.uuid4().hex[:12]}.docx'
+    doc.save(str(path))
+    return path
+
+def send_docx_inline(file_path, download_name=None):
+    path = Path(file_path)
+    if not path.is_file():
+        from flask import abort
+        abort(404)
+    return send_file(
+        path,
+        mimetype=DOCX_MIMETYPE,
+        as_attachment=False,
+        download_name=download_name or path.name,
+    )
+
+def docx_preview_page(doc_title, customer_name, doc_url, download_url=None, back_url=None, is_draft=False):
+    return render_template(
+        'contract_preview.html',
+        contract_code=doc_title,
+        customer_name=customer_name,
+        doc_url=doc_url,
+        download_url=download_url,
+        back_url=back_url or url_for('customers'),
+        is_draft=is_draft,
+    )
+
+def clear_contract_draft_temp():
+    old = session.pop(CONTRACT_DRAFT_SESSION_KEY, None)
+    if old:
+        p = Path(old)
+        if p.is_file():
+            try:
+                p.unlink()
+            except OSError:
+                pass
 
 def _doc_add_center_heading(doc, text, level=1):
     p = doc.add_heading(text, level=level)
@@ -1885,29 +2257,20 @@ def customer_list_extras(customer_ids):
         orders_map.setdefault(o.customer_id, []).append(o)
     return contracts, quotes_map, orders_map
 
-def build_contract_doc(customer, code, signed, expired):
+def ensure_contract_template_layout():
+    create_template_docx()
+    if not TEMPLATE_DOCX.exists():
+        return
     doc = Document(TEMPLATE_DOCX)
+    if normalize_contract_party_tables(doc):
+        doc.save(TEMPLATE_DOCX)
+
+def build_contract_doc(customer, code, signed, expired):
+    ensure_contract_template_layout()
+    doc = Document(TEMPLATE_DOCX)
+    normalize_contract_party_tables(doc)
     replace_docx_text(doc, contract_mapping(customer, code, signed, expired))
     return doc
-
-def docx_to_preview_html(doc):
-    blocks = []
-    for p in doc.paragraphs:
-        text = p.text
-        style = ''
-        if p.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-            style = ' style="text-align:center"'
-        if not text.strip():
-            blocks.append('<p class="doc-empty">&nbsp;</p>')
-        else:
-            blocks.append(f'<p{style}>{escape(text)}</p>')
-    for table in doc.tables:
-        rows = []
-        for row in table.rows:
-            cells = ''.join(f'<td>{escape(cell.text)}</td>' for cell in row.cells)
-            rows.append(f'<tr>{cells}</tr>')
-        blocks.append(f'<table class="doc-table"><tbody>{"".join(rows)}</tbody></table>')
-    return '\n'.join(blocks)
 
 def parse_contract_form():
     customer = Customer.query.get_or_404(int(request.form['customer_id']))
@@ -2154,20 +2517,22 @@ def update_customer(cid):
 @app.route('/customers/<int:cid>/contract/preview')
 def preview_customer_framework_contract(cid):
     customer = Customer.query.get_or_404(cid)
-    contract = get_framework_contract(customer.id) or create_framework_contract_for_customer(customer)
-    if not contract.file_path or not Path(contract.file_path).exists():
-        create_framework_contract_for_customer(customer)
-        contract = get_framework_contract(customer.id)
-    doc = Document(contract.file_path)
-    return render_template(
-        'contract_preview.html',
-        contract_code=contract.contract_code,
-        customer_name=customer.name,
-        preview_html=docx_to_preview_html(doc),
-        download_url=url_for('download_customer_framework_contract', cid=customer.id),
-        is_draft=False,
-        back_url=url_for('customers'),
+    create_framework_contract_for_customer(customer)
+    contract = get_framework_contract(customer.id)
+    return docx_preview_page(
+        contract.contract_code,
+        customer.name,
+        url_for('view_customer_framework_contract', cid=customer.id),
+        url_for('download_customer_framework_contract', cid=customer.id),
+        url_for('customers'),
     )
+
+@app.route('/customers/<int:cid>/contract/view')
+def view_customer_framework_contract(cid):
+    customer = Customer.query.get_or_404(cid)
+    create_framework_contract_for_customer(customer)
+    contract = get_framework_contract(customer.id)
+    return send_docx_inline(contract.file_path, f'{contract.contract_code}.docx')
 
 @app.route('/customers/<int:cid>/contract/download')
 def download_customer_framework_contract(cid):
@@ -2314,6 +2679,10 @@ def apply_product_filters(query, filters):
 def products_redirect_after_save(message=None, category='success'):
     if message:
         flash(message, category)
+    if request.form.get('_from_detail') == '1':
+        pid = request.form.get('_pid', type=int)
+        if pid:
+            return redirect(url_for('product_detail', pid=pid))
     return redirect(url_for(
         'products',
         q=request.form.get('_q', ''),
@@ -2713,6 +3082,63 @@ def import_product_data_list(items, update_existing=False):
         'created': created, 'updated': updated, 'skipped': skipped,
         'errors': errors, 'error_lines': error_lines[:8],
     }
+
+def refresh_quote_subtotals(quote):
+    quote.subtotal = sum((item.amount or 0) for item in quote.items)
+    recalculate_quote_totals(quote)
+
+def delete_quote_doc_files(quote):
+    for path_attr in ('sale_contract_path', 'handover_doc_path'):
+        path = getattr(quote, path_attr, '') or ''
+        if path and Path(path).is_file():
+            Path(path).unlink(missing_ok=True)
+
+def delete_contract_files(contract):
+    if contract.file_path and Path(contract.file_path).is_file():
+        Path(contract.file_path).unlink(missing_ok=True)
+    delete_contract_scan_file(contract.signed_scan_path)
+
+def delete_payment_record_files(payment):
+    if payment.receipt_path:
+        fp = BASE_DIR / 'static' / payment.receipt_path
+        if fp.is_file():
+            fp.unlink(missing_ok=True)
+
+def delete_order_record(order, reset_quote=True):
+    quote = db.session.get(Quote, order.quote_id) if order.quote_id else None
+    for payment in Payment.query.filter_by(order_id=order.id).all():
+        delete_payment_record_files(payment)
+    Payment.query.filter_by(order_id=order.id).delete(synchronize_session=False)
+    delete_order_handover_scan_file(order.handover_scan_path)
+    db.session.delete(order)
+    if reset_quote and quote and quote_display_status(quote) == 'Đã chốt':
+        quote.status = 'Mới tạo'
+
+def delete_product_record(product):
+    affected_ids = [
+        row[0] for row in db.session.query(QuoteItem.quote_id).filter_by(product_id=product.id).distinct().all()
+    ]
+    delete_all_product_image_files(product)
+    QuoteItem.query.filter_by(product_id=product.id).delete(synchronize_session=False)
+    StockMovement.query.filter_by(product_id=product.id).delete(synchronize_session=False)
+    PriceHistory.query.filter_by(product_id=product.id).delete(synchronize_session=False)
+    db.session.delete(product)
+    for qid in affected_ids:
+        q = db.session.get(Quote, qid)
+        if q:
+            refresh_quote_subtotals(q)
+            generate_quote_documents(q, commit=False)
+
+def delete_customer_record(customer):
+    for order in Order.query.filter_by(customer_id=customer.id).all():
+        delete_order_record(order, reset_quote=True)
+    for quote in Quote.query.filter_by(customer_id=customer.id).all():
+        delete_quote_doc_files(quote)
+        db.session.delete(quote)
+    for contract in Contract.query.filter_by(customer_id=customer.id).all():
+        delete_contract_files(contract)
+        db.session.delete(contract)
+    db.session.delete(customer)
 
 def delete_all_products_data():
     """Xóa toàn bộ sản phẩm và dữ liệu liên quan (danh mục, kho, báo giá chi tiết)."""
@@ -3302,7 +3728,7 @@ def products():
         assign_product_taxonomy_from_form(p)
         db.session.add(p)
         db.session.flush()
-        if not save_product_image(p, request.files.get('image')):
+        if not save_product_images(p, request.files.getlist('images')):
             db.session.rollback()
             return redirect(url_for('products'))
         db.session.commit()
@@ -3352,6 +3778,32 @@ def products():
         show_category_import_preview=bool(request.args.get('category_import_preview')),
     )
 
+@app.route('/products/<int:pid>')
+def product_detail(pid):
+    ensure_category_brand_schema()
+    ensure_product_image_column()
+    p = Product.query.get_or_404(pid)
+    price_histories = {
+        p.id: PriceHistory.query.filter_by(product_id=p.id)
+        .order_by(PriceHistory.created_at.desc())
+        .limit(50)
+        .all(),
+    }
+    return render_template(
+        'product_detail.html',
+        p=p,
+        parent_categories=parent_categories(),
+        brands_list=Brand.query.order_by(Brand.name).all(),
+        price_histories=price_histories,
+        stock_in_methods=STOCK_IN_METHODS,
+        stock_out_methods=STOCK_OUT_METHODS,
+        filters={},
+        pagination=type('Pg', (), {'page': 1})(),
+        per_page=10,
+        from_detail=True,
+        taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
+    )
+
 @app.route('/products/<int:pid>/update', methods=['POST'])
 def update_product(pid):
     ensure_category_brand_schema()
@@ -3367,10 +3819,12 @@ def update_product(pid):
         return products_redirect_after_save()
     p.sku = sku
     apply_product_form(p)
-    if request.form.get('remove_image') == '1':
-        delete_product_image_file(p.image_path)
-        p.image_path = ''
-    if not save_product_image(p, request.files.get('image')):
+    remove_indices = request.form.getlist('remove_image_idx')
+    if remove_indices:
+        remove_product_images(p, remove_indices)
+    elif request.form.get('remove_image') == '1':
+        delete_all_product_image_files(p)
+    if not save_product_images(p, request.files.getlist('images')):
         return products_redirect_after_save()
     db.session.commit()
     return products_redirect_after_save('Đã cập nhật sản phẩm')
@@ -3517,6 +3971,42 @@ def toggle_product_active(pid):
     label = 'Đang bán' if p.is_active else 'Ngừng bán'
     return products_redirect_after_save(f'Đã chuyển sang trạng thái: {label}')
 
+@app.route('/products/<int:pid>/delete', methods=['POST'])
+def delete_product(pid):
+    ensure_product_image_column()
+    p = Product.query.get_or_404(pid)
+    name = p.name or p.sku
+    delete_product_record(p)
+    db.session.commit()
+    flash(f'Đã xóa sản phẩm "{name}"', 'success')
+    if request.form.get('_from_detail') == '1':
+        return redirect(url_for('products'))
+    return products_redirect_after_save()
+
+@app.route('/customers/<int:cid>/delete', methods=['POST'])
+def delete_customer(cid):
+    ensure_customer_columns()
+    ensure_contract_columns()
+    c = Customer.query.get_or_404(cid)
+    name = c.name
+    delete_customer_record(c)
+    db.session.commit()
+    flash(f'Đã xóa khách hàng "{name}" và dữ liệu liên quan', 'success')
+    return customers_redirect_after_save()
+
+@app.route('/orders/<int:oid>/delete', methods=['POST'])
+def delete_order(oid):
+    ensure_order_columns()
+    ensure_payment_columns()
+    o = Order.query.get_or_404(oid)
+    code = o.order_code
+    delete_order_record(o, reset_quote=True)
+    db.session.commit()
+    flash(f'Đã xóa đơn hàng / hóa đơn {code}', 'success')
+    if request.form.get('_from') == 'preview':
+        return redirect(url_for('orders'))
+    return orders_redirect(page=request.form.get('_page', 1, type=int) or 1)
+
 @app.route('/products/<int:pid>/stock', methods=['POST'])
 def adjust_product_stock(pid):
     ensure_stock_movement_columns()
@@ -3543,6 +4033,16 @@ def adjust_product_stock(pid):
     db.session.commit()
     label = 'nhập' if mtype == 'IN' else 'xuất'
     return products_redirect_after_save(f'Đã {label} kho thành công')
+
+@app.route('/quotes/preview', methods=['POST'])
+def quote_create_preview():
+    quote, valid_until = build_quote_preview_from_form()
+    return render_template(
+        'partials/quote_create_preview_doc.html',
+        quote=quote,
+        company=get_company_profile(),
+        valid_until=valid_until,
+    )
 
 @app.route('/quotes', methods=['GET', 'POST'])
 def quotes():
@@ -3685,29 +4185,37 @@ def update_quote(qid):
     flash('Đã cập nhật báo giá', 'success')
     return quotes_redirect(tab=request.form.get('_tab', 'list'))
 
-def _quote_doc_preview_response(quote, file_path, doc_title, download_endpoint):
+def _quote_doc_preview_page(quote, file_path, doc_title, download_endpoint, view_endpoint):
     if not file_path or not Path(file_path).is_file():
         flash('Không tìm thấy file tài liệu', 'danger')
         return redirect(url_for('quote_preview', qid=quote.id))
-    doc = Document(file_path)
-    return render_template(
-        'contract_preview.html',
-        contract_code=doc_title,
-        customer_name=quote.customer.name,
-        preview_html=docx_to_preview_html(doc),
-        download_url=url_for(download_endpoint, qid=quote.id),
-        back_url=url_for('quote_preview', qid=quote.id),
+    return docx_preview_page(
+        doc_title,
+        quote.customer.name,
+        url_for(view_endpoint, qid=quote.id),
+        url_for(download_endpoint, qid=quote.id),
+        url_for('quote_preview', qid=quote.id),
     )
 
 @app.route('/quotes/<int:qid>/sale-contract/preview')
 def preview_quote_sale_contract(qid):
     ensure_quote_columns()
     quote = ensure_quote_documents(Quote.query.get_or_404(qid))
-    return _quote_doc_preview_response(
+    return _quote_doc_preview_page(
         quote, quote.sale_contract_path,
         f'HĐMB/{quote.quote_code}',
         'download_quote_sale_contract',
+        'view_quote_sale_contract',
     )
+
+@app.route('/quotes/<int:qid>/sale-contract/view')
+def view_quote_sale_contract(qid):
+    ensure_quote_columns()
+    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    if not quote.sale_contract_path or not Path(quote.sale_contract_path).is_file():
+        from flask import abort
+        abort(404)
+    return send_docx_inline(quote.sale_contract_path, f'HĐMB-{quote.quote_code}.docx')
 
 @app.route('/quotes/<int:qid>/sale-contract/download')
 def download_quote_sale_contract(qid):
@@ -3722,11 +4230,21 @@ def download_quote_sale_contract(qid):
 def preview_quote_handover(qid):
     ensure_quote_columns()
     quote = ensure_quote_documents(Quote.query.get_or_404(qid))
-    return _quote_doc_preview_response(
+    return _quote_doc_preview_page(
         quote, quote.handover_doc_path,
         f'BBGH/{quote.quote_code}',
         'download_quote_handover',
+        'view_quote_handover',
     )
+
+@app.route('/quotes/<int:qid>/handover/view')
+def view_quote_handover(qid):
+    ensure_quote_columns()
+    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    if not quote.handover_doc_path or not Path(quote.handover_doc_path).is_file():
+        from flask import abort
+        abort(404)
+    return send_docx_inline(quote.handover_doc_path, f'BBGH-{quote.quote_code}.docx')
 
 @app.route('/quotes/<int:qid>/handover/download')
 def download_quote_handover(qid):
@@ -3785,15 +4303,33 @@ def contracts():
 def preview_contract_draft():
     customer, code, signed, expired, _ = parse_contract_form()
     doc = build_contract_doc(customer, code, signed, expired)
-    return render_template(
-        'contract_preview.html',
-        contract_code=code,
-        customer_name=customer.name,
-        preview_html=docx_to_preview_html(doc),
-        download_url=None,
+    clear_contract_draft_temp()
+    temp_path = save_temp_docx(doc, 'contract_draft')
+    session[CONTRACT_DRAFT_SESSION_KEY] = str(temp_path)
+    return docx_preview_page(
+        code,
+        customer.name,
+        url_for('view_contract_draft'),
+        url_for('download_contract_draft'),
+        url_for('customers'),
         is_draft=True,
-        back_url=url_for('customers'),
     )
+
+@app.route('/contracts/preview/view')
+def view_contract_draft():
+    path = session.get(CONTRACT_DRAFT_SESSION_KEY)
+    if not path or not Path(path).is_file():
+        from flask import abort
+        abort(404)
+    return send_docx_inline(path, 'hop-dong-nhap.docx')
+
+@app.route('/contracts/preview/download')
+def download_contract_draft():
+    path = session.get(CONTRACT_DRAFT_SESSION_KEY)
+    if not path or not Path(path).is_file():
+        flash('Không tìm thấy bản nháp hợp đồng', 'danger')
+        return redirect(url_for('customers'))
+    return send_file(path, as_attachment=True, download_name=Path(path).name)
 
 @app.route('/contracts/<int:cid>/preview')
 def preview_contract(cid):
@@ -3801,16 +4337,21 @@ def preview_contract(cid):
     if not c.file_path or not Path(c.file_path).exists():
         flash('Không tìm thấy file hợp đồng', 'danger')
         return redirect(url_for('customers'))
-    doc = Document(c.file_path)
-    return render_template(
-        'contract_preview.html',
-        contract_code=c.contract_code,
-        customer_name=c.customer.name,
-        preview_html=docx_to_preview_html(doc),
-        download_url=url_for('download_contract', cid=c.id),
-        is_draft=False,
-        back_url=url_for('customers'),
+    return docx_preview_page(
+        c.contract_code,
+        c.customer.name,
+        url_for('view_contract', cid=c.id),
+        url_for('download_contract', cid=c.id),
+        url_for('customers'),
     )
+
+@app.route('/contracts/<int:cid>/view')
+def view_contract(cid):
+    c = Contract.query.get_or_404(cid)
+    if not c.file_path or not Path(c.file_path).is_file():
+        from flask import abort
+        abort(404)
+    return send_docx_inline(c.file_path, f'{c.contract_code}.docx')
 
 @app.route('/download/contract/<int:cid>')
 def download_contract(cid):
@@ -4396,6 +4937,7 @@ def init_db(seed=False):
     QUOTE_DOCS_DIR.mkdir(parents=True, exist_ok=True)
     create_template_docx()
     create_quote_doc_templates()
+    ensure_contract_template_layout()
     db.create_all()
     ensure_contract_columns()
     ensure_order_columns()

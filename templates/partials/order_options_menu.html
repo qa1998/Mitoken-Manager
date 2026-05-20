@@ -45,6 +45,15 @@
     </li>
     {% endif %}
     {% endif %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <form method="post" action="{{ url_for('delete_order', oid=order.id) }}" class="m-0 order-delete-form" data-code="{{ order.order_code }}">
+        <input type="hidden" name="_page" value="{{ page }}">
+        <button type="submit" class="dropdown-item text-danger">
+          <i class="bi bi-trash me-2"></i>Xóa hóa đơn / đơn hàng
+        </button>
+      </form>
+    </li>
   </ul>
 </div>
 {% endmacro %}

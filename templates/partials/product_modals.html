@@ -1,16 +1,26 @@
-{% from 'partials/product_thumb.html' import product_thumb %}
+{% from 'partials/product_image_upload_panel.html' import product_image_upload_panel as product_image_gallery %}
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
+{% from 'partials/product_price_setup.html' import product_price_setup %}
+
+{% macro product_redirect_fields() %}
+{% if from_detail|default(false) %}
+<input type="hidden" name="_from_detail" value="1">
+<input type="hidden" name="_pid" value="{{ p.id }}">
+{% else %}
+<input type="hidden" name="_q" value="{{ filters.q|default('') }}">
+<input type="hidden" name="_page" value="{{ pagination.page|default(1) }}">
+<input type="hidden" name="_per_page" value="{{ per_page|default(10) }}">
+<input type="hidden" name="_category" value="{{ filters.category|default('') }}">
+<input type="hidden" name="_brand" value="{{ filters.brand|default('') }}">
+<input type="hidden" name="_status" value="{{ filters.status|default('') }}">
+{% endif %}
+{% endmacro %}
 
 <div class="modal fade product-page-modal" id="productPrice{{ p.id }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form method="post" action="{{ url_for('update_price', pid=p.id) }}">
-        <input type="hidden" name="_q" value="{{ filters.q }}">
-        <input type="hidden" name="_page" value="{{ pagination.page }}">
-        <input type="hidden" name="_per_page" value="{{ per_page }}">
-        <input type="hidden" name="_category" value="{{ filters.category }}">
-        <input type="hidden" name="_brand" value="{{ filters.brand }}">
-        <input type="hidden" name="_status" value="{{ filters.status }}">
+        {{ product_redirect_fields() }}
         <div class="modal-header">
           <h5 class="modal-title">Sửa giá — {{ p.name }}</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -18,12 +28,30 @@
         <div class="modal-body">
           <div class="row g-3">
             <div class="col-md-6">
-              <label class="form-label-custom">Giá bán lẻ</label>
-              <input type="text" name="retail_price" class="form-control" value="{{ p.retail_price }}">
+              <label class="form-label-custom">Giá lẻ</label>
+              <div class="money-input-wrap">
+                <input type="text"
+                       name="retail_price"
+                       class="form-control money-input"
+                       inputmode="numeric"
+                       autocomplete="off"
+                       value="{% if p.retail_price %}{{ p.retail_price|money_plain }}{% endif %}"
+                       placeholder="0">
+                <span class="money-input-suffix">đ</span>
+              </div>
             </div>
             <div class="col-md-6">
-              <label class="form-label-custom">Giá dự án</label>
-              <input type="text" name="project_price" class="form-control" value="{{ p.project_price }}">
+              <label class="form-label-custom">Giá công trình</label>
+              <div class="money-input-wrap">
+                <input type="text"
+                       name="project_price"
+                       class="form-control money-input"
+                       inputmode="numeric"
+                       autocomplete="off"
+                       value="{% if p.project_price %}{{ p.project_price|money_plain }}{% endif %}"
+                       placeholder="0">
+                <span class="money-input-suffix">đ</span>
+              </div>
             </div>
           </div>
         </div>
@@ -40,12 +68,7 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form method="post" action="{{ url_for('adjust_product_stock', pid=p.id) }}">
-        <input type="hidden" name="_q" value="{{ filters.q }}">
-        <input type="hidden" name="_page" value="{{ pagination.page }}">
-        <input type="hidden" name="_per_page" value="{{ per_page }}">
-        <input type="hidden" name="_category" value="{{ filters.category }}">
-        <input type="hidden" name="_brand" value="{{ filters.brand }}">
-        <input type="hidden" name="_status" value="{{ filters.status }}">
+        {{ product_redirect_fields() }}
         <div class="modal-header">
           <h5 class="modal-title">Chỉnh tồn kho — {{ p.name }}</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -128,48 +151,36 @@
 </div>
 
 <div class="modal fade product-page-modal" id="productEdit{{ p.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <form method="post" action="{{ url_for('update_product', pid=p.id) }}" enctype="multipart/form-data">
-        <input type="hidden" name="_q" value="{{ filters.q }}">
-        <input type="hidden" name="_page" value="{{ pagination.page }}">
-        <input type="hidden" name="_per_page" value="{{ per_page }}">
-        <input type="hidden" name="_category" value="{{ filters.category }}">
-        <input type="hidden" name="_brand" value="{{ filters.brand }}">
-        <input type="hidden" name="_status" value="{{ filters.status }}">
-        <div class="modal-header">
-          <h5 class="modal-title">Chỉnh sửa sản phẩm</h5>
+        {{ product_redirect_fields() }}
+        <div class="modal-header border-0 pb-0">
+          <h5 class="modal-title fw-bold">Chỉnh sửa sản phẩm</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="modal-body">
-          <div class="row g-3 mb-2">
-            <div class="col-md-4">
-              {{ product_thumb(p, 'lg') }}
-            </div>
-            <div class="col-md-8">
-              <label class="form-label-custom">Ảnh sản phẩm</label>
-              <input type="file" name="image" class="form-control product-image-input" accept="image/jpeg,image/png,image/webp,image/gif">
-              <div class="small-muted mt-1">Để trống nếu không đổi ảnh</div>
-              {% if p.image_path %}
-              <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" name="remove_image" value="1" id="removeImage{{ p.id }}">
-                <label class="form-check-label small-muted" for="removeImage{{ p.id }}">Xóa ảnh hiện tại</label>
-              </div>
-              {% endif %}
-            </div>
+        <div class="modal-body pt-3">
+          <div class="mb-3">
+            {{ product_image_gallery(p, editable=true) }}
           </div>
           <div class="row g-3">
             <div class="col-md-6">
               <label class="form-label-custom">SKU <span class="text-danger">*</span></label>
-              <input type="text" name="sku" class="form-control" required value="{{ p.sku }}">
+              <div class="input-icon-wrap">
+                <i class="bi bi-upc-scan"></i>
+                <input type="text" name="sku" class="form-control" required value="{{ p.sku }}">
+              </div>
             </div>
             <div class="col-md-6">
               <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
-              <input type="text" name="name" class="form-control" required value="{{ p.name }}">
+              <div class="input-icon-wrap">
+                <i class="bi bi-box-seam"></i>
+                <input type="text" name="name" class="form-control" required value="{{ p.name }}">
+              </div>
             </div>
             <div class="col-12">
-              <label class="form-label-custom">Danh mục &amp; thương hiệu</label>
-              {{ product_taxonomy_picker(parent_categories, brands_list, p.category_id, p.brand_id) }}
+              <label class="form-label-custom mb-2">Danh mục &amp; thương hiệu</label>
+              {{ product_taxonomy_picker(parent_categories, brands_list, p.category_id, p.brand_id, inline=true) }}
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Model</label>
@@ -192,30 +203,22 @@
               <input type="text" name="low_stock" class="form-control" value="{{ p.low_stock }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label-custom">Giá nhập</label>
-              <input type="text" name="cost_price" class="form-control" value="{{ p.cost_price }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Giá bán lẻ</label>
-              <input type="text" name="retail_price" class="form-control" value="{{ p.retail_price }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Giá đại lý</label>
-              <input type="text" name="dealer_price" class="form-control" value="{{ p.dealer_price }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Giá dự án</label>
-              <input type="text" name="project_price" class="form-control" value="{{ p.project_price }}">
-            </div>
-            <div class="col-md-4">
               <label class="form-label-custom">Bảo hành</label>
-              <input type="text" name="warranty" class="form-control" value="{{ p.warranty }}">
+              <div class="input-icon-wrap">
+                <i class="bi bi-shield-check"></i>
+                <input type="text" name="warranty" class="form-control" value="{{ p.warranty }}">
+              </div>
+            </div>
+            <div class="col-12">
+              {{ product_price_setup(p) }}
             </div>
           </div>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        <div class="modal-footer border-0 pt-0">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-floppy me-1"></i>Lưu thay đổi
+          </button>
         </div>
       </form>
     </div>

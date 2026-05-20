@@ -1,0 +1,66 @@
+{% macro product_price_setup(product=none) %}
+<div class="product-price-setup-card">
+  <div class="product-price-setup-head">
+    <h6 class="product-price-setup-title"><i class="bi bi-tags me-2"></i>Thiết lập giá bán</h6>
+    <p class="product-price-setup-sub mb-0">Thiết lập theo thứ tự từ giá nhập đến giá bán lẻ</p>
+  </div>
+  <div class="row g-3 product-price-setup-grid">
+    <div class="col-md-6 col-xl-3">
+      <label class="form-label-custom">Giá nhập</label>
+      <div class="money-input-wrap">
+        <input type="text"
+               name="cost_price"
+               class="form-control money-input"
+               inputmode="numeric"
+               autocomplete="off"
+               value="{% if product and product.cost_price %}{{ product.cost_price|money_plain }}{% endif %}"
+               placeholder="0">
+        <span class="money-input-suffix">đ</span>
+      </div>
+      <div class="product-price-field-hint">Giá mua từ nhà cung cấp</div>
+    </div>
+    <div class="col-md-6 col-xl-3">
+      <label class="form-label-custom">Giá công trình</label>
+      <div class="money-input-wrap">
+        <input type="text"
+               name="project_price"
+               class="form-control money-input"
+               inputmode="numeric"
+               autocomplete="off"
+               value="{% if product and product.project_price %}{{ product.project_price|money_plain }}{% endif %}"
+               placeholder="0">
+        <span class="money-input-suffix">đ</span>
+      </div>
+      <div class="product-price-field-hint">Áp dụng cho đơn dự án / số lượng lớn</div>
+    </div>
+    <div class="col-md-6 col-xl-3">
+      <label class="form-label-custom">Giá sỉ</label>
+      <div class="money-input-wrap">
+        <input type="text"
+               name="dealer_price"
+               class="form-control money-input"
+               inputmode="numeric"
+               autocomplete="off"
+               value="{% if product and product.dealer_price %}{{ product.dealer_price|money_plain }}{% endif %}"
+               placeholder="0">
+        <span class="money-input-suffix">đ</span>
+      </div>
+      <div class="product-price-field-hint">Áp dụng cho đại lý hoặc khách quen</div>
+    </div>
+    <div class="col-md-6 col-xl-3">
+      <label class="form-label-custom">Giá lẻ</label>
+      <div class="money-input-wrap">
+        <input type="text"
+               name="retail_price"
+               class="form-control money-input"
+               inputmode="numeric"
+               autocomplete="off"
+               value="{% if product and product.retail_price %}{{ product.retail_price|money_plain }}{% endif %}"
+               placeholder="0">
+        <span class="money-input-suffix">đ</span>
+      </div>
+      <div class="product-price-field-hint">Giá bán thông thường</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

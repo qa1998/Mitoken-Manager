@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
 {% from 'partials/product_thumb.html' import product_thumb %}
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
+{% from 'partials/product_image_upload_panel.html' import product_image_upload_panel %}
+{% from 'partials/product_price_setup.html' import product_price_setup %}
 {% block title %}Sản phẩm — Business Web{% endblock %}
 {% block content %}
 
@@ -118,12 +120,12 @@
         <tbody>
           {% for p in products %}
           {% set sale_key, sale_label = product_list_status(p) %}
-          <tr>
+          <tr class="product-table-row-click" data-product-detail="{{ url_for('product_detail', pid=p.id) }}">
             <td><span class="product-sku-cell">{{ p.sku }}</span></td>
             <td>{{ product_thumb(p) }}</td>
             <td>
               <div class="product-name-block">
-                <div class="product-name-main">{{ p.name }}</div>
+                <a href="{{ url_for('product_detail', pid=p.id) }}" class="product-name-main product-name-link">{{ p.name }}</a>
                 <div class="product-barcode-sub">Mã vạch: {{ product_barcode(p) }}</div>
               </div>
             </td>
@@ -139,12 +141,17 @@
             <td>
               <span class="product-status-pill status-{{ sale_key }}">{{ sale_label }}</span>
             </td>
-            <td class="text-end">
+            <td class="text-end table-actions-cell">
               <div class="dropdown">
                 <button class="btn btn-light btn-action-dots" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                   <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
+                  <li>
+                    <a class="dropdown-item" href="{{ url_for('product_detail', pid=p.id) }}">
+                      <i class="bi bi-eye me-2"></i>Chi tiết
+                    </a>
+                  </li>
                   <li>
                     <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
                       <i class="bi bi-pencil me-2"></i>Sửa giá
@@ -166,6 +173,19 @@
                     </button>
                   </li>
                   <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form method="post" action="{{ url_for('delete_product', pid=p.id) }}" class="m-0 product-delete-form" data-name="{{ p.name }}">
+                      <input type="hidden" name="_q" value="{{ filters.q }}">
+                      <input type="hidden" name="_page" value="{{ pagination.page }}">
+                      <input type="hidden" name="_per_page" value="{{ per_page }}">
+                      <input type="hidden" name="_category" value="{{ filters.category }}">
+                      <input type="hidden" name="_brand" value="{{ filters.brand }}">
+                      <input type="hidden" name="_status" value="{{ filters.status }}">
+                      <button type="submit" class="dropdown-item text-danger">
+                        <i class="bi bi-trash me-2"></i>Xóa sản phẩm
+                      </button>
+                    </form>
+                  </li>
                   <li>
                     <form method="post" action="{{ url_for('toggle_product_active', pid=p.id) }}" class="m-0 product-toggle-form">
                       <input type="hidden" name="_q" value="{{ filters.q }}">
@@ -241,57 +261,73 @@
 {% endfor %}
 
 <div class="modal fade product-page-modal" id="createProductModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <form method="post" action="{{ url_for('products') }}" enctype="multipart/form-data">
-        <div class="modal-header">
+        <div class="modal-header border-0 pb-0">
           <h5 class="modal-title fw-bold">Thêm sản phẩm mới</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body pt-3">
+          <div class="mb-3">
+            {{ product_image_upload_panel() }}
+          </div>
           <div class="row g-3">
             <div class="col-md-6">
               <label class="form-label-custom">SKU / Mã vạch <span class="text-danger">*</span></label>
-              <input type="text" name="sku" class="form-control" required placeholder="VD: DJI-A4-COMBO">
+              <div class="input-icon-wrap">
+                <i class="bi bi-upc-scan"></i>
+                <input type="text" name="sku" class="form-control" required placeholder="VD: DJI-A4-COMBO">
+              </div>
             </div>
             <div class="col-md-6">
               <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
-              <input type="text" name="name" class="form-control" required placeholder="Nhập tên sản phẩm">
+              <div class="input-icon-wrap">
+                <i class="bi bi-box-seam"></i>
+                <input type="text" name="name" class="form-control" required placeholder="Nhập tên sản phẩm">
+              </div>
             </div>
             <div class="col-12">
-              <label class="form-label-custom">Danh mục &amp; thương hiệu</label>
-              {{ product_taxonomy_picker(parent_categories, brands_list) }}
+              <label class="form-label-custom mb-2">Danh mục &amp; thương hiệu</label>
+              {{ product_taxonomy_picker(parent_categories, brands_list, inline=true) }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Model</label>
+              <input type="text" name="model" class="form-control" placeholder="VD: Action 4">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Biến thể</label>
+              <input type="text" name="variant" class="form-control" placeholder="VD: Adventure Combo">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label-custom">Đơn vị</label>
+              <input type="text" name="unit" class="form-control" value="cái" placeholder="cái">
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Tồn kho</label>
               <input type="number" name="stock" class="form-control" value="0" min="0">
             </div>
             <div class="col-md-4">
-              <label class="form-label-custom">Giá nhập</label>
-              <input type="text" name="cost_price" class="form-control" placeholder="0">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Giá bán lẻ</label>
-              <input type="text" name="retail_price" class="form-control" placeholder="0">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Giá dự án</label>
-              <input type="text" name="project_price" class="form-control" placeholder="0">
+              <label class="form-label-custom">Tồn tối thiểu</label>
+              <input type="number" name="low_stock" class="form-control" value="0" min="0">
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Bảo hành</label>
-              <input type="text" name="warranty" class="form-control" placeholder="VD: 12 tháng">
+              <div class="input-icon-wrap">
+                <i class="bi bi-shield-check"></i>
+                <input type="text" name="warranty" class="form-control" placeholder="VD: 12 tháng">
+              </div>
             </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Ảnh sản phẩm</label>
-              <input type="file" name="image" class="form-control product-image-input" accept="image/jpeg,image/png,image/webp,image/gif">
-              <div class="small-muted mt-1">JPG, PNG, WEBP, GIF — tối đa 5MB</div>
+            <div class="col-12">
+              {{ product_price_setup() }}
             </div>
           </div>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-primary">Thêm sản phẩm</button>
+        <div class="modal-footer border-0 pt-0">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Thêm sản phẩm
+          </button>
         </div>
       </form>
     </div>

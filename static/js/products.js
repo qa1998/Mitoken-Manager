@@ -507,8 +507,361 @@ function initProductImportPreview() {
   });
 }
 
+/** Panel upload ảnh: hàng thumbnail + placeholder +N, thao tác dưới ảnh chọn, dropzone. */
+function initProductMultiImages() {
+  var accumulators = new WeakMap();
+  var replaceTargets = new WeakMap();
+
+  function fileKey(f) {
+    return f.name + '|' + f.size + '|' + f.lastModified;
+  }
+
+  function setInputFiles(input, files) {
+    var dt = new DataTransfer();
+    files.forEach(function (f) {
+      dt.items.add(f);
+    });
+    try {
+      input.files = dt.files;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function revokeNewPreviewBlobs(panel) {
+    if (!panel) return;
+    panel.querySelectorAll('.product-image-thumb-wrap[data-new-index] img').forEach(function (img) {
+      if (img.src && img.src.indexOf('blob:') === 0) URL.revokeObjectURL(img.src);
+    });
+  }
+
+  function countExisting(panel) {
+    var n = 0;
+    panel.querySelectorAll('.product-image-thumb-wrap[data-existing="1"]').forEach(function (wrap) {
+      var chk = wrap.querySelector('.product-image-remove-check');
+      if (!chk || !chk.checked) n += 1;
+    });
+    return n;
+  }
+
+  function countNew(panel, input) {
+    return (accumulators.get(input) || []).length;
+  }
+
+  function slotsLeft(panel, input) {
+    var max = parseInt(panel.getAttribute('data-max-images') || '5', 10) || 5;
+    return Math.max(0, max - countExisting(panel) - countNew(panel, input));
+  }
+
+  function updateActionsBar(panel) {
+    var bar = panel.querySelector('.product-images-actions-bar');
+    var rep = panel.querySelector('.product-image-replace-btn');
+    if (!bar || !rep) return;
+    var has = panel.querySelector(
+      '.product-image-thumb-wrap[data-existing="1"], .product-image-thumb-wrap[data-new-index]'
+    );
+    var sel = panel.querySelector('.product-image-thumb-wrap.is-selected');
+    if (!has || !sel) {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    rep.classList.toggle('d-none', sel.dataset.existing !== '1');
+  }
+
+  function selectWrap(panel, wrap) {
+    panel.querySelectorAll('.product-image-thumb-wrap.is-selected').forEach(function (w) {
+      w.classList.remove('is-selected');
+    });
+    wrap.classList.add('is-selected');
+    updateActionsBar(panel);
+  }
+
+  function ensureSelection(panel) {
+    var sel = panel.querySelector('.product-image-thumb-wrap.is-selected');
+    if (sel && panel.contains(sel)) {
+      updateActionsBar(panel);
+      return;
+    }
+    var first =
+      panel.querySelector('.product-image-thumb-wrap[data-existing="1"]') ||
+      panel.querySelector('.product-image-thumb-wrap[data-new-index]');
+    if (first) selectWrap(panel, first);
+    else updateActionsBar(panel);
+  }
+
+  function updatePanelUI(panel) {
+    var input = panel.querySelector('.product-images-file-input');
+    if (!input) return;
+    var max = parseInt(panel.getAttribute('data-max-images') || '5', 10) || 5;
+    var existing = countExisting(panel);
+    var newer = countNew(panel, input);
+    var total = existing + newer;
+    var left = Math.max(0, max - total);
+    var counter = panel.querySelector('.product-images-counter');
+    if (counter) {
+      counter.textContent =
+        total +
+        '/' +
+        max +
+        ' ảnh' +
+        (left > 0 ? ' — còn thêm được ' + left + ' ảnh' : ' — đã đủ tối đa');
+    }
+    var ph = panel.querySelector('.product-image-slot-placeholder');
+    if (ph) {
+      var numEl = ph.querySelector('.product-image-slot-placeholder-num');
+      if (numEl) numEl.textContent = String(left);
+      ph.classList.toggle('d-none', left <= 0);
+    }
+    var dropzone = panel.querySelector('.product-images-dropzone');
+    if (dropzone) {
+      dropzone.classList.toggle('is-disabled', left <= 0);
+      /* Không disabled input — trình duyệt sẽ không gửi file khi submit */
+    }
+    updateActionsBar(panel);
+  }
+
+  function panelCanAddFiles(panel, input) {
+    return slotsLeft(panel, input) > 0;
+  }
+
+  function syncFilesBeforeSubmit(panel, input) {
+    var merged = accumulators.get(input);
+    if (merged && merged.length) {
+      setInputFiles(input, merged);
+    }
+    input.disabled = false;
+    input.removeAttribute('disabled');
+  }
+
+  function renderNewPreviews(panel, input) {
+    var strip = panel.querySelector('.product-images-new-strip');
+    var scroll = panel.querySelector('.product-images-strip-scroll');
+    if (!strip) return;
+    revokeNewPreviewBlobs(panel);
+    panel.querySelectorAll('.product-image-thumb-wrap[data-new-index]').forEach(function (el) {
+      el.remove();
+    });
+    var files = accumulators.get(input) || [];
+    files.forEach(function (file, idx) {
+      var wrap = document.createElement('div');
+      wrap.className = 'product-image-thumb-wrap';
+      wrap.dataset.newIndex = String(idx);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'product-image-thumb';
+      btn.setAttribute('aria-label', 'Ảnh mới ' + (idx + 1));
+      var img = document.createElement('img');
+      img.alt = '';
+      img.src = URL.createObjectURL(file);
+      btn.appendChild(img);
+      wrap.appendChild(btn);
+      if (scroll) scroll.insertBefore(wrap, strip);
+      else strip.appendChild(wrap);
+    });
+    ensureSelection(panel);
+    updatePanelUI(panel);
+  }
+
+  function mergeIntoInput(panel, input, newFiles) {
+    var prev = accumulators.get(input) || [];
+    var map = new Map();
+    prev.forEach(function (f) {
+      map.set(fileKey(f), f);
+    });
+    Array.from(newFiles || []).forEach(function (f) {
+      map.set(fileKey(f), f);
+    });
+    var max = parseInt(panel.getAttribute('data-max-images') || '5', 10) || 5;
+    var cap = Math.max(0, max - countExisting(panel));
+    var merged = Array.from(map.values()).slice(0, cap);
+    accumulators.set(input, merged);
+    setInputFiles(input, merged);
+    renderNewPreviews(panel, input);
+  }
+
+  function resetPanel(panel) {
+    var input = panel.querySelector('.product-images-file-input');
+    if (!input) return;
+    accumulators.delete(input);
+    replaceTargets.delete(input);
+    input.value = '';
+    input.disabled = false;
+    input.removeAttribute('disabled');
+    panel.querySelectorAll('.product-image-remove-check').forEach(function (chk) {
+      chk.checked = false;
+    });
+    panel.querySelectorAll('.product-image-thumb-wrap[data-existing="1"]').forEach(function (wrap) {
+      wrap.classList.remove('is-marked-remove');
+    });
+    revokeNewPreviewBlobs(panel);
+    panel.querySelectorAll('.product-image-thumb-wrap[data-new-index]').forEach(function (el) {
+      el.remove();
+    });
+    panel.querySelectorAll('.product-image-thumb-wrap.is-selected').forEach(function (w) {
+      w.classList.remove('is-selected');
+    });
+    var first = panel.querySelector('.product-image-thumb-wrap[data-existing="1"]');
+    if (first) first.classList.add('is-selected');
+    updatePanelUI(panel);
+  }
+
+  function initPanel(panel) {
+    var input = panel.querySelector('.product-images-file-input');
+    if (!input || panel.dataset.imagesInit === '1') return;
+    panel.dataset.imagesInit = '1';
+
+    var scroll = panel.querySelector('.product-images-strip-scroll');
+    if (scroll) {
+      scroll.addEventListener('click', function (e) {
+        if (e.target.closest('.product-image-slot-placeholder')) {
+          if (panelCanAddFiles(panel, input)) input.click();
+          return;
+        }
+        var wrap = e.target.closest('.product-image-thumb-wrap');
+        if (!wrap || !scroll.contains(wrap) || !wrap.querySelector('.product-image-thumb')) return;
+        selectWrap(panel, wrap);
+      });
+    }
+
+    input.addEventListener('change', function () {
+      var replaceIdx = replaceTargets.get(input);
+      if (replaceIdx != null) {
+        var rwrap = panel.querySelector(
+          '.product-image-thumb-wrap[data-existing="1"][data-index="' + replaceIdx + '"]'
+        );
+        var chk = rwrap && rwrap.querySelector('.product-image-remove-check');
+        if (chk) {
+          chk.checked = true;
+          if (rwrap) rwrap.classList.add('is-marked-remove');
+        }
+        replaceTargets.delete(input);
+        if (input.files && input.files[0]) mergeIntoInput(panel, input, [input.files[0]]);
+        else updatePanelUI(panel);
+        return;
+      }
+      mergeIntoInput(panel, input, input.files);
+    });
+
+    var repBtn = panel.querySelector('.product-image-replace-btn');
+    if (repBtn) {
+      repBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var sel = panel.querySelector('.product-image-thumb-wrap.is-selected');
+        if (!sel || sel.dataset.existing !== '1') return;
+        replaceTargets.set(input, sel.getAttribute('data-index'));
+        input.click();
+      });
+    }
+
+    var delBtn = panel.querySelector('.product-image-delete-btn');
+    if (delBtn) {
+      delBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var sel = panel.querySelector('.product-image-thumb-wrap.is-selected');
+        if (!sel) return;
+        if (sel.dataset.existing === '1') {
+          var c = sel.querySelector('.product-image-remove-check');
+          if (c) {
+            c.checked = !c.checked;
+            sel.classList.toggle('is-marked-remove', c.checked);
+          }
+          updatePanelUI(panel);
+          return;
+        }
+        if (sel.dataset.newIndex != null) {
+          var rm = parseInt(sel.dataset.newIndex, 10);
+          var acc = (accumulators.get(input) || []).slice();
+          acc.splice(rm, 1);
+          accumulators.set(input, acc);
+          setInputFiles(input, acc);
+          renderNewPreviews(panel, input);
+        }
+      });
+    }
+
+    var dropzone = panel.querySelector('.product-images-dropzone');
+    if (dropzone) {
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        dropzone.addEventListener(ev, function (e) {
+          e.preventDefault();
+          if (!dropzone.classList.contains('is-disabled')) dropzone.classList.add('is-dragover');
+        });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        dropzone.addEventListener(ev, function (e) {
+          e.preventDefault();
+          dropzone.classList.remove('is-dragover');
+        });
+      });
+      dropzone.addEventListener('drop', function (e) {
+        if (dropzone.classList.contains('is-disabled')) return;
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) mergeIntoInput(panel, input, files);
+      });
+    }
+
+    var form = panel.closest('form');
+    if (form) {
+      form.addEventListener('submit', function () {
+        syncFilesBeforeSubmit(panel, input);
+      });
+    }
+
+    ensureSelection(panel);
+    updatePanelUI(panel);
+  }
+
+  document.querySelectorAll('.product-images-panel').forEach(initPanel);
+
+  document.querySelectorAll('.product-page-modal').forEach(function (modal) {
+    modal.addEventListener('show.bs.modal', function () {
+      modal.querySelectorAll('.product-images-panel').forEach(resetPanel);
+    });
+  });
+}
+
+/** Bấm vào dòng (trừ menu, nút, link) mở trang chi tiết sản phẩm. */
+function initProductTableRowClick() {
+  var tbody = document.querySelector('table.product-table-v2 tbody');
+  if (!tbody) return;
+  tbody.addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-product-detail]');
+    if (!tr) return;
+    if (e.target.closest('a, button, input, label, .dropdown, form')) return;
+    var url = tr.getAttribute('data-product-detail');
+    if (url) window.location.href = url;
+  });
+}
+
+function initProductDetailGallery() {
+  var gallery = document.querySelector('.product-detail-gallery');
+  if (!gallery) return;
+  var mainImg = document.getElementById('productDetailMainImg');
+  var thumbs = Array.from(gallery.querySelectorAll('.product-detail-thumb'));
+  if (!mainImg || !thumbs.length) return;
+
+  function activateThumb(btn) {
+    var img = btn.querySelector('img');
+    if (img && img.src) mainImg.src = img.src;
+    thumbs.forEach(function (t) {
+      t.classList.remove('is-active');
+    });
+    btn.classList.add('is-active');
+  }
+
+  thumbs.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      activateThumb(btn);
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
   initProductModalActions();
+  initProductTableRowClick();
+  initProductMultiImages();
+  initProductDetailGallery();
   initProductStockMethodSelects();
   initCategoryPickers();
   initTaxonomyPickers();
@@ -551,6 +904,16 @@ document.addEventListener('DOMContentLoaded', function () {
     form.addEventListener('submit', function (e) {
       var label = form.querySelector('button')?.textContent?.trim() || '';
       if (label.indexOf('Ngừng') >= 0 && !confirm('Ngừng bán sản phẩm này?')) e.preventDefault();
+    });
+  });
+  document.querySelectorAll('.product-delete-form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      var name = form.getAttribute('data-name') || 'sản phẩm này';
+      var msg =
+        'Xóa sản phẩm "' +
+        name +
+        '"?\n\nDòng sản phẩm trong báo giá liên quan cũng sẽ bị gỡ. Thao tác không thể hoàn tác.';
+      if (!confirm(msg)) e.preventDefault();
     });
   });
   var deleteAllForm = document.getElementById('productDeleteAllForm');

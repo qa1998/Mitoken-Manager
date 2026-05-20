@@ -1,9 +1,9 @@
-{% macro product_taxonomy_picker(parent_categories, brands_list, selected_category_id=None, selected_brand_id=None) %}
-<div class="taxonomy-picker"
+{% macro product_taxonomy_picker(parent_categories, brands_list, selected_category_id=None, selected_brand_id=None, inline=false) %}
+<div class="taxonomy-picker{% if inline %} taxonomy-picker-inline{% endif %}"
      data-selected-category-id="{{ selected_category_id or '' }}"
      data-selected-brand-id="{{ selected_brand_id or '' }}">
   <div class="row g-2">
-    <div class="col-12">
+    <div class="{% if inline %}col-md-4{% else %}col-12{% endif %}">
       <label class="form-label-custom small mb-1">Danh mục cha</label>
       <select name="category_parent_id" class="form-select form-select-sm taxonomy-parent-select">
         <option value="">— Chọn danh mục cha —</option>
@@ -11,14 +11,19 @@
         <option value="{{ p.id }}">{{ p.name }}</option>
         {% endfor %}
       </select>
+      {% if inline %}
+      <button type="button" class="btn btn-link btn-sm px-0 mt-2 taxonomy-manage-link category-create-link d-block text-start">
+        <i class="bi bi-folder2 me-1"></i>Quản lý danh mục &amp; thương hiệu
+      </button>
+      {% endif %}
     </div>
-    <div class="col-12">
+    <div class="{% if inline %}col-md-4{% else %}col-12{% endif %}">
       <label class="form-label-custom small mb-1">Danh mục con</label>
       <select name="category_id" class="form-select form-select-sm taxonomy-child-select">
         <option value="">— Chọn danh mục con —</option>
       </select>
     </div>
-    <div class="col-12">
+    <div class="{% if inline %}col-md-4{% else %}col-12{% endif %}">
       <label class="form-label-custom small mb-1">Thương hiệu</label>
       <select name="brand_id" class="form-select form-select-sm taxonomy-brand-select">
         <option value="">— Chọn thương hiệu —</option>
@@ -28,8 +33,10 @@
       </select>
     </div>
   </div>
+  {% if not inline %}
   <button type="button" class="btn btn-link btn-sm px-0 mt-1 taxonomy-manage-link category-create-link">
     <i class="bi bi-folder2 me-1"></i>Quản lý danh mục &amp; thương hiệu
   </button>
+  {% endif %}
 </div>
 {% endmacro %}

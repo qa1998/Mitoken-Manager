@@ -1,1 +1,122 @@
-{% extends 'base.html' %}{% block content %}<h3 class="mb-4">Dashboard</h3><div class="row g-3 mb-4">{% for label,key in [('Khách hàng','customers'),('Sản phẩm','products'),('Báo giá','quotes'),('Đơn hàng','orders'),('Công nợ','debt'),('Tồn thấp','low_stock')] %}<div class="col-md-2"><div class="card p-3"><div class="small-muted">{{label}}</div><div class="stat">{% if key=='debt' %}{{stats[key]|money}}{% else %}{{stats[key]}}{% endif %}</div></div></div>{% endfor %}</div><div class="row g-3"><div class="col-md-6"><div class="card p-3"><h5>Báo giá mới</h5><table class="table"><tr><th>Mã</th><th>Khách</th><th>Tổng</th></tr>{% for q in latest_quotes %}<tr><td>{{q.quote_code}}</td><td>{{q.customer.name}}</td><td>{{q.total|money}}</td></tr>{% endfor %}</table></div></div><div class="col-md-6"><div class="card p-3"><h5>Đơn hàng mới</h5><table class="table"><tr><th>Mã</th><th>Khách</th><th>Trạng thái</th></tr>{% for o in latest_orders %}<tr><td>{{o.order_code}}</td><td>{{o.customer.name}}</td><td><span class="badge badge-soft">{{o.status}}</span></td></tr>{% endfor %}</table></div></div></div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<h3 class="mb-4">Dashboard</h3>
+
+<div class="row g-3 mb-4">
+  {% for label, key in [
+    ('Khách hàng', 'customers'),
+    ('Sản phẩm', 'products'),
+    ('Báo giá', 'quotes'),
+    ('Đơn hàng', 'orders'),
+    ('Công nợ', 'debt'),
+    ('Tồn thấp', 'low_stock'),
+  ] %}
+  <div class="col-md-2 col-6">
+    <div class="card p-3 h-100">
+      <div class="small-muted">{{ label }}</div>
+      <div class="stat fs-4 fw-semibold">
+        {% if key == 'debt' %}{{ stats[key]|money }}{% else %}{{ stats[key] }}{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Báo giá mới</h5>
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr><th>Mã</th><th>Khách</th><th class="text-end">Tổng</th></tr>
+        </thead>
+        <tbody>
+          {% for q in latest_quotes %}
+          <tr>
+            <td><a href="{{ url_for('quote_preview', qid=q.id) }}">{{ q.quote_code }}</a></td>
+            <td>{{ quote_customer_label(q) }}</td>
+            <td class="text-end">{{ q.total|money }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="text-muted">Chưa có báo giá</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Đơn hàng mới</h5>
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr><th>Mã</th><th>Khách</th><th>Trạng thái</th></tr>
+        </thead>
+        <tbody>
+          {% for o in latest_orders %}
+          <tr>
+            <td><a href="{{ url_for('order_preview', oid=o.id) }}">{{ o.order_code }}</a></td>
+            <td>{{ o.customer.name if o.customer else '—' }}</td>
+            <td><span class="badge badge-soft">{{ o.status }}</span></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="text-muted">Chưa có đơn hàng</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if is_admin %}
+<div class="panel-card border border-danger">
+  <div class="p-3">
+    <h5 class="text-danger mb-2"><i class="bi bi-exclamation-triangle me-2"></i>Clear data — Xóa toàn bộ dữ liệu</h5>
+    <p class="small-muted mb-3">
+      Xóa <strong>toàn bộ</strong> khách hàng, sản phẩm, báo giá, đơn hàng, kho, NCC, phiếu mua, hợp đồng, công ty và file đính kèm.
+      <strong>Không xóa</strong> tài khoản đăng nhập (User). Hành động <strong>không thể hoàn tác</strong>.
+    </p>
+    <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearDataModal">
+      <i class="bi bi-trash me-1"></i> Clear data
+    </button>
+  </div>
+</div>
+
+<div class="modal fade" id="clearDataModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content border-danger">
+      <form method="post" action="{{ url_for('dashboard_clear_data') }}" id="clearDataForm">
+        <div class="modal-header border-danger">
+          <h5 class="modal-title text-danger">Xác nhận xóa toàn bộ dữ liệu</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3">Bạn sắp xóa sạch database nghiệp vụ. Chỉ dùng khi reset môi trường demo / test.</p>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="confirm_ack" value="1" id="clearDataAck" required>
+            <label class="form-check-label" for="clearDataAck">
+              Tôi hiểu mọi dữ liệu nghiệp vụ sẽ bị xóa vĩnh viễn
+            </label>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Gõ <code>XOA HET</code> để xác nhận</label>
+            <input type="text" name="confirm_text" class="form-control" autocomplete="off" required
+                   placeholder="XOA HET">
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Mật khẩu đăng nhập của bạn</label>
+            <input type="password" name="password" class="form-control" autocomplete="current-password" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-danger">Xóa toàn bộ dữ liệu</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

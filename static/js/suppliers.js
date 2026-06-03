@@ -255,6 +255,8 @@ function setSupplierProductPickerValue(picker, product) {
 
 function applySupplierProductCost(row, product) {
   if (!row || !product) return;
+  var panel = row.closest('[data-supplier-products-panel]');
+  if (panel && panel.getAttribute('data-skip-auto-cost') === '1') return;
   var costInput = row.querySelector('input[name="sp_cost_price"]');
   if (!costInput || costInput.value) return;
   var cost = product.purchase_cost_price || product.cost_price || 0;

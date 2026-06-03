@@ -227,9 +227,6 @@
             <th>SKU</th>
             <th>Sản phẩm</th>
             <th>Kho</th>
-            <th class="text-end">Tồn đầu kỳ</th>
-            <th class="text-end">Nhập</th>
-            <th class="text-end">Xuất</th>
             <th class="text-end">Tồn hiện tại</th>
             <th>Đơn vị</th>
             <th>Trạng thái</th>
@@ -250,9 +247,6 @@
               </div>
             </td>
             <td><span class="warehouse-label"><i class="bi bi-building"></i> {{ row.warehouse }}</span></td>
-            <td class="text-end">{{ row.opening }}</td>
-            <td class="text-end text-stock-in">{{ row.inbound }}</td>
-            <td class="text-end text-stock-out">{{ row.outbound }}</td>
             <td class="text-end fw-semibold">{{ row.current }}</td>
             <td>{{ product_base_unit(p) }}</td>
             <td><span class="stock-status-badge status-{{ row.status_key }}">{{ row.status_label }}</span></td>
@@ -267,7 +261,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="11" class="text-center text-muted py-5">Không có dữ liệu tồn kho</td></tr>
+          <tr><td colspan="8" class="text-center text-muted py-5">Không có dữ liệu tồn kho</td></tr>
           {% endfor %}
         </tbody>
       </table>

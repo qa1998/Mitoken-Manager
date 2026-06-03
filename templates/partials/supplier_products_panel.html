@@ -29,7 +29,8 @@
     <input type="hidden" name="sp_qty_unit_mode" value="base" data-supplier-qty-unit-mode-hidden>
     <div class="supplier-qty-amount-wrap">
       <label class="supplier-qty-micro-label" data-supplier-qty-unit-label>Số lượng</label>
-      <input type="number" name="sp_qty" class="form-control form-control-sm supplier-intake-qty" min="0" step="any" value="0" placeholder="0">
+      <input type="number" name="sp_qty" class="form-control form-control-sm supplier-intake-qty" min="0" step="any"
+             value="{% if link and (link.purchase_qty or link.qty) %}{% if link.purchase_qty and link.purchase_qty > 0 %}{{ link.purchase_qty }}{% else %}{{ link.qty }}{% endif %}{% else %}0{% endif %}" placeholder="0">
     </div>
     <div class="supplier-qty-convert-hint small-muted" data-supplier-qty-convert-hint></div>
     <div class="supplier-qty-conv-badge small-muted d-none" data-supplier-conv-badge></div>
@@ -40,9 +41,9 @@
 </td>
 {% endmacro %}
 
-{% macro supplier_products_panel(links=none) %}
+{% macro supplier_products_panel(links=none, skip_auto_cost=false) %}
 {% set links = links or [] %}
-<div class="supplier-products-panel" data-supplier-products-panel>
+<div class="supplier-products-panel" data-supplier-products-panel{% if skip_auto_cost %} data-skip-auto-cost="1"{% endif %}>
   <div class="supplier-products-panel-head">
     <div>
       <h6 class="supplier-products-panel-title"><i class="bi bi-box-seam me-2"></i>Sản phẩm nhập từ NCC</h6>

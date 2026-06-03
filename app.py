@@ -321,11 +321,55 @@ class SupplierIntakeLine(db.Model):
     def qty_base(self):
         return float(self.qty or 0)
 
+class PurchaseOrder(db.Model):
+    __tablename__ = 'purchase_order'
+    id = db.Column(db.Integer, primary_key=True)
+    po_code = db.Column(db.String(80), unique=True, nullable=False)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=True)
+    receipt_mode = db.Column(db.String(40), default='stock_in')
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=True)
+    quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=True)
+    status = db.Column(db.String(40), default='Nháp')
+    ref_code = db.Column(db.String(80), default='')
+    note = db.Column(db.String(255), default='')
+    total_amount = db.Column(db.Integer, default=0)
+    paid_amount = db.Column(db.Integer, default=0)
+    received_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    supplier = db.relationship('Supplier', backref=db.backref('purchase_orders', lazy='dynamic'))
+    customer = db.relationship('Customer')
+    order = db.relationship('Order')
+    quote = db.relationship('Quote')
+    lines = db.relationship(
+        'PurchaseOrderLine',
+        backref='purchase_order',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+    )
+    payments = db.relationship('SupplierPayment', backref='purchase_order', lazy='dynamic')
+
+class PurchaseOrderLine(db.Model):
+    __tablename__ = 'purchase_order_line'
+    id = db.Column(db.Integer, primary_key=True)
+    purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_order.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    qty = db.Column(db.Float, default=0)
+    purchase_qty = db.Column(db.Float, default=0)
+    cost_price = db.Column(db.Integer, default=0)
+    line_amount = db.Column(db.Integer, default=0)
+    supplier_sku = db.Column(db.String(120), default='')
+    note = db.Column(db.String(255), default='')
+    stock_movement_id = db.Column(db.Integer, db.ForeignKey('stock_movement.id'), nullable=True)
+    product = db.relationship('Product')
+    stock_movement = db.relationship('StockMovement')
+
 class SupplierPayment(db.Model):
     __tablename__ = 'supplier_payment'
     id = db.Column(db.Integer, primary_key=True)
     supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=False)
-    intake_id = db.Column(db.Integer, db.ForeignKey('supplier_intake.id'), nullable=False)
+    intake_id = db.Column(db.Integer, db.ForeignKey('supplier_intake.id'), nullable=True)
+    purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_order.id'), nullable=True)
     amount = db.Column(db.Integer, default=0)
     method = db.Column(db.String(80), default='Chuyển khoản')
     note = db.Column(db.String(255), default='')
@@ -360,6 +404,7 @@ ADMIN_ONLY_ENDPOINTS = frozenset({
     'delete_user',
     'products_delete_all',
     'delete_customer',
+    'dashboard_clear_data',
 })
 
 SALES_ENDPOINTS = frozenset({
@@ -470,6 +515,12 @@ WAREHOUSE_ENDPOINTS = frozenset({
     'delete_supplier_intake',
     'view_supplier_payment_receipt',
     'product_options_json',
+    'purchase_orders',
+    'purchase_order_detail',
+    'purchase_order_receive',
+    'purchase_order_delete',
+    'purchase_order_payment',
+    'customer_orders_json',
     'supplier_debt',
 })
 
@@ -500,6 +551,7 @@ SIDEBAR_SECTIONS = [
         'title': 'KHO VẬN',
         'items': [
             {'key': 'stock', 'endpoint': 'stock', 'label': 'Tồn kho', 'icon': 'bi-boxes'},
+            {'key': 'purchase_orders', 'endpoint': 'purchase_orders', 'label': 'Phiếu mua hàng', 'icon': 'bi-receipt'},
         ],
     },
     {
@@ -521,10 +573,10 @@ SIDEBAR_SECTIONS = [
 ROLE_NAV_KEYS = {
     'admin': {
         'dashboard', 'customers', 'suppliers', 'products', 'quotes', 'orders', 'contracts',
-        'stock', 'debt', 'supplier_debt', 'users', 'company_settings',
+        'stock', 'purchase_orders', 'debt', 'supplier_debt', 'users', 'company_settings',
     },
     'sales': {'dashboard', 'customers', 'quotes', 'orders', 'contracts', 'debt'},
-    'warehouse': {'dashboard', 'suppliers', 'products', 'stock'},
+    'warehouse': {'dashboard', 'suppliers', 'products', 'stock', 'purchase_orders'},
 }
 
 def get_current_user():
@@ -1467,6 +1519,8 @@ def resolve_active_nav_key():
     ep = request.endpoint
     if ep == 'stock':
         return 'stock'
+    if ep and ep.startswith('purchase_order'):
+        return 'purchase_orders'
     endpoint_keys = {
         'dashboard': 'dashboard',
         'customers': 'customers',
@@ -1477,6 +1531,7 @@ def resolve_active_nav_key():
         'contracts': 'contracts',
         'debt': 'debt',
         'supplier_debt': 'supplier_debt',
+        'purchase_orders': 'purchase_orders',
         'users': 'users',
         'company_settings': 'company_settings',
     }
@@ -1618,9 +1673,9 @@ def create_order_from_quote_record(quote):
     db.session.flush()
     return order, True
 
-def quote_stock_shortages(quote):
-    """Sản phẩm trong báo giá không đủ tồn kho để xuất bán."""
-    shortages = []
+def quote_shortage_lines(quote):
+    """Dòng báo giá thiếu tồn — dùng tạo phiếu mua hàng."""
+    lines = []
     for item in quote.items:
         product = item.product if getattr(item, 'product', None) else Product.query.get(item.product_id)
         if not product:
@@ -1629,24 +1684,102 @@ def quote_stock_shortages(quote):
         if qty <= 0:
             continue
         stock = float(product.stock or 0)
-        if stock < qty - 1e-9:
-            shortages.append({
-                'name': item.product_name or product.name,
-                'sku': item.sku or product.sku,
-                'stock': stock,
-                'need': qty,
-            })
+        shortfall = max(qty - stock, 0)
+        if shortfall <= 1e-9:
+            continue
+        link = (
+            ProductSupplier.query.filter_by(product_id=product.id, is_primary=True).first()
+            or ProductSupplier.query.filter_by(product_id=product.id)
+            .order_by(ProductSupplier.cost_price.asc())
+            .first()
+        )
+        purchase_cost = (link.cost_price if link else 0) or product.cost_price or 0
+        if product_has_unit_conversion(product) and purchase_cost:
+            purchase_cost = purchase_unit_cost_from_base_cost(product, purchase_cost)
+        lines.append({
+            'product': product,
+            'item': item,
+            'shortfall': shortfall,
+            'supplier': link.supplier if link else None,
+            'supplier_id': link.supplier_id if link else None,
+            'cost': int(purchase_cost or 0),
+            'supplier_sku': (link.supplier_sku if link else '') or '',
+        })
+    return lines
+
+def quote_stock_shortages(quote):
+    """Sản phẩm trong báo giá không đủ tồn kho (hiển thị thông báo)."""
+    shortages = []
+    for row in quote_shortage_lines(quote):
+        item = row['item']
+        product = row['product']
+        shortages.append({
+            'name': item.product_name or product.name,
+            'sku': item.sku or product.sku,
+            'stock': float(product.stock or 0),
+            'need': float(item.qty or 0),
+        })
     return shortages
 
-def format_quote_stock_shortage_message(shortages):
-    parts = []
-    for s in shortages[:5]:
-        parts.append(
-            f'{s["name"]} ({s["sku"]}): tồn {format_qty_display(s["stock"])}, '
-            f'cần {format_qty_display(s["need"])}'
+def quote_chot_stock_in_qty(product_id, quote_id):
+    ensure_stock_movement_columns()
+    return float(
+        db.session.query(func.coalesce(func.sum(StockMovement.qty), 0))
+        .filter(
+            StockMovement.product_id == product_id,
+            StockMovement.quote_id == quote_id,
+            StockMovement.movement_type == 'IN',
         )
-    extra = f' và {len(shortages) - 5} sản phẩm khác' if len(shortages) > 5 else ''
-    return 'Tồn kho không đủ để chốt báo giá: ' + '; '.join(parts) + extra
+        .scalar() or 0,
+    )
+
+def auto_create_purchase_orders_for_quote(quote, order):
+    """Tự tạo phiếu mua hàng (Nháp) theo NCC cho phần thiếu tồn khi chốt báo giá."""
+    ensure_purchase_order_schema()
+    ensure_purchase_order_quote_column()
+    existing = PurchaseOrder.query.filter_by(quote_id=quote.id).all()
+    if existing:
+        return [po.po_code for po in existing]
+    shortage_lines = quote_shortage_lines(quote)
+    if not shortage_lines:
+        return []
+    by_supplier = {}
+    for row in shortage_lines:
+        sid = row['supplier_id'] or 0
+        by_supplier.setdefault(sid, []).append(row)
+    walkin = is_walkin_customer(quote.customer)
+    codes = []
+    for sid, rows in by_supplier.items():
+        po = PurchaseOrder(
+            po_code=next_purchase_order_code(),
+            supplier_id=sid if sid else None,
+            quote_id=quote.id,
+            status='Nháp',
+            ref_code=quote.quote_code,
+            note=f'Tự động từ chốt báo giá {quote.quote_code}',
+        )
+        po.receipt_mode = 'no_stock'
+        if order and not walkin:
+            po.customer_id = order.customer_id
+            po.order_id = order.id
+        db.session.add(po)
+        db.session.flush()
+        pending = []
+        for row in rows:
+            product = row['product']
+            shortfall = row['shortfall']
+            pending.append({
+                'product': product,
+                'purchase_qty': shortfall,
+                'base_qty': shortfall,
+                'unit_mode': 'base',
+                'cost': row['cost'],
+                'sku': row['supplier_sku'],
+                'note': f'Thiếu tồn khi chốt {quote.quote_code}',
+            })
+        save_purchase_order_lines(po, pending)
+        codes.append(po.po_code)
+    return codes
 
 def quote_stock_already_deducted(quote_id):
     ensure_stock_movement_columns()
@@ -1656,7 +1789,7 @@ def quote_stock_already_deducted(quote_id):
     ).first() is not None
 
 def apply_quote_stock_deduction(quote, order=None):
-    """Trừ tồn kho theo báo giá; thiếu tồn thì tự nhập đủ phần thiếu rồi xuất bán (mỗi BG một lần)."""
+    """Trừ tồn theo báo giá; thiếu tồn thì tạm nhập đủ phần thiếu rồi xuất (mỗi BG một lần)."""
     ensure_stock_movement_columns()
     if quote_stock_already_deducted(quote.id):
         return False, 0
@@ -1673,7 +1806,7 @@ def apply_quote_stock_deduction(quote, order=None):
         shortfall = max(qty - stock, 0)
         if shortfall > 1e-9:
             product.stock = stock + shortfall
-            in_note = f'Tự động nhập khi chốt báo giá {quote.quote_code}'
+            in_note = f'Tạm nhập khi chốt báo giá {quote.quote_code} (chờ PMH)'
             if order_code:
                 in_note += f' → đơn {order_code}'
             db.session.add(StockMovement(
@@ -1682,7 +1815,7 @@ def apply_quote_stock_deduction(quote, order=None):
                 qty=shortfall,
                 purchase_qty=0,
                 ref_code=quote.quote_code,
-                method='Nhập mua hàng',
+                method='Chốt báo giá',
                 warehouse=DEFAULT_WAREHOUSE,
                 note=in_note,
                 quote_id=quote.id,
@@ -1705,21 +1838,24 @@ def apply_quote_stock_deduction(quote, order=None):
         ))
     return True, auto_in_lines
 
-def quote_chot_stock_flash_detail(stock_deducted, auto_in_lines):
+def quote_chot_flash_detail(stock_deducted, auto_in_lines, po_codes):
     parts = []
+    if po_codes:
+        parts.append('phiếu mua ' + ', '.join(po_codes))
     if auto_in_lines:
-        parts.append(f'tự nhập kho {auto_in_lines} dòng thiếu hàng')
+        parts.append(f'tạm nhập kho {auto_in_lines} dòng thiếu')
     if stock_deducted:
         parts.append('trừ kho')
-    return ' và '.join(parts)
+    return ' — '.join(parts)
 
 def chot_quote(quote):
-    """Chốt báo giá: tạo đơn hàng (nếu chưa có), tự nhập nếu thiếu tồn, rồi xuất kho."""
+    """Chốt báo giá: đơn hàng, phiếu mua hàng (thiếu tồn), nhập/xuất kho."""
     if quote_display_status(quote) != 'Đã chốt':
         quote.status = 'Đã chốt'
     order, created = create_order_from_quote_record(quote)
+    po_codes = auto_create_purchase_orders_for_quote(quote, order)
     stock_deducted, auto_in_lines = apply_quote_stock_deduction(quote, order)
-    return order, created, stock_deducted, auto_in_lines
+    return order, created, stock_deducted, auto_in_lines, po_codes
 
 def effective_quote_status(quote):
     return quote_display_status(quote)
@@ -2831,6 +2967,387 @@ def supplier_inbound_counts(supplier_ids):
 def ensure_supplier_intake_schema():
     db.create_all()
 
+def ensure_purchase_order_schema():
+    db.create_all()
+    ensure_purchase_order_supplier_nullable()
+    ensure_purchase_order_quote_column()
+
+def ensure_purchase_order_quote_column():
+    from sqlalchemy import inspect, text
+    db.create_all()
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('purchase_order')}
+    except Exception:
+        return
+    if 'quote_id' not in cols:
+        with db.engine.begin() as conn:
+            conn.execute(text('ALTER TABLE purchase_order ADD COLUMN quote_id INTEGER REFERENCES quote(id)'))
+
+def ensure_purchase_order_supplier_nullable():
+    """SQLite: bảng cũ có supplier_id NOT NULL — tạo lại bảng cho phép chưa gán NCC."""
+    from sqlalchemy import inspect, text
+    try:
+        tables = inspect(db.engine).get_table_names()
+    except Exception:
+        return
+    if 'purchase_order' not in tables:
+        return
+    try:
+        with db.engine.begin() as conn:
+            row = conn.execute(text(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='purchase_order'"
+            )).fetchone()
+        if not row or not row[0]:
+            return
+        ddl = row[0].upper()
+        if 'SUPPLIER_ID' not in ddl or 'SUPPLIER_ID INTEGER NOT NULL' not in ddl.replace('  ', ' '):
+            return
+    except Exception:
+        return
+    with db.engine.begin() as conn:
+        conn.execute(text('PRAGMA foreign_keys=OFF'))
+        conn.execute(text("""
+            CREATE TABLE purchase_order_new (
+                id INTEGER PRIMARY KEY,
+                po_code VARCHAR(80) NOT NULL UNIQUE,
+                supplier_id INTEGER REFERENCES supplier(id),
+                receipt_mode VARCHAR(40) DEFAULT 'stock_in',
+                customer_id INTEGER REFERENCES customer(id),
+                order_id INTEGER REFERENCES "order"(id),
+                status VARCHAR(40) DEFAULT 'Nháp',
+                ref_code VARCHAR(80) DEFAULT '',
+                note VARCHAR(255) DEFAULT '',
+                total_amount INTEGER DEFAULT 0,
+                paid_amount INTEGER DEFAULT 0,
+                received_at DATETIME,
+                created_at DATETIME
+            )
+        """))
+        conn.execute(text("""
+            INSERT INTO purchase_order_new (
+                id, po_code, supplier_id, receipt_mode, customer_id, order_id,
+                status, ref_code, note, total_amount, paid_amount, received_at, created_at
+            )
+            SELECT
+                id, po_code, supplier_id, receipt_mode, customer_id, order_id,
+                status, ref_code, note, total_amount, paid_amount, received_at, created_at
+            FROM purchase_order
+        """))
+        conn.execute(text('DROP TABLE purchase_order'))
+        conn.execute(text('ALTER TABLE purchase_order_new RENAME TO purchase_order'))
+        conn.execute(text('PRAGMA foreign_keys=ON'))
+
+def ensure_supplier_payment_columns():
+    from sqlalchemy import inspect, text
+    ensure_purchase_order_schema()
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('supplier_payment')}
+    except Exception:
+        return
+    with db.engine.begin() as conn:
+        if 'purchase_order_id' not in cols:
+            conn.execute(text(
+                'ALTER TABLE supplier_payment ADD COLUMN purchase_order_id INTEGER '
+                'REFERENCES purchase_order(id)'
+            ))
+
+def purchase_order_receipt_mode_label(mode):
+    if mode == 'direct_delivery':
+        return 'Giao thẳng khách hàng'
+    if mode == 'no_stock':
+        return 'Không nhập kho'
+    return 'Nhập kho'
+
+def next_purchase_order_code():
+    return next_code('PMH', PurchaseOrder, 'po_code')
+
+def purchase_order_balance(po):
+    total = po.total_amount or 0
+    paid = po.paid_amount or 0
+    return max(0, total - paid)
+
+def purchase_order_payment_status(po):
+    total = po.total_amount or 0
+    paid = po.paid_amount or 0
+    if po.status == 'Nháp':
+        return 'Chưa nhận hàng'
+    if total <= 0:
+        return '—'
+    if paid <= 0:
+        return 'Chưa thanh toán'
+    if paid >= total:
+        return 'Đã thanh toán'
+    return 'Thanh toán một phần'
+
+def purchase_order_payment_status_key(po):
+    status = purchase_order_payment_status(po)
+    if status == 'Đã thanh toán':
+        return 'paid'
+    if status == 'Thanh toán một phần':
+        return 'partial'
+    if status == 'Chưa thanh toán':
+        return 'unpaid'
+    return 'none'
+
+app.jinja_env.globals['purchase_order_receipt_mode_label'] = purchase_order_receipt_mode_label
+app.jinja_env.globals['purchase_order_balance'] = purchase_order_balance
+app.jinja_env.globals['purchase_order_payment_status'] = purchase_order_payment_status
+app.jinja_env.globals['purchase_order_payment_status_key'] = purchase_order_payment_status_key
+
+def recalc_purchase_order_paid(po):
+    paid = db.session.query(func.coalesce(func.sum(SupplierPayment.amount), 0)).filter(
+        SupplierPayment.purchase_order_id == po.id,
+    ).scalar() or 0
+    po.paid_amount = int(paid)
+    return po.paid_amount
+
+def parse_purchase_order_form_lines():
+    product_ids = request.form.getlist('sp_product_id')
+    qtys = request.form.getlist('sp_qty')
+    qty_modes = request.form.getlist('sp_qty_unit_mode')
+    cost_prices = request.form.getlist('sp_cost_price')
+    supplier_skus = request.form.getlist('sp_supplier_sku')
+    notes = request.form.getlist('sp_note')
+    pending = []
+    for idx, pid_raw in enumerate(product_ids):
+        if not pid_raw:
+            continue
+        try:
+            pid = int(pid_raw)
+        except (TypeError, ValueError):
+            continue
+        product = Product.query.get(pid)
+        if not product:
+            continue
+        entered_qty = max(parse_qty(qtys[idx] if idx < len(qtys) else 0, 0), 0)
+        unit_mode = qty_modes[idx] if idx < len(qty_modes) else ''
+        purchase_qty, base_qty, unit_mode = resolve_supplier_intake_quantities(
+            product, entered_qty, unit_mode,
+        )
+        cost = parse_int(cost_prices[idx] if idx < len(cost_prices) else 0, 0)
+        sku = (supplier_skus[idx] if idx < len(supplier_skus) else '').strip()
+        note = (notes[idx] if idx < len(notes) else '').strip()
+        if base_qty <= 0 and purchase_qty <= 0 and cost <= 0:
+            continue
+        pending.append({
+            'product': product,
+            'purchase_qty': purchase_qty,
+            'base_qty': base_qty,
+            'unit_mode': unit_mode,
+            'cost': cost,
+            'sku': sku,
+            'note': note,
+        })
+    return pending
+
+def save_purchase_order_lines(po, pending_lines):
+    for line in po.lines.all():
+        db.session.delete(line)
+    total_amount = 0
+    for item in pending_lines:
+        product = item['product']
+        purchase_qty = item['purchase_qty']
+        base_qty = item['base_qty']
+        cost = item['cost']
+        bill_qty = purchase_qty if product_has_unit_conversion(product) else base_qty
+        line_amount = int(bill_qty * cost)
+        total_amount += line_amount
+        db.session.add(PurchaseOrderLine(
+            purchase_order_id=po.id,
+            product_id=product.id,
+            qty=base_qty,
+            purchase_qty=purchase_qty,
+            cost_price=cost,
+            line_amount=line_amount,
+            supplier_sku=item['sku'],
+            note=item['note'],
+        ))
+    po.total_amount = total_amount
+
+def apply_purchase_order_line_on_receive(po, line):
+    product = line.product or Product.query.get(line.product_id)
+    supplier = po.supplier
+    if not product or not supplier:
+        return 0
+    purchase_qty = float(line.purchase_qty or 0)
+    base_qty = float(line.qty or 0)
+    purchase_cost = line.cost_price or 0
+    sku = line.supplier_sku or ''
+    note = line.note or ''
+    base_cost = base_unit_cost_from_purchase_cost(product, purchase_cost)
+    upsert_product_supplier_link(product, supplier, purchase_cost, sku, note)
+    movement = None
+    stock_added = 0
+    skip_stock_in = False
+    if po.quote_id and base_qty > 0:
+        already_in = quote_chot_stock_in_qty(product.id, po.quote_id)
+        if already_in >= base_qty - 1e-9:
+            skip_stock_in = True
+        elif already_in > 0:
+            base_qty = max(base_qty - already_in, 0)
+            purchase_qty = base_qty
+    if po.receipt_mode == 'stock_in' and base_qty > 0 and not skip_stock_in:
+        product.stock += base_qty
+        stock_added = base_qty
+        line_note = po.note or ''
+        if note:
+            line_note = f'{line_note} — {note}' if line_note else note
+        movement = StockMovement(
+            product_id=product.id,
+            supplier_id=supplier.id,
+            movement_type='IN',
+            qty=base_qty,
+            purchase_qty=purchase_qty,
+            ref_code=po.ref_code or po.po_code,
+            method='Phiếu mua hàng',
+            warehouse=DEFAULT_WAREHOUSE,
+            note=line_note or f'PMH {po.po_code} — {supplier.code}',
+        )
+        db.session.add(movement)
+        db.session.flush()
+        line.stock_movement_id = movement.id
+    if purchase_cost > 0:
+        old_cost = product.cost_price or 0
+        if old_cost != base_cost:
+            hist_note = f'PMH {po.po_code} — {supplier.code}'
+            db.session.add(PriceHistory(
+                product_id=product.id,
+                price_type='cost_price',
+                old_price=old_cost,
+                new_price=base_cost,
+                note=hist_note,
+            ))
+        product.cost_price = base_cost
+    return stock_added
+
+def save_purchase_order_from_request(po=None):
+    ensure_purchase_order_schema()
+    ensure_stock_movement_columns()
+    if po and po.status != 'Nháp':
+        return None, 'Chỉ sửa được phiếu ở trạng thái Nháp'
+    supplier_id = parse_supplier_id(request.form.get('supplier_id'))
+    supplier = Supplier.query.get(supplier_id) if supplier_id else None
+    receipt_mode = (request.form.get('receipt_mode') or 'stock_in').strip()
+    if receipt_mode not in ('stock_in', 'direct_delivery', 'no_stock'):
+        receipt_mode = 'stock_in'
+    customer_id = None
+    order_id = None
+    if receipt_mode == 'direct_delivery':
+        try:
+            customer_id = int(request.form.get('customer_id') or 0)
+        except (TypeError, ValueError):
+            customer_id = 0
+        if customer_id <= 0 or not Customer.query.get(customer_id):
+            return None, 'Giao thẳng khách hàng: vui lòng chọn khách hàng'
+        oid_raw = (request.form.get('order_id') or '').strip()
+        if oid_raw:
+            try:
+                order_id = int(oid_raw)
+            except (TypeError, ValueError):
+                order_id = 0
+            order = Order.query.filter_by(id=order_id, customer_id=customer_id).first()
+            if not order:
+                return None, 'Đơn hàng liên quan không thuộc khách hàng đã chọn'
+    ref_code = request.form.get('ref_code', '').strip()
+    note = (request.form.get('note') or request.form.get('intake_note') or '').strip()
+    pending = parse_purchase_order_form_lines()
+    if not pending:
+        return None, 'Vui lòng thêm ít nhất một sản phẩm (số lượng hoặc giá nhập)'
+    if po is None:
+        po = PurchaseOrder(
+            po_code=next_purchase_order_code(),
+            supplier_id=supplier.id if supplier else None,
+            status='Nháp',
+        )
+        db.session.add(po)
+        db.session.flush()
+    else:
+        po.supplier_id = supplier.id if supplier else None
+    po.receipt_mode = receipt_mode
+    po.customer_id = customer_id
+    po.order_id = order_id
+    po.ref_code = ref_code
+    po.note = note
+    save_purchase_order_lines(po, pending)
+    return po, None
+
+def confirm_purchase_order_receive(po):
+    ensure_purchase_order_schema()
+    ensure_stock_movement_columns()
+    ensure_supplier_payment_columns()
+    if po.status != 'Nháp':
+        return False, 'Phiếu đã xác nhận nhận hàng'
+    if not po.supplier_id or not po.supplier:
+        return False, 'Vui lòng chọn nhà cung cấp trước khi xác nhận nhận hàng'
+    if po.receipt_mode == 'direct_delivery' and not po.customer_id:
+        return False, 'Giao thẳng khách hàng: thiếu khách hàng'
+    lines = po.lines.order_by(PurchaseOrderLine.id.asc()).all()
+    if not lines:
+        return False, 'Phiếu chưa có dòng sản phẩm'
+    stock_qty = 0
+    for line in lines:
+        stock_qty += apply_purchase_order_line_on_receive(po, line)
+    po.status = 'Đã nhận hàng'
+    po.received_at = datetime.utcnow()
+    return True, stock_qty
+
+def delete_purchase_order_record(po):
+    ensure_purchase_order_schema()
+    ensure_stock_movement_columns()
+    code = po.po_code or f'#{po.id}'
+    if po.status == 'Đã nhận hàng':
+        for payment in po.payments.all():
+            unlink_supplier_payment_receipt(payment.receipt_path)
+            db.session.delete(payment)
+        for line in po.lines.all():
+            if line.stock_movement_id:
+                movement = StockMovement.query.get(line.stock_movement_id)
+                if movement:
+                    product = Product.query.get(line.product_id)
+                    if product and movement.movement_type == 'IN':
+                        product.stock = max((product.stock or 0) - float(movement.qty or 0), 0)
+                    db.session.delete(movement)
+    else:
+        for payment in po.payments.all():
+            unlink_supplier_payment_receipt(payment.receipt_path)
+            db.session.delete(payment)
+    db.session.delete(po)
+    return code
+
+def purchase_order_redirect(message=None, category='success', po_id=None):
+    if message:
+        flash(message, category)
+    if po_id:
+        return redirect(url_for('purchase_order_detail', poid=po_id))
+    src = request.form if request.method == 'POST' else request.args
+    return redirect(url_for(
+        'purchase_orders',
+        q=src.get('q') or '',
+        supplier_id=src.get('supplier_id') or '',
+        status=src.get('status') or '',
+        receipt_mode=src.get('receipt_mode') or '',
+        per_page=src.get('per_page', 10, type=int) or 10,
+        page=src.get('page', 1, type=int) or 1,
+    ))
+
+def purchase_order_list_params():
+    q = request.args.get('q', '').strip()
+    per_page = request.args.get('per_page', 10, type=int)
+    page = request.args.get('page', 1, type=int)
+    supplier_id = request.args.get('supplier_id', '').strip()
+    status = request.args.get('status', '').strip()
+    receipt_mode = request.args.get('receipt_mode', '').strip()
+    if per_page not in (10, 25, 50):
+        per_page = 10
+    return q, per_page, page, supplier_id, status, receipt_mode
+
+def purchase_order_stats():
+    q = PurchaseOrder.query
+    total = q.count()
+    draft = q.filter_by(status='Nháp').count()
+    received = q.filter_by(status='Đã nhận hàng').count()
+    return {'total': total, 'draft': draft, 'received': received}
+
 def supplier_intake_balance(intake):
     total = intake.total_amount or 0
     paid = intake.paid_amount or 0
@@ -2954,6 +3471,7 @@ def build_supplier_intake_board(supplier_ids):
     ensure_supplier_intake_schema()
     ensure_supplier_intake_line_columns()
     ensure_stock_movement_columns()
+    ensure_purchase_order_schema()
     if not supplier_ids:
         return {'intakes': {}, 'payments': {}, 'summaries': {}, 'line_counts': {}}
     for sid in supplier_ids:
@@ -2984,17 +3502,30 @@ def build_supplier_intake_board(supplier_ids):
     payments_by_supplier = {sid: [] for sid in supplier_ids}
     for payment in payments:
         payments_by_supplier.setdefault(payment.supplier_id, []).append(payment)
+    purchase_orders = (
+        PurchaseOrder.query.filter(
+            PurchaseOrder.supplier_id.in_(supplier_ids),
+            PurchaseOrder.status == 'Đã nhận hàng',
+        ).all()
+    )
+    pos_by_supplier = {sid: [] for sid in supplier_ids}
+    for po in purchase_orders:
+        pos_by_supplier.setdefault(po.supplier_id, []).append(po)
     summaries = {}
     for sid in supplier_ids:
         items = intakes_by_supplier.get(sid, [])
-        total = sum(i.total_amount or 0 for i in items)
-        paid = sum(i.paid_amount or 0 for i in items)
+        pos = pos_by_supplier.get(sid, [])
+        total = sum(i.total_amount or 0 for i in items) + sum(p.total_amount or 0 for p in pos)
+        paid = sum(i.paid_amount or 0 for i in items) + sum(p.paid_amount or 0 for p in pos)
         summaries[sid] = {
             'total': total,
             'paid': paid,
             'remaining': max(0, total - paid),
-            'intake_count': len(items),
-            'unpaid_count': sum(1 for i in items if supplier_intake_balance(i) > 0 and (i.total_amount or 0) > 0),
+            'intake_count': len(items) + len(pos),
+            'unpaid_count': (
+                sum(1 for i in items if supplier_intake_balance(i) > 0 and (i.total_amount or 0) > 0)
+                + sum(1 for p in pos if purchase_order_balance(p) > 0 and (p.total_amount or 0) > 0)
+            ),
         }
     return {
         'intakes': intakes_by_supplier,
@@ -3042,20 +3573,9 @@ def movement_qty_sum(product_id, movement_type, date_from=None, date_to=None, be
     return float(q.scalar() or 0)
 
 def product_stock_row(product, date_from=None, date_to=None):
-    inbound = movement_qty_sum(product.id, 'IN', date_from, date_to)
-    outbound = movement_qty_sum(product.id, 'OUT', date_from, date_to)
-    if date_from:
-        opening = product.stock - inbound + outbound
-    else:
-        in_all = movement_qty_sum(product.id, 'IN')
-        out_all = movement_qty_sum(product.id, 'OUT')
-        opening = max(0, product.stock - in_all + out_all)
     status_key, status_label = stock_status(product)
     return {
         'product': product,
-        'opening': opening,
-        'inbound': inbound,
-        'outbound': outbound,
         'current': product.stock,
         'status_key': status_key,
         'status_label': status_label,
@@ -4416,7 +4936,44 @@ def dashboard():
     }
     latest_quotes = Quote.query.order_by(Quote.created_at.desc()).limit(5).all()
     latest_orders = Order.query.order_by(Order.created_at.desc()).limit(5).all()
-    return render_template('dashboard.html', stats=stats, latest_quotes=latest_quotes, latest_orders=latest_orders)
+    user = get_current_user()
+    return render_template(
+        'dashboard.html',
+        stats=stats,
+        latest_quotes=latest_quotes,
+        latest_orders=latest_orders,
+        is_admin=user and user.role == 'admin',
+    )
+
+@app.route('/dashboard/clear-data', methods=['POST'])
+def dashboard_clear_data():
+    user = get_current_user()
+    if not user or user.role != 'admin':
+        flash('Chỉ quản trị viên mới được xóa toàn bộ dữ liệu', 'danger')
+        return redirect(url_for('dashboard'))
+    if request.form.get('confirm_ack') != '1':
+        flash('Vui lòng tick xác nhận bạn hiểu hành động này không thể hoàn tác', 'warning')
+        return redirect(url_for('dashboard'))
+    if (request.form.get('confirm_text') or '').strip().upper() != 'XOA HET':
+        flash('Nhập đúng chữ XOA HET (viết hoa, có dấu cách) để xác nhận', 'warning')
+        return redirect(url_for('dashboard'))
+    password = request.form.get('password') or ''
+    if not password or not check_password_hash(user.password_hash, password):
+        flash('Mật khẩu đăng nhập không đúng', 'danger')
+        return redirect(url_for('dashboard'))
+    counts = clear_all_business_data()
+    if has_request_context():
+        session.pop(ACTIVE_COMPANY_SESSION_KEY, None)
+        session.pop(CONTRACT_DRAFT_SESSION_KEY, None)
+        session.pop(IMPORT_PREVIEW_SESSION_KEY, None)
+        session.pop(CATEGORY_IMPORT_SESSION_KEY, None)
+    total_rows = sum(counts.values())
+    flash(
+        f'Đã xóa toàn bộ dữ liệu ({total_rows} bản ghi nghiệp vụ). '
+        f'Tài khoản đăng nhập được giữ nguyên; đã tạo lại khách vãng lai và công ty mặc định.',
+        'success',
+    )
+    return redirect(url_for('dashboard'))
 
 CUSTOMER_SORT_FIELDS = {'name', 'tax_code', 'representative', 'phone', 'address', 'created_at', 'customer_type'}
 
@@ -4664,6 +5221,195 @@ def customer_options_json():
             for c in rows
         ],
     }
+
+@app.route('/customers/<int:cid>/orders.json')
+def customer_orders_json(cid):
+    Customer.query.get_or_404(cid)
+    rows = (
+        Order.query.filter_by(customer_id=cid)
+        .filter(Order.status != 'Đã hủy')
+        .order_by(Order.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    return {
+        'orders': [
+            {
+                'id': o.id,
+                'order_code': o.order_code,
+                'status': o.status,
+                'total': o.total or 0,
+                'created_at': o.created_at.strftime('%d/%m/%Y') if o.created_at else '',
+            }
+            for o in rows
+        ],
+    }
+
+@app.route('/purchase-orders', methods=['GET', 'POST'])
+def purchase_orders():
+    ensure_purchase_order_schema()
+    ensure_stock_movement_columns()
+    ensure_supplier_payment_columns()
+    if request.method == 'POST':
+        po, err = save_purchase_order_from_request()
+        if err:
+            flash(err, 'warning')
+            return purchase_order_redirect()
+        db.session.commit()
+        flash(f'Đã tạo phiếu mua hàng {po.po_code}', 'success')
+        return redirect(url_for('purchase_order_detail', poid=po.id))
+    q, per_page, page, supplier_id, status, receipt_mode = purchase_order_list_params()
+    query = PurchaseOrder.query.outerjoin(Supplier)
+    if q:
+        like = f'%{q}%'
+        query = query.filter(or_(
+            PurchaseOrder.po_code.ilike(like),
+            PurchaseOrder.ref_code.ilike(like),
+            Supplier.name.ilike(like),
+            Supplier.code.ilike(like),
+        ))
+    if supplier_id:
+        try:
+            query = query.filter(PurchaseOrder.supplier_id == int(supplier_id))
+        except (TypeError, ValueError):
+            pass
+    if status:
+        query = query.filter(PurchaseOrder.status == status)
+    if receipt_mode in ('stock_in', 'direct_delivery', 'no_stock'):
+        query = query.filter(PurchaseOrder.receipt_mode == receipt_mode)
+    query = query.order_by(PurchaseOrder.created_at.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    list_args = {
+        'q': q,
+        'per_page': per_page,
+        'supplier_id': supplier_id,
+        'status': status,
+        'receipt_mode': receipt_mode,
+    }
+    return render_template(
+        'purchase_orders.html',
+        pagination=pagination,
+        purchase_orders=pagination.items,
+        suppliers=active_suppliers(),
+        customers=customers_for_select(),
+        stats=purchase_order_stats(),
+        q=q,
+        per_page=per_page,
+        supplier_id=supplier_id,
+        status=status,
+        receipt_mode=receipt_mode,
+        list_args=list_args,
+        today_iso=date.today().isoformat(),
+        open_create_modal=request.args.get('open_create') == '1',
+    )
+
+@app.route('/purchase-orders/<int:poid>')
+def purchase_order_detail(poid):
+    ensure_purchase_order_schema()
+    po = PurchaseOrder.query.get_or_404(poid)
+    lines = (
+        PurchaseOrderLine.query.filter_by(purchase_order_id=po.id)
+        .join(Product)
+        .order_by(Product.name.asc())
+        .all()
+    )
+    return render_template(
+        'purchase_order_detail.html',
+        po=po,
+        lines=lines,
+        suppliers=active_suppliers(),
+        customers=customers_for_select(),
+        today_iso=date.today().isoformat(),
+    )
+
+@app.route('/purchase-orders/<int:poid>/update', methods=['POST'])
+def purchase_order_update(poid):
+    ensure_purchase_order_schema()
+    po = PurchaseOrder.query.get_or_404(poid)
+    po, err = save_purchase_order_from_request(po)
+    if err:
+        flash(err, 'warning')
+        return purchase_order_redirect(po_id=poid)
+    db.session.commit()
+    flash('Đã cập nhật phiếu mua hàng', 'success')
+    return purchase_order_redirect(po_id=poid)
+
+@app.route('/purchase-orders/<int:poid>/receive', methods=['POST'])
+def purchase_order_receive(poid):
+    ensure_purchase_order_schema()
+    ensure_stock_movement_columns()
+    po = PurchaseOrder.query.get_or_404(poid)
+    ok, result = confirm_purchase_order_receive(po)
+    if not ok:
+        flash(result, 'warning')
+        return purchase_order_redirect(po_id=poid)
+    db.session.commit()
+    stock_qty = result
+    mode_label = purchase_order_receipt_mode_label(po.receipt_mode)
+    msg = f'Đã xác nhận nhận hàng ({mode_label}) — phát sinh công nợ NCC {money(po.total_amount or 0)}'
+    if po.receipt_mode == 'stock_in' and stock_qty:
+        msg += f'; nhập kho {format_qty_display(stock_qty)} (đơn vị tồn)'
+    flash(msg, 'success')
+    return purchase_order_redirect(po_id=poid)
+
+@app.route('/purchase-orders/<int:poid>/payment', methods=['POST'])
+def purchase_order_payment(poid):
+    ensure_purchase_order_schema()
+    ensure_supplier_payment_columns()
+    po = PurchaseOrder.query.get_or_404(poid)
+    if po.status != 'Đã nhận hàng':
+        flash('Chỉ thanh toán phiếu đã xác nhận nhận hàng', 'warning')
+        return purchase_order_redirect(po_id=poid)
+    balance = purchase_order_balance(po)
+    if balance <= 0:
+        flash('Phiếu đã thanh toán đủ', 'warning')
+        return purchase_order_redirect(po_id=poid)
+    amount = parse_int(request.form.get('amount'))
+    if amount <= 0:
+        flash('Số tiền không hợp lệ', 'danger')
+        return purchase_order_redirect(po_id=poid)
+    receipt_path = save_supplier_payment_receipt(request.files.get('payment_receipt'))
+    if not receipt_path:
+        return purchase_order_redirect(po_id=poid)
+    pay_amount = min(amount, balance)
+    if amount > balance:
+        flash(
+            f'Số tiền vượt còn nợ ({money(balance)}). Chỉ ghi nhận {money(pay_amount)}.',
+            'warning',
+        )
+    method = request.form.get('method', 'Chuyển khoản').strip() or 'Chuyển khoản'
+    note = request.form.get('note', '').strip()
+    payment_date_raw = request.form.get('payment_date', '').strip()
+    payment_date = date.today()
+    if payment_date_raw:
+        try:
+            payment_date = datetime.strptime(payment_date_raw, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+    db.session.add(SupplierPayment(
+        supplier_id=po.supplier_id,
+        purchase_order_id=po.id,
+        amount=pay_amount,
+        method=method,
+        note=note,
+        payment_date=payment_date,
+        receipt_path=receipt_path,
+        receipt_uploaded_at=datetime.utcnow(),
+    ))
+    recalc_purchase_order_paid(po)
+    db.session.commit()
+    flash(f'Đã ghi nhận thanh toán {money(pay_amount)} — {purchase_order_payment_status(po)}', 'success')
+    return purchase_order_redirect(po_id=poid)
+
+@app.route('/purchase-orders/<int:poid>/delete', methods=['POST'])
+def purchase_order_delete(poid):
+    ensure_purchase_order_schema()
+    ensure_stock_movement_columns()
+    po = PurchaseOrder.query.get_or_404(poid)
+    code = delete_purchase_order_record(po)
+    db.session.commit()
+    flash(f'Đã xóa phiếu mua hàng {code}', 'success')
+    return purchase_order_redirect()
 
 @app.route('/suppliers', methods=['GET', 'POST'])
 def suppliers():
@@ -5672,6 +6418,73 @@ def delete_all_products_data():
             if path.is_file():
                 path.unlink()
     return product_count
+
+def empty_directory_tree(directory):
+    """Xóa mọi file/thư mục con; giữ nguyên thư mục gốc."""
+    if not directory.exists():
+        return
+    for path in directory.iterdir():
+        try:
+            if path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+        except OSError:
+            pass
+
+def clear_all_business_data():
+    """Xóa toàn bộ dữ liệu nghiệp vụ và file đính kèm; giữ bảng User (tài khoản đăng nhập)."""
+    counts = {
+        'supplier_payments': SupplierPayment.query.count(),
+        'purchase_orders': PurchaseOrder.query.count(),
+        'supplier_intakes': SupplierIntake.query.count(),
+        'payments': Payment.query.count(),
+        'stock_movements': StockMovement.query.count(),
+        'quotes': Quote.query.count(),
+        'orders': Order.query.count(),
+        'contracts': Contract.query.count(),
+        'products': Product.query.count(),
+        'customers': Customer.query.count(),
+        'suppliers': Supplier.query.count(),
+    }
+    SupplierPayment.query.delete(synchronize_session=False)
+    PurchaseOrderLine.query.delete(synchronize_session=False)
+    PurchaseOrder.query.delete(synchronize_session=False)
+    SupplierIntakeLine.query.delete(synchronize_session=False)
+    SupplierIntake.query.delete(synchronize_session=False)
+    Payment.query.delete(synchronize_session=False)
+    StockMovement.query.delete(synchronize_session=False)
+    QuoteItem.query.delete(synchronize_session=False)
+    Order.query.delete(synchronize_session=False)
+    Quote.query.delete(synchronize_session=False)
+    Contract.query.delete(synchronize_session=False)
+    ProductSupplier.query.delete(synchronize_session=False)
+    PriceHistory.query.delete(synchronize_session=False)
+    Product.query.delete(synchronize_session=False)
+    Supplier.query.delete(synchronize_session=False)
+    Customer.query.delete(synchronize_session=False)
+    Brand.query.delete(synchronize_session=False)
+    Category.query.delete(synchronize_session=False)
+    CompanyProfile.query.delete(synchronize_session=False)
+    db.session.commit()
+
+    for upload_dir in (
+        PRODUCT_UPLOAD_DIR,
+        COMPANY_LOGO_DIR,
+        CONTRACT_SIGNED_UPLOAD_DIR,
+        ORDER_HANDOVER_UPLOAD_DIR,
+        PAYMENT_RECEIPT_UPLOAD_DIR,
+        SUPPLIER_PAYMENT_RECEIPT_UPLOAD_DIR,
+        IMPORT_PREVIEW_DIR,
+        TEMP_DOC_DIR,
+    ):
+        empty_directory_tree(upload_dir)
+    empty_directory_tree(QUOTE_DOCS_DIR)
+    empty_directory_tree(OUTPUT_DIR / 'contracts')
+
+    ensure_walkin_customer()
+    ensure_company_profiles()
+    return counts
 
 def _import_preview_path(preview_id):
     return IMPORT_PREVIEW_DIR / f'{preview_id}.json'
@@ -6701,16 +7514,16 @@ def update_quote_status(qid):
     }
     if new_status in QUOTE_STATUSES and new_status in allowed.get(current, set()):
         if new_status == 'Đã chốt':
-            order, created, stock_deducted, auto_in_lines = chot_quote(quote)
+            order, created, stock_deducted, auto_in_lines, po_codes = chot_quote(quote)
             set_quote_session_customer(quote)
             db.session.commit()
-            stock_detail = quote_chot_stock_flash_detail(stock_deducted, auto_in_lines)
             if created:
                 msg = f'Đã chốt báo giá và tạo đơn hàng {order.order_code}'
             else:
                 msg = f'Đã chốt báo giá (đơn hàng {order.order_code})'
-            if stock_detail:
-                msg += f' — {stock_detail}'
+            detail = quote_chot_flash_detail(stock_deducted, auto_in_lines, po_codes)
+            if detail:
+                msg += f' — {detail}'
             flash(msg, 'success')
         else:
             quote.status = new_status
@@ -6748,10 +7561,10 @@ def update_quote(qid):
     old_status = quote_display_status(quote)
     if new_status in QUOTE_STATUSES:
         if new_status == 'Đã chốt' and old_status != 'Đã chốt':
-            _, _, stock_deducted, auto_in_lines = chot_quote(quote)
-            stock_detail = quote_chot_stock_flash_detail(stock_deducted, auto_in_lines)
-            if stock_detail:
-                flash(f'Đã chốt báo giá — {stock_detail}', 'success')
+            _, _, stock_deducted, auto_in_lines, po_codes = chot_quote(quote)
+            detail = quote_chot_flash_detail(stock_deducted, auto_in_lines, po_codes)
+            if detail:
+                flash(f'Đã chốt báo giá — {detail}', 'success')
         elif new_status != 'Đã chốt':
             quote.status = new_status
     recalculate_quote_totals(quote)
@@ -7130,16 +7943,17 @@ def create_order_from_quote(qid):
         flash('Vui lòng chốt báo giá trước khi tạo đơn hàng', 'warning')
         return redirect(url_for('quotes'))
     order, created = create_order_from_quote_record(quote)
+    po_codes = auto_create_purchase_orders_for_quote(quote, order)
     stock_deducted, auto_in_lines = apply_quote_stock_deduction(quote, order)
     db.session.commit()
-    stock_detail = quote_chot_stock_flash_detail(stock_deducted, auto_in_lines)
     if created:
         msg = f'Đã tạo đơn hàng {order.order_code}'
     else:
         msg = f'Đơn hàng {order.order_code} đã tồn tại'
-    if stock_detail:
-        msg += f' — {stock_detail}'
-    flash(msg, 'success' if created or stock_detail else 'info')
+    detail = quote_chot_flash_detail(stock_deducted, auto_in_lines, po_codes)
+    if detail:
+        msg += f' — {detail}'
+    flash(msg, 'success' if created or stock_deducted or po_codes else 'info')
     return redirect(url_for('order_preview', oid=order.id))
 
 @app.route('/contracts', methods=['GET', 'POST'])
@@ -7689,12 +8503,11 @@ def stock_export():
     rows = [product_stock_row(p, date_from, date_to) for p in query.all()]
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(['SKU', 'Sản phẩm', 'Kho', 'Tồn đầu kỳ', 'Nhập', 'Xuất', 'Tồn hiện tại', 'Đơn vị', 'Trạng thái'])
+    writer.writerow(['SKU', 'Sản phẩm', 'Kho', 'Tồn hiện tại', 'Đơn vị', 'Trạng thái'])
     for r in rows:
         p = r['product']
         writer.writerow([
-            p.sku, p.name, r['warehouse'], r['opening'], r['inbound'], r['outbound'],
-            r['current'], product_base_unit(p), r['status_label'],
+            p.sku, p.name, r['warehouse'], r['current'], product_base_unit(p), r['status_label'],
         ])
     return Response(
         '\ufeff' + buf.getvalue(),
@@ -7959,6 +8772,9 @@ def init_db():
     ensure_product_supplier_schema()
     ensure_supplier_intake_schema()
     ensure_supplier_intake_line_columns()
+    ensure_purchase_order_schema()
+    ensure_purchase_order_quote_column()
+    ensure_supplier_payment_columns()
     ensure_company_profiles()
     ensure_walkin_customer()
     if User.query.count() == 0:

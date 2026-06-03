@@ -1,0 +1,193 @@
+{% extends 'base.html' %}
+{% block title %}{{ po.po_code }} — Phiếu mua hàng{% endblock %}
+{% block content %}
+
+<div class="purchase-order-detail-page">
+  <div class="panel-card mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+      <div class="section-header mb-0">
+        <a href="{{ url_for('purchase_orders') }}" class="btn btn-sm btn-outline-secondary mb-2"><i class="bi bi-arrow-left"></i> Danh sách</a>
+        <div class="d-flex align-items-center gap-2">
+          <div class="page-header-icon"><i class="bi bi-receipt"></i></div>
+          <div>
+            <h2 class="section-title mb-0">{{ po.po_code }}</h2>
+            <p class="small-muted mb-0">
+              NCC: {% if po.supplier %}{{ po.supplier.name }}{% else %}<span class="text-warning">Chưa chọn</span>{% endif %}
+              · {{ purchase_order_receipt_mode_label(po.receipt_mode) }}
+              · <span class="{% if po.status == 'Nháp' %}text-secondary{% else %}text-success{% endif %}">{{ po.status }}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        {% if po.status == 'Nháp' %}
+        <form method="post" action="{{ url_for('purchase_order_receive', poid=po.id) }}" class="d-inline po-receive-form"
+              data-mode="{{ po.receipt_mode }}" data-has-supplier="{{ '1' if po.supplier_id else '0' }}">
+          <button type="submit" class="btn btn-success" {% if not po.supplier_id %}disabled title="Chọn nhà cung cấp trước"{% endif %}>
+            <i class="bi bi-check2-circle me-1"></i> Xác nhận nhận hàng
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('purchase_order_delete', poid=po.id) }}" class="d-inline po-delete-form"
+              data-code="{{ po.po_code }}">
+          <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i> Xóa</button>
+        </form>
+        {% else %}
+        {% set balance = purchase_order_balance(po) %}
+        {% if balance > 0 %}
+        <button type="button" class="btn btn-primary po-pay-btn"
+                data-bs-toggle="modal" data-bs-target="#poPaymentModal"
+                data-balance="{{ balance }}"
+                data-code="{{ po.po_code }}">
+          <i class="bi bi-cash-coin me-1"></i> Thanh toán NCC
+        </button>
+        {% endif %}
+        <form method="post" action="{{ url_for('purchase_order_delete', poid=po.id) }}" class="d-inline po-delete-form"
+              data-code="{{ po.po_code }}" data-received="1">
+          <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if po.status == 'Đã nhận hàng' %}
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <div class="panel-card p-3">
+        <div class="small-muted">Tổng mua</div>
+        <div class="fs-5 fw-semibold">{{ po.total_amount|money }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="panel-card p-3">
+        <div class="small-muted">Đã trả NCC</div>
+        <div class="fs-5 fw-semibold">{{ po.paid_amount|money }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="panel-card p-3">
+        <div class="small-muted">Còn nợ NCC</div>
+        <div class="fs-5 fw-semibold text-danger">{{ purchase_order_balance(po)|money }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="panel-card p-3">
+        <div class="small-muted">Thanh toán</div>
+        <div class="fs-6 fw-semibold">{{ purchase_order_payment_status(po) }}</div>
+        {% if po.received_at %}
+        <div class="small-muted">Nhận: {{ po.received_at.strftime('%d/%m/%Y %H:%M') }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% if po.receipt_mode == 'direct_delivery' or (po.receipt_mode == 'no_stock' and po.order_id) %}
+  <div class="panel-card mb-3 p-3">
+    <div class="row g-2">
+      <div class="col-md-6"><span class="small-muted">Khách hàng:</span> <strong>{{ po.customer.name if po.customer else '—' }}</strong></div>
+      <div class="col-md-6"><span class="small-muted">Đơn hàng:</span>
+        {% if po.order %}
+        <a href="{{ url_for('order_preview', oid=po.order.id) }}">{{ po.order.order_code }}</a>
+        {% else %}—{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  <div class="panel-card mb-3">
+    <h5 class="section-title">Chi tiết hàng</h5>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Sản phẩm</th>
+            <th class="text-end">SL</th>
+            <th class="text-end">Giá nhập</th>
+            <th class="text-end">Thành tiền</th>
+            <th>Ghi chú</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+          <tr>
+            <td>{{ line.product.sku }} — {{ line.product.name }}</td>
+            <td class="text-end">{{ line.purchase_qty or line.qty }}</td>
+            <td class="text-end">{{ line.cost_price|money }}</td>
+            <td class="text-end">{{ line.line_amount|money }}</td>
+            <td>{{ line.note or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if po.ref_code or po.note %}
+    <p class="small-muted mb-0 mt-2">
+      {% if po.ref_code %}Chứng từ: {{ po.ref_code }}{% endif %}
+      {% if po.note %} · {{ po.note }}{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="panel-card">
+    <form method="post" action="{{ url_for('purchase_order_update', poid=po.id) }}" class="po-form">
+      {% set form_uid = 'edit' %}
+      {% set po = po %}
+      {% set po_lines = lines %}
+      {% include 'partials/purchase_order_form_fields.html' %}
+      <div class="d-flex gap-2 mt-3">
+        <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        <a href="{{ url_for('purchase_orders') }}" class="btn btn-outline-secondary">Hủy</a>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="modal fade" id="poPaymentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('purchase_order_payment', poid=po.id) }}" class="supplier-payment-form" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title">Thanh toán NCC</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2">Phiếu: <strong class="supplier-payment-intake-label">{{ po.po_code }}</strong></p>
+          <p class="mb-3">Còn nợ: <strong class="supplier-payment-balance-label">{{ purchase_order_balance(po)|money }}</strong></p>
+          <div class="mb-3">
+            <label class="form-label-custom">Số tiền <span class="text-danger">*</span></label>
+            <input type="number" name="amount" class="form-control supplier-payment-amount" required min="1"
+                   value="{{ purchase_order_balance(po) }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Ngày thanh toán</label>
+            <input type="date" name="payment_date" class="form-control" value="{{ today_iso }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Hình thức</label>
+            <select name="method" class="form-select">
+              <option value="Chuyển khoản">Chuyển khoản</option>
+              <option value="Tiền mặt">Tiền mặt</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Ghi chú</label>
+            <input type="text" name="note" class="form-control">
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Ảnh bill <span class="text-danger">*</span></label>
+            <input type="file" name="payment_receipt" class="form-control" accept="image/*" capture="environment" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Đóng</button>
+          <button type="submit" class="btn btn-primary">Ghi nhận</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/suppliers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/purchase_orders.js') }}"></script>
+{% endblock %}

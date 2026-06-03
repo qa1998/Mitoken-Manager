@@ -1,0 +1,199 @@
+{% extends 'base.html' %}
+{% block title %}Phiếu mua hàng{% endblock %}
+{% block content %}
+
+<div class="purchase-order-page">
+  <div class="panel-card mb-3">
+    <div class="panel-card-head mb-0">
+      <div class="section-header">
+        <div class="page-header-icon"><i class="bi bi-receipt"></i></div>
+        <div>
+          <h2 class="section-title">Phiếu mua hàng</h2>
+          <p class="small-muted mb-0">Mua hàng NCC — nhập kho hoặc giao thẳng khách hàng</p>
+        </div>
+      </div>
+      <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createPoModal">
+        <i class="bi bi-plus-lg me-1"></i> Tạo phiếu mua hàng
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-blue"><i class="bi bi-receipt"></i></div>
+        <div>
+          <div class="order-stat-label">Tổng phiếu</div>
+          <div class="order-stat-value">{{ stats.total }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-orange"><i class="bi bi-pencil-square"></i></div>
+        <div>
+          <div class="order-stat-label">Nháp</div>
+          <div class="order-stat-value">{{ stats.draft }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="order-stat-card">
+        <div class="order-stat-icon stat-green"><i class="bi bi-check2-circle"></i></div>
+        <div>
+          <div class="order-stat-label">Đã nhận hàng</div>
+          <div class="order-stat-value">{{ stats.received }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card mb-3">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label-custom">Tìm kiếm</label>
+        <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Mã phiếu, NCC, chứng từ...">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label-custom">NCC</label>
+        <select name="supplier_id" class="form-select">
+          <option value="">Tất cả</option>
+          {% for s in suppliers %}
+          <option value="{{ s.id }}" {% if supplier_id and supplier_id|int == s.id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label-custom">Trạng thái</label>
+        <select name="status" class="form-select">
+          <option value="">Tất cả</option>
+          <option value="Nháp" {% if status == 'Nháp' %}selected{% endif %}>Nháp</option>
+          <option value="Đã nhận hàng" {% if status == 'Đã nhận hàng' %}selected{% endif %}>Đã nhận hàng</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label-custom">Hình thức</label>
+        <select name="receipt_mode" class="form-select">
+          <option value="">Tất cả</option>
+          <option value="stock_in" {% if receipt_mode == 'stock_in' %}selected{% endif %}>Nhập kho</option>
+          <option value="no_stock" {% if receipt_mode == 'no_stock' %}selected{% endif %}>Không nhập kho</option>
+          <option value="direct_delivery" {% if receipt_mode == 'direct_delivery' %}selected{% endif %}>Giao thẳng KH</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search me-1"></i> Lọc</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel-card">
+    <div class="table-toolbar">
+      <h5 class="section-title mb-0">DANH SÁCH PHIẾU</h5>
+      <form method="get" class="per-page-select">
+        {% for key, val in list_args.items() %}
+        {% if val and key != 'per_page' %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
+        {% endfor %}
+        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="10" {% if per_page == 10 %}selected{% endif %}>10 / trang</option>
+          <option value="25" {% if per_page == 25 %}selected{% endif %}>25 / trang</option>
+          <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / trang</option>
+        </select>
+      </form>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã phiếu</th>
+            <th>NCC</th>
+            <th>Hình thức</th>
+            <th>Khách / Đơn</th>
+            <th>Ngày tạo</th>
+            <th class="text-end">Tổng tiền</th>
+            <th>Trạng thái</th>
+            <th>Thanh toán</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for po in purchase_orders %}
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('purchase_order_detail', poid=po.id) }}">
+            <td><a href="{{ url_for('purchase_order_detail', poid=po.id) }}" class="fw-semibold">{{ po.po_code }}</a></td>
+            <td>{% if po.supplier %}{{ po.supplier.name }}{% else %}<span class="text-muted">Chưa gán NCC</span>{% endif %}</td>
+            <td><span class="badge bg-light text-dark border">{{ purchase_order_receipt_mode_label(po.receipt_mode) }}</span></td>
+            <td class="small">
+              {% if po.receipt_mode == 'direct_delivery' %}
+                {{ po.customer.name if po.customer else '—' }}
+                {% if po.order %}<br><span class="text-muted">{{ po.order.order_code }}</span>{% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-nowrap">{{ po.created_at.strftime('%d/%m/%Y') if po.created_at else '—' }}</td>
+            <td class="text-end fw-semibold">{{ po.total_amount|money }}</td>
+            <td>
+              {% if po.status == 'Nháp' %}
+              <span class="badge bg-secondary">Nháp</span>
+              {% else %}
+              <span class="badge bg-success">Đã nhận hàng</span>
+              {% endif %}
+            </td>
+            <td>
+              {% set pay_key = purchase_order_payment_status_key(po) %}
+              <span class="supplier-pay-badge {{ pay_key }}">{{ purchase_order_payment_status(po) }}</span>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted py-4">Chưa có phiếu mua hàng</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pagination.pages > 1 %}
+    <nav class="mt-3">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for('purchase_orders', page=p, **list_args) }}">{{ p }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+      </ul>
+    </nav>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="createPoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('purchase_orders') }}" class="po-form">
+        <div class="modal-header">
+          <h5 class="modal-title">Tạo phiếu mua hàng</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {% set form_uid = 'create' %}
+          {% include 'partials/purchase_order_form_fields.html' %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu nháp</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/suppliers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/purchase_orders.js') }}"></script>
+{% if open_create_modal %}
+<script>document.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('createPoModal');
+  if (el) new bootstrap.Modal(el).show();
+});</script>
+{% endif %}
+{% endblock %}

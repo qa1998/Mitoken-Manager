@@ -633,4 +633,19 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
   });
+  document.querySelectorAll('.supplier-intake-delete-form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      var code = form.getAttribute('data-code') || 'phiếu này';
+      var msg =
+        'Xóa phiếu nhập ' +
+        code +
+        '?\n\n' +
+        '• Tồn kho sẽ được trừ lại theo số lượng đã nhập\n' +
+        '• Các khoản thanh toán liên quan cũng bị xóa\n' +
+        'Hành động không thể hoàn tác.';
+      if (!confirm(msg)) {
+        e.preventDefault();
+      }
+    });
+  });
 });

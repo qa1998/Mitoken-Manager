@@ -6,7 +6,11 @@
   <div class="preview-page-head-body">
     <h3 class="mb-0">Xem trước hợp đồng</h3>
     <p class="small-muted mb-0">{{ contract_code }} — {{ customer_name }}{% if is_draft %} <span class="badge badge-soft">Bản nháp</span>{% endif %}</p>
+    {% if pdf_url %}
     <p class="small-muted mb-0 mt-1">Hiển thị PDF từ file Word gốc — giữ nguyên font, lề, bảng biểu và phân trang.</p>
+    {% elif docx_view_url %}
+    <p class="small-muted mb-0 mt-1">Xem trước file Word trong trình duyệt.</p>
+    {% endif %}
   </div>
   <div class="preview-page-head-actions d-flex flex-wrap gap-2">
     {% if docx_download_url %}
@@ -19,9 +23,29 @@
   </div>
 </div>
 
+{% if pdf_error and not pdf_url and docx_view_url %}
+<details class="preview-pdf-hint no-print mb-3">
+  <summary class="small-muted">Chưa có PDF trên máy chủ (vẫn xem được Word bên dưới)</summary>
+  <p class="small-muted mb-0 mt-2">{{ pdf_error }}</p>
+</details>
+{% elif pdf_error and not pdf_url %}
+<div class="alert alert-danger no-print mb-3" role="alert">{{ pdf_error }}</div>
+{% endif %}
+
+{% if pdf_url %}
 {% include 'partials/pdf_preview_viewer.html' %}
+{% elif docx_view_url %}
+{% include 'partials/docx_preview_viewer.html' %}
+{% else %}
+<div class="alert alert-danger">Không có file để xem trước.</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
+{% if docx_view_url and not pdf_url %}
+<script src="{{ url_for('static', filename='vendor/jszip.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/docx-preview.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/docx_preview.js') }}"></script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/pdf_preview.js') }}"></script>
 {% endblock %}

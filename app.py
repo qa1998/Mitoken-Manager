@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.request import urlopen
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response, session, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response, session, abort, has_request_context
 from werkzeug.utils import secure_filename
 from sqlalchemy import func, or_
 from flask_sqlalchemy import SQLAlchemy
@@ -270,6 +270,7 @@ class StockMovement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=True)
+    quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=True)
     movement_type = db.Column(db.String(20), nullable=False)  # IN/OUT
     qty = db.Column(db.Float, default=0)
     purchase_qty = db.Column(db.Float, default=0)
@@ -280,6 +281,7 @@ class StockMovement(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     product = db.relationship('Product')
     supplier = db.relationship('Supplier')
+    quote = db.relationship('Quote')
 
 class SupplierIntake(db.Model):
     __tablename__ = 'supplier_intake'
@@ -465,6 +467,7 @@ WAREHOUSE_ENDPOINTS = frozenset({
     'supplier_options_json',
     'supplier_products_intake',
     'supplier_intake_payment',
+    'delete_supplier_intake',
     'view_supplier_payment_receipt',
     'product_options_json',
     'supplier_debt',
@@ -496,10 +499,7 @@ SIDEBAR_SECTIONS = [
     {
         'title': 'KHO VẬN',
         'items': [
-            {'key': 'stock', 'endpoint': 'stock', 'label': 'Tồn kho', 'icon': 'bi-boxes', 'url_args': {'tab': 'inventory'}},
-            {'key': 'stock_in', 'endpoint': 'stock', 'label': 'Nhập hàng', 'icon': 'bi-box-arrow-in-down', 'url_args': {'tab': 'history', 'movement_type': 'IN'}},
-            {'key': 'stock_out', 'endpoint': 'stock', 'label': 'Xuất hàng', 'icon': 'bi-box-arrow-up', 'url_args': {'tab': 'history', 'movement_type': 'OUT'}},
-            {'key': 'stocktake', 'endpoint': 'stock', 'label': 'Kiểm kê', 'icon': 'bi-clipboard-check', 'url_args': {'tab': 'inventory', 'mode': 'stocktake'}},
+            {'key': 'stock', 'endpoint': 'stock', 'label': 'Tồn kho', 'icon': 'bi-boxes'},
         ],
     },
     {
@@ -521,10 +521,10 @@ SIDEBAR_SECTIONS = [
 ROLE_NAV_KEYS = {
     'admin': {
         'dashboard', 'customers', 'suppliers', 'products', 'quotes', 'orders', 'contracts',
-        'stock', 'stock_in', 'stock_out', 'stocktake', 'debt', 'supplier_debt', 'users', 'company_settings',
+        'stock', 'debt', 'supplier_debt', 'users', 'company_settings',
     },
     'sales': {'dashboard', 'customers', 'quotes', 'orders', 'contracts', 'debt'},
-    'warehouse': {'dashboard', 'suppliers', 'products', 'stock', 'stock_in', 'stock_out', 'stocktake'},
+    'warehouse': {'dashboard', 'suppliers', 'products', 'stock'},
 }
 
 def get_current_user():
@@ -1383,11 +1383,12 @@ def get_company_row(company_id=None):
     ensure_company_profiles()
     if company_id:
         return CompanyProfile.query.get(company_id)
-    cid = session.get(ACTIVE_COMPANY_SESSION_KEY)
-    if cid:
-        row = CompanyProfile.query.get(cid)
-        if row:
-            return row
+    if has_request_context():
+        cid = session.get(ACTIVE_COMPANY_SESSION_KEY)
+        if cid:
+            row = CompanyProfile.query.get(cid)
+            if row:
+                return row
     row = CompanyProfile.query.filter_by(is_default=True).first()
     if row:
         return row
@@ -1464,30 +1465,22 @@ def save_company_logo(row, file_storage):
 
 def resolve_active_nav_key():
     ep = request.endpoint
-    if ep != 'stock':
-        endpoint_keys = {
-            'dashboard': 'dashboard',
-            'customers': 'customers',
-            'suppliers': 'suppliers',
-            'products': 'products',
-            'quotes': 'quotes',
-            'orders': 'orders',
-            'contracts': 'contracts',
-            'debt': 'debt',
-            'supplier_debt': 'supplier_debt',
-            'users': 'users',
-            'company_settings': 'company_settings',
-        }
-        return endpoint_keys.get(ep, ep)
-    tab = request.args.get('tab', 'inventory')
-    mtype = request.args.get('movement_type', '')
-    if tab == 'history' and mtype == 'IN':
-        return 'stock_in'
-    if tab == 'history' and mtype == 'OUT':
-        return 'stock_out'
-    if request.args.get('mode') == 'stocktake':
-        return 'stocktake'
-    return 'stock'
+    if ep == 'stock':
+        return 'stock'
+    endpoint_keys = {
+        'dashboard': 'dashboard',
+        'customers': 'customers',
+        'suppliers': 'suppliers',
+        'products': 'products',
+        'quotes': 'quotes',
+        'orders': 'orders',
+        'contracts': 'contracts',
+        'debt': 'debt',
+        'supplier_debt': 'supplier_debt',
+        'users': 'users',
+        'company_settings': 'company_settings',
+    }
+    return endpoint_keys.get(ep, ep)
 
 def build_sidebar_sections(user):
     if not user:
@@ -1622,11 +1615,111 @@ def create_order_from_quote_record(quote):
         status='Đang xử lý',
     )
     db.session.add(order)
+    db.session.flush()
     return order, True
 
+def quote_stock_shortages(quote):
+    """Sản phẩm trong báo giá không đủ tồn kho để xuất bán."""
+    shortages = []
+    for item in quote.items:
+        product = item.product if getattr(item, 'product', None) else Product.query.get(item.product_id)
+        if not product:
+            continue
+        qty = float(item.qty or 0)
+        if qty <= 0:
+            continue
+        stock = float(product.stock or 0)
+        if stock < qty - 1e-9:
+            shortages.append({
+                'name': item.product_name or product.name,
+                'sku': item.sku or product.sku,
+                'stock': stock,
+                'need': qty,
+            })
+    return shortages
+
+def format_quote_stock_shortage_message(shortages):
+    parts = []
+    for s in shortages[:5]:
+        parts.append(
+            f'{s["name"]} ({s["sku"]}): tồn {format_qty_display(s["stock"])}, '
+            f'cần {format_qty_display(s["need"])}'
+        )
+    extra = f' và {len(shortages) - 5} sản phẩm khác' if len(shortages) > 5 else ''
+    return 'Tồn kho không đủ để chốt báo giá: ' + '; '.join(parts) + extra
+
+def quote_stock_already_deducted(quote_id):
+    ensure_stock_movement_columns()
+    return StockMovement.query.filter_by(
+        quote_id=quote_id,
+        movement_type='OUT',
+    ).first() is not None
+
+def apply_quote_stock_deduction(quote, order=None):
+    """Trừ tồn kho theo báo giá; thiếu tồn thì tự nhập đủ phần thiếu rồi xuất bán (mỗi BG một lần)."""
+    ensure_stock_movement_columns()
+    if quote_stock_already_deducted(quote.id):
+        return False, 0
+    order_code = order.order_code if order else ''
+    auto_in_lines = 0
+    for item in quote.items:
+        product = item.product if getattr(item, 'product', None) else Product.query.get(item.product_id)
+        if not product:
+            continue
+        qty = float(item.qty or 0)
+        if qty <= 0:
+            continue
+        stock = float(product.stock or 0)
+        shortfall = max(qty - stock, 0)
+        if shortfall > 1e-9:
+            product.stock = stock + shortfall
+            in_note = f'Tự động nhập khi chốt báo giá {quote.quote_code}'
+            if order_code:
+                in_note += f' → đơn {order_code}'
+            db.session.add(StockMovement(
+                product_id=product.id,
+                movement_type='IN',
+                qty=shortfall,
+                purchase_qty=0,
+                ref_code=quote.quote_code,
+                method='Nhập mua hàng',
+                warehouse=DEFAULT_WAREHOUSE,
+                note=in_note,
+                quote_id=quote.id,
+            ))
+            auto_in_lines += 1
+        product.stock = max(float(product.stock or 0) - qty, 0)
+        out_note = f'Xuất bán — báo giá {quote.quote_code}'
+        if order_code:
+            out_note += f' → đơn {order_code}'
+        db.session.add(StockMovement(
+            product_id=product.id,
+            movement_type='OUT',
+            qty=qty,
+            purchase_qty=0,
+            ref_code=quote.quote_code,
+            method='Bán hàng',
+            warehouse=DEFAULT_WAREHOUSE,
+            note=out_note,
+            quote_id=quote.id,
+        ))
+    return True, auto_in_lines
+
+def quote_chot_stock_flash_detail(stock_deducted, auto_in_lines):
+    parts = []
+    if auto_in_lines:
+        parts.append(f'tự nhập kho {auto_in_lines} dòng thiếu hàng')
+    if stock_deducted:
+        parts.append('trừ kho')
+    return ' và '.join(parts)
+
 def chot_quote(quote):
-    quote.status = 'Đã chốt'
-    return create_order_from_quote_record(quote)
+    """Chốt báo giá: tạo đơn hàng (nếu chưa có), tự nhập nếu thiếu tồn, rồi xuất kho."""
+    if quote_display_status(quote) != 'Đã chốt':
+        quote.status = 'Đã chốt'
+    order, created = create_order_from_quote_record(quote)
+    stock_deducted, auto_in_lines = apply_quote_stock_deduction(quote, order)
+    return order, created, stock_deducted, auto_in_lines
 
 def effective_quote_status(quote):
     return quote_display_status(quote)
@@ -2356,6 +2449,8 @@ def ensure_stock_movement_columns():
             conn.execute(text("ALTER TABLE stock_movement ADD COLUMN supplier_id INTEGER REFERENCES supplier(id)"))
         if 'purchase_qty' not in cols:
             conn.execute(text('ALTER TABLE stock_movement ADD COLUMN purchase_qty REAL DEFAULT 0'))
+        if 'quote_id' not in cols:
+            conn.execute(text('ALTER TABLE stock_movement ADD COLUMN quote_id INTEGER REFERENCES quote(id)'))
 
 def ensure_supplier_intake_line_columns():
     from sqlalchemy import inspect, text
@@ -2777,6 +2872,25 @@ def recalc_supplier_intake_paid(intake):
     intake.paid_amount = int(paid)
     return intake.paid_amount
 
+def delete_supplier_intake_record(intake):
+    """Xóa phiếu nhập NCC: hoàn tồn kho, gỡ phiếu kho và thanh toán liên quan."""
+    ensure_supplier_intake_schema()
+    ensure_stock_movement_columns()
+    code = intake.intake_code or f'#{intake.id}'
+    for payment in list(intake.payments):
+        unlink_supplier_payment_receipt(payment.receipt_path)
+        db.session.delete(payment)
+    for line in list(intake.lines):
+        if line.stock_movement_id:
+            movement = StockMovement.query.get(line.stock_movement_id)
+            if movement:
+                product = Product.query.get(line.product_id)
+                if product and movement.movement_type == 'IN':
+                    product.stock = max((product.stock or 0) - float(movement.qty or 0), 0)
+                db.session.delete(movement)
+    db.session.delete(intake)
+    return code
+
 def linked_supplier_stock_movement_ids():
     rows = db.session.query(SupplierIntakeLine.stock_movement_id).filter(
         SupplierIntakeLine.stock_movement_id.isnot(None),
@@ -3005,9 +3119,20 @@ def stock_redirect_after_save(message=None, category='success'):
     ))
 
 def next_code(prefix, model, field):
+    """Mã tiếp theo theo năm: lấy số thứ tự lớn nhất + 1 (không dùng count — tránh trùng khi đã xóa bản ghi giữa)."""
     year = datetime.now().year
-    count = model.query.filter(getattr(model, field).like(f'{prefix}-{year}-%')).count() + 1
-    return f'{prefix}-{year}-{count:04d}'
+    pattern = f'{prefix}-{year}-%'
+    col = getattr(model, field)
+    max_seq = 0
+    for (code,) in db.session.query(col).filter(col.like(pattern)):
+        if not code:
+            continue
+        suffix = code.rsplit('-', 1)[-1]
+        try:
+            max_seq = max(max_seq, int(suffix))
+        except ValueError:
+            pass
+    return f'{prefix}-{year}-{max_seq + 1:04d}'
 
 def parse_qty(value, default=0):
     if value is None or value == '':
@@ -3019,9 +3144,59 @@ def parse_qty(value, default=0):
         return float(default)
 
 def parse_int(value, default=0):
+    """Parse số nguyên VNĐ: số Excel (110000.0), chuỗi 1.100.000, 110.000, v.v."""
     if value is None or value == '':
         return default
-    return int(str(value).replace('.', '').replace(',', '').strip())
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value != value:
+            return default
+        return int(round(value))
+
+    s = str(value).strip().replace('\xa0', '').replace(' ', '')
+    for ch in ('đ', 'Đ', '₫', 'd', 'D'):
+        s = s.replace(ch, '')
+    s = s.strip()
+    if not s:
+        return default
+
+    negative = s.startswith('-')
+    if negative:
+        s = s[1:].strip()
+
+    dot_count = s.count('.')
+    comma_count = s.count(',')
+
+    if dot_count > 1 or comma_count > 1:
+        digits = ''.join(c for c in s if c.isdigit())
+        n = int(digits) if digits else default
+        return -n if negative else n
+
+    for sep in ('.', ','):
+        if s.count(sep) != 1:
+            continue
+        left, _, right = s.partition(sep)
+        if not left.isdigit() or not right.isdigit():
+            continue
+        if len(right) == 3:
+            n = int(left + right)
+            return -n if negative else n
+        if len(right) <= 2:
+            try:
+                n = int(round(float(s.replace(',', '.'))))
+                return -n if negative else n
+            except ValueError:
+                pass
+        break
+
+    digits = ''.join(c for c in s if c.isdigit())
+    if not digits:
+        return default
+    n = int(digits)
+    return -n if negative else n
 
 def replace_docx_text(doc, mapping):
     from docx.oxml.ns import qn
@@ -3314,6 +3489,16 @@ def save_supplier_payment_receipt(file_storage):
     file_storage.save(SUPPLIER_PAYMENT_RECEIPT_UPLOAD_DIR / filename)
     return rel_path
 
+def unlink_supplier_payment_receipt(receipt_path):
+    if not receipt_path:
+        return
+    file_path = BASE_DIR / 'static' / receipt_path
+    if file_path.is_file():
+        try:
+            file_path.unlink()
+        except OSError:
+            pass
+
 def supplier_payment_receipt_url(receipt_path):
     return contract_signed_scan_url(receipt_path)
 
@@ -3547,14 +3732,53 @@ def ensure_pdf_for_docx(docx_path, force=False):
     return convert_docx_to_pdf(docx_path)
 
 
-def preview_pdf_urls(docx_path, view_endpoint, download_docx_endpoint, download_pdf_endpoint, **url_kwargs):
-    """Sinh PDF từ DOCX và trả về URL xem/tải."""
-    ensure_pdf_for_docx(docx_path)
-    return {
-        'pdf_url': url_for(view_endpoint, **url_kwargs),
+def prepare_document_preview_urls(
+    docx_path,
+    view_pdf_endpoint,
+    view_docx_endpoint,
+    download_docx_endpoint,
+    download_pdf_endpoint,
+    **url_kwargs,
+):
+    """Chuẩn bị URL preview: ưu tiên PDF; nếu không convert được thì fallback xem Word."""
+    docx_path = Path(docx_path)
+    if not docx_path.is_file():
+        raise FileNotFoundError(f'Không tìm thấy file: {docx_path}')
+    urls = {
+        'pdf_url': None,
+        'docx_view_url': url_for(view_docx_endpoint, **url_kwargs) if view_docx_endpoint else None,
         'docx_download_url': url_for(download_docx_endpoint, **url_kwargs),
-        'pdf_download_url': url_for(download_pdf_endpoint, **url_kwargs),
+        'pdf_download_url': None,
+        'pdf_error': None,
     }
+    try:
+        ensure_pdf_for_docx(docx_path)
+        urls['pdf_url'] = url_for(view_pdf_endpoint, **url_kwargs)
+        urls['pdf_download_url'] = url_for(download_pdf_endpoint, **url_kwargs)
+    except (RuntimeError, FileNotFoundError) as e:
+        urls['pdf_error'] = str(e)
+    return urls
+
+
+def render_document_preview_page(doc_title, customer_name, urls, back_url=None, is_draft=False):
+    return docx_preview_page(
+        doc_title,
+        customer_name,
+        pdf_url=urls.get('pdf_url'),
+        docx_download_url=urls['docx_download_url'],
+        pdf_download_url=urls.get('pdf_download_url'),
+        docx_view_url=urls.get('docx_view_url'),
+        pdf_error=urls.get('pdf_error'),
+        back_url=back_url,
+        is_draft=is_draft,
+    )
+
+
+def pdf_path_for_docx_or_abort(docx_path):
+    try:
+        return ensure_pdf_for_docx(docx_path)
+    except (RuntimeError, FileNotFoundError) as e:
+        abort(503, description=str(e))
 
 def app_back_url(default_endpoint, **default_values):
     """URL quay lại: ưu tiên trang trước (cùng host), không thì list mặc định."""
@@ -3573,9 +3797,11 @@ def app_back_url(default_endpoint, **default_values):
 def docx_preview_page(
     doc_title,
     customer_name,
-    pdf_url,
-    docx_download_url,
-    pdf_download_url,
+    pdf_url=None,
+    docx_download_url=None,
+    pdf_download_url=None,
+    docx_view_url=None,
+    pdf_error=None,
     back_url=None,
     is_draft=False,
 ):
@@ -3586,6 +3812,8 @@ def docx_preview_page(
         pdf_url=pdf_url,
         docx_download_url=docx_download_url,
         pdf_download_url=pdf_download_url,
+        docx_view_url=docx_view_url,
+        pdf_error=pdf_error,
         back_url=back_url or app_back_url('contracts'),
         is_draft=is_draft,
     )
@@ -3741,29 +3969,54 @@ def build_quote_sale_contract_doc(quote):
     table.rows[0].cells[1].text = 'ĐẠI DIỆN BÊN BÁN\n\n\n\n(Ký, đóng dấu)'
     return doc
 
-def build_quote_handover_doc(quote):
+def quote_handover_context(quote):
+    """Dữ liệu cho templates_docx/bien_ban_nhan_hang.docx (docxtpl)."""
     customer = quote.customer
-    items = list(quote.items)
+    company = get_company_profile(quote_doc_company_id(quote))
+    is_company = getattr(customer, 'customer_type', 'company') != 'individual'
     signed = quote_handover_on(quote)
-    place = quote_handover_place_text(quote)
-    company_id = quote_doc_company_id(quote)
-    condition = (quote.handover_condition_note or '').strip() or 'Mới 100%, nguyên đai kiện, đúng chủng loại và số lượng.'
-    doc = Document()
-    _doc_add_center_heading(doc, 'BIÊN BẢN GIAO NHẬN HÀNG HÓA', level=1)
-    doc.add_paragraph(f'Số biên bản: BBGH/{quote.quote_code}')
-    doc.add_paragraph(f'Căn cứ báo giá / hợp đồng mua bán liên quan số {quote.quote_code}.')
-    doc.add_paragraph(f'Hôm nay, ngày {signed.strftime("%d/%m/%Y")}, tại {place}, chúng tôi gồm:')
-    _doc_add_party_block(doc, 'BÊN GIAO HÀNG (BÊN B):', quote_seller_party_lines(company_id))
-    _doc_add_party_block(doc, 'BÊN NHẬN HÀNG (BÊN A):', quote_customer_party_lines(customer))
-    doc.add_paragraph('Hai bên cùng lập biên bản giao nhận hàng hóa với chi tiết sau:')
-    _doc_add_quote_items_table(doc, items, include_price=False)
-    doc.add_paragraph(f'Tình trạng hàng hóa: {condition}')
-    doc.add_paragraph('Biên bản này là căn cứ nghiệm thu giao nhận hàng hóa giữa hai bên.')
-    doc.add_paragraph('Biên bản được lập thành 02 bản, mỗi bên giữ 01 bản có giá trị như nhau.')
-    table = doc.add_table(rows=1, cols=2)
-    table.rows[0].cells[0].text = 'BÊN GIAO HÀNG (BÊN B)\n\n\n\n(Ký, đóng dấu)'
-    table.rows[0].cells[1].text = 'BÊN NHẬN HÀNG (BÊN A)\n\n\n\n(Ký, ghi rõ họ tên)'
-    return doc
+    items = []
+    for item in quote.items:
+        items.append({
+            'ten_hang': item.product_name or '',
+            'dvt': (item.unit or 'cái').strip() or 'cái',
+            'so_luong': format_qty_display(item.qty or 0),
+        })
+    bank_b = company.get('bank') or ''
+    if not bank_b and company.get('bank_account'):
+        parts = [company.get('bank_account', '')]
+        if company.get('bank_name'):
+            parts.append(company['bank_name'])
+        bank_b = ' - '.join(p for p in parts if p)
+    return {
+        'TEN_BEN_A': customer.name or '',
+        'TEN_BEN_B': company.get('name', ''),
+        'DAI_DIEN_A': (customer.representative or '').strip() or (customer.name if not is_company else ''),
+        'CHUC_VU_A': (customer.position or '').strip() if is_company else '',
+        'DIA_CHI_A': customer.address or '',
+        'MST_A': customer.tax_code if is_company else (customer.id_card or ''),
+        'DAI_DIEN_B': company.get('director_name', ''),
+        'CHUC_VU_B': company.get('director', 'Giám đốc'),
+        'DIA_CHI_B': company.get('address', ''),
+        'DIEN_THOAI_B': company.get('phone', ''),
+        'TAI_KHOAN_B': bank_b,
+        'MST_B': company.get('tax_code', ''),
+        'NGAY_GIAO': signed.strftime('%d/%m/%Y'),
+        'DIA_DIEM': quote_handover_place_text(quote),
+        'items': items,
+    }
+
+
+def build_quote_handover_doc(quote):
+    from docxtpl import DocxTemplate
+
+    if not TEMPLATE_QUOTE_HANDOVER.is_file():
+        raise FileNotFoundError(
+            f'Không tìm thấy file mẫu biên bản: {TEMPLATE_QUOTE_HANDOVER}'
+        )
+    tpl = DocxTemplate(str(TEMPLATE_QUOTE_HANDOVER))
+    tpl.render(quote_handover_context(quote))
+    return tpl.docx
 
 def regenerate_quote_sale_contract(quote, commit=False):
     old_path = quote.sale_contract_path
@@ -3779,8 +4032,15 @@ def regenerate_quote_handover(quote, commit=False):
     old_path = quote.handover_doc_path
     doc = build_quote_handover_doc(quote)
     quote.handover_doc_path = str(save_quote_docx(doc, quote, 'bien-ban-nhan-hang'))
-    if old_path and old_path != quote.handover_doc_path and Path(old_path).is_file():
-        Path(old_path).unlink(missing_ok=True)
+    if old_path and old_path != quote.handover_doc_path:
+        if Path(old_path).is_file():
+            Path(old_path).unlink(missing_ok=True)
+        old_pdf = Path(old_path).with_suffix('.pdf')
+        if old_pdf.is_file():
+            old_pdf.unlink(missing_ok=True)
+    new_pdf = Path(quote.handover_doc_path).with_suffix('.pdf')
+    if new_pdf.is_file():
+        new_pdf.unlink(missing_ok=True)
     if commit:
         db.session.commit()
     return quote
@@ -3804,11 +4064,22 @@ def generate_quote_documents(quote, commit=True):
         db.session.commit()
     return quote
 
+def docx_template_newer_than(template_path, output_path):
+    """File mẫu Word đã sửa sau bản xuất → cần tạo lại (không ghi đè file mẫu)."""
+    tpl = Path(template_path)
+    out = Path(output_path) if output_path else None
+    if not tpl.is_file() or not out or not out.is_file():
+        return False
+    return tpl.stat().st_mtime > out.stat().st_mtime
+
 def ensure_quote_documents(quote):
     sale_ok = quote.sale_contract_path and Path(quote.sale_contract_path).is_file()
     hand_ok = quote.handover_doc_path and Path(quote.handover_doc_path).is_file()
     if not sale_ok or not hand_ok:
         generate_quote_documents(quote, commit=True)
+        return quote
+    if hand_ok and docx_template_newer_than(TEMPLATE_QUOTE_HANDOVER, quote.handover_doc_path):
+        regenerate_quote_handover(quote, commit=True)
     return quote
 
 def get_framework_contract(customer_id):
@@ -4199,6 +4470,13 @@ def customers_for_select():
     ensure_walkin_customer()
     return Customer.query.filter(Customer.customer_type != WALKIN_CUSTOMER_TYPE).order_by(Customer.name).all()
 
+def customers_for_order_filter():
+    """Dropdown lọc đơn hàng — gồm cả Khách vãng lai (đơn từ báo giá không chọn KH)."""
+    ensure_walkin_customer()
+    walkin = Customer.query.filter_by(customer_type=WALKIN_CUSTOMER_TYPE).first()
+    others = Customer.query.filter(Customer.customer_type != WALKIN_CUSTOMER_TYPE).order_by(Customer.name).all()
+    return ([walkin] if walkin else []) + others
+
 def resolve_quote_customer_id(raw):
     if raw is None or str(raw).strip() == '':
         return ensure_walkin_customer().id
@@ -4212,7 +4490,7 @@ def resolve_quote_customer_id(raw):
     return cid
 
 def set_quote_session_customer(quote):
-    if quote.customer_id and not is_walkin_customer(quote.customer):
+    if quote.customer_id:
         session['debt_customer_id'] = quote.customer_id
         session['orders_customer_id'] = quote.customer_id
 
@@ -4541,6 +4819,16 @@ def supplier_intake_payment(sid, iid):
     flash(f'Đã ghi nhận thanh toán {money(pay_amount)} — {status}', 'success')
     return suppliers_redirect_after_save('')
 
+@app.route('/suppliers/<int:sid>/intakes/<int:iid>/delete', methods=['POST'])
+def delete_supplier_intake(sid, iid):
+    ensure_supplier_intake_schema()
+    ensure_stock_movement_columns()
+    supplier = Supplier.query.get_or_404(sid)
+    intake = SupplierIntake.query.filter_by(id=iid, supplier_id=supplier.id).first_or_404()
+    code = delete_supplier_intake_record(intake)
+    db.session.commit()
+    return suppliers_redirect_after_save(f'Đã xóa phiếu nhập {code}')
+
 @app.route('/suppliers/payments/<int:pid>/receipt')
 def view_supplier_payment_receipt(pid):
     ensure_supplier_intake_schema()
@@ -4616,22 +4904,21 @@ def preview_customer_framework_contract(cid):
         flash('Chưa có hợp đồng. Vui lòng tạo tại màn Hợp đồng.', 'info')
         return redirect(contracts_create_url(customer.id))
     try:
-        urls = preview_pdf_urls(
+        urls = prepare_document_preview_urls(
             contract.file_path,
             'view_customer_framework_contract_pdf',
+            'view_customer_framework_contract',
             'download_customer_framework_contract',
             'download_customer_framework_contract_pdf',
             cid=customer.id,
         )
-    except (RuntimeError, FileNotFoundError) as e:
+    except FileNotFoundError as e:
         flash(str(e), 'danger')
         return redirect(url_for('customers'))
-    return docx_preview_page(
+    return render_document_preview_page(
         contract.contract_code,
         customer.name,
-        urls['pdf_url'],
-        urls['docx_download_url'],
-        urls['pdf_download_url'],
+        urls,
         url_for('customers'),
     )
 
@@ -4650,8 +4937,10 @@ def view_customer_framework_contract_pdf(cid):
     contract = get_framework_contract(customer.id)
     if not contract or not contract.file_path or not Path(contract.file_path).is_file():
         abort(404)
-    pdf_path = ensure_pdf_for_docx(contract.file_path)
-    return send_pdf_inline(pdf_path, f'{contract.contract_code}.pdf')
+    return send_pdf_inline(
+        pdf_path_for_docx_or_abort(contract.file_path),
+        f'{contract.contract_code}.pdf',
+    )
 
 @app.route('/customers/<int:cid>/contract/download')
 def download_customer_framework_contract(cid):
@@ -6320,10 +6609,7 @@ def quotes():
             return redirect(url_for('quotes', tab='list'))
         flash('Đã lưu nháp báo giá' if quote.status == 'Nháp' else 'Đã tạo báo giá',
               'secondary' if quote.status == 'Nháp' else 'success')
-        redirect_args = {'tab': 'draft' if quote.status == 'Nháp' else 'list'}
-        if not is_walkin_customer(quote.customer):
-            redirect_args['quote_customer_id'] = quote.customer_id
-        return redirect(url_for('quotes', **redirect_args))
+        return redirect(url_for('quote_preview', qid=quote.id))
 
     filters = quote_filters_from_request()
     per_page = request.args.get('per_page', 10, type=int)
@@ -6415,13 +6701,17 @@ def update_quote_status(qid):
     }
     if new_status in QUOTE_STATUSES and new_status in allowed.get(current, set()):
         if new_status == 'Đã chốt':
-            order, created = chot_quote(quote)
+            order, created, stock_deducted, auto_in_lines = chot_quote(quote)
             set_quote_session_customer(quote)
             db.session.commit()
+            stock_detail = quote_chot_stock_flash_detail(stock_deducted, auto_in_lines)
             if created:
-                flash(f'Đã chốt báo giá và tạo đơn hàng {order.order_code}', 'success')
+                msg = f'Đã chốt báo giá và tạo đơn hàng {order.order_code}'
             else:
-                flash(f'Đã chốt báo giá (đơn hàng {order.order_code})', 'success')
+                msg = f'Đã chốt báo giá (đơn hàng {order.order_code})'
+            if stock_detail:
+                msg += f' — {stock_detail}'
+            flash(msg, 'success')
         else:
             quote.status = new_status
             db.session.commit()
@@ -6458,7 +6748,10 @@ def update_quote(qid):
     old_status = quote_display_status(quote)
     if new_status in QUOTE_STATUSES:
         if new_status == 'Đã chốt' and old_status != 'Đã chốt':
-            chot_quote(quote)
+            _, _, stock_deducted, auto_in_lines = chot_quote(quote)
+            stock_detail = quote_chot_stock_flash_detail(stock_deducted, auto_in_lines)
+            if stock_detail:
+                flash(f'Đã chốt báo giá — {stock_detail}', 'success')
         elif new_status != 'Đã chốt':
             quote.status = new_status
     recalculate_quote_totals(quote)
@@ -6478,27 +6771,27 @@ def _quote_doc_preview_page(
     download_docx_endpoint,
     download_pdf_endpoint,
     view_pdf_endpoint,
+    view_docx_endpoint,
 ):
     if not file_path or not Path(file_path).is_file():
         flash('Không tìm thấy file tài liệu', 'danger')
         return redirect(url_for('quote_preview', qid=quote.id))
     try:
-        urls = preview_pdf_urls(
+        urls = prepare_document_preview_urls(
             file_path,
             view_pdf_endpoint,
+            view_docx_endpoint,
             download_docx_endpoint,
             download_pdf_endpoint,
             qid=quote.id,
         )
-    except (RuntimeError, FileNotFoundError) as e:
+    except FileNotFoundError as e:
         flash(str(e), 'danger')
         return redirect(url_for('quote_preview', qid=quote.id))
-    return docx_preview_page(
+    return render_document_preview_page(
         doc_title,
         quote_customer_label(quote),
-        urls['pdf_url'],
-        urls['docx_download_url'],
-        urls['pdf_download_url'],
+        urls,
         url_for('quote_preview', qid=quote.id),
     )
 
@@ -6512,6 +6805,7 @@ def preview_quote_sale_contract(qid):
         'download_quote_sale_contract',
         'download_quote_sale_contract_pdf',
         'view_quote_sale_contract_pdf',
+        'view_quote_sale_contract',
     )
 
 @app.route('/quotes/<int:qid>/sale-contract/view')
@@ -6529,8 +6823,10 @@ def view_quote_sale_contract_pdf(qid):
     quote = ensure_quote_documents(Quote.query.get_or_404(qid))
     if not quote.sale_contract_path or not Path(quote.sale_contract_path).is_file():
         abort(404)
-    pdf_path = ensure_pdf_for_docx(quote.sale_contract_path)
-    return send_pdf_inline(pdf_path, f'HĐMB-{quote.quote_code}.pdf')
+    return send_pdf_inline(
+        pdf_path_for_docx_or_abort(quote.sale_contract_path),
+        f'HĐMB-{quote.quote_code}.pdf',
+    )
 
 @app.route('/quotes/<int:qid>/sale-contract/download')
 def download_quote_sale_contract(qid):
@@ -6559,13 +6855,20 @@ def download_quote_sale_contract_pdf(qid):
 @app.route('/quotes/<int:qid>/handover/preview')
 def preview_quote_handover(qid):
     ensure_quote_columns()
-    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    quote = Quote.query.get_or_404(qid)
+    try:
+        ensure_quote_documents(quote)
+    except Exception as e:
+        app.logger.exception('ensure_quote_documents handover')
+        flash(f'Không tạo được biên bản giao nhận: {e}', 'danger')
+        return redirect(url_for('quote_preview', qid=qid))
     return _quote_doc_preview_page(
         quote, quote.handover_doc_path,
         f'BBGH/{quote.quote_code}',
         'download_quote_handover',
         'download_quote_handover_pdf',
         'view_quote_handover_pdf',
+        'view_quote_handover',
     )
 
 @app.route('/quotes/<int:qid>/handover/view')
@@ -6583,8 +6886,10 @@ def view_quote_handover_pdf(qid):
     quote = ensure_quote_documents(Quote.query.get_or_404(qid))
     if not quote.handover_doc_path or not Path(quote.handover_doc_path).is_file():
         abort(404)
-    pdf_path = ensure_pdf_for_docx(quote.handover_doc_path)
-    return send_pdf_inline(pdf_path, f'BBGH-{quote.quote_code}.pdf')
+    return send_pdf_inline(
+        pdf_path_for_docx_or_abort(quote.handover_doc_path),
+        f'BBGH-{quote.quote_code}.pdf',
+    )
 
 @app.route('/quotes/<int:qid>/handover/download')
 def download_quote_handover(qid):
@@ -6613,22 +6918,40 @@ def download_quote_handover_pdf(qid):
 QUOTE_SALE_DRAFT_KEY = 'quote_sale_draft_path'
 QUOTE_HANDOVER_DRAFT_KEY = 'quote_handover_draft_path'
 
-def _quote_doc_draft_preview(quote, doc, title, view_pdf_endpoint, download_docx_endpoint, download_pdf_endpoint, back_url, session_key):
+def _quote_doc_draft_preview(
+    quote,
+    doc,
+    title,
+    view_pdf_endpoint,
+    view_docx_endpoint,
+    download_docx_endpoint,
+    download_pdf_endpoint,
+    back_url,
+    session_key,
+):
     _unlink_preview_file(session.pop(session_key, None))
-    temp_path = save_temp_docx(doc, 'quote_doc_draft')
     try:
-        ensure_pdf_for_docx(temp_path, force=True)
-    except (RuntimeError, FileNotFoundError) as e:
+        temp_path = save_temp_docx(doc, 'quote_doc_draft')
+    except Exception as e:
+        flash(f'Không tạo được file Word: {e}', 'danger')
+        return redirect(back_url)
+    session[session_key] = str(temp_path)
+    try:
+        urls = prepare_document_preview_urls(
+            temp_path,
+            view_pdf_endpoint,
+            view_docx_endpoint,
+            download_docx_endpoint,
+            download_pdf_endpoint,
+        )
+    except FileNotFoundError as e:
         _unlink_preview_file(str(temp_path))
         flash(str(e), 'danger')
         return redirect(back_url)
-    session[session_key] = str(temp_path)
-    return docx_preview_page(
+    return render_document_preview_page(
         title,
         quote_customer_label(quote),
-        url_for(view_pdf_endpoint),
-        url_for(download_docx_endpoint),
-        url_for(download_pdf_endpoint),
+        urls,
         back_url,
         is_draft=True,
     )
@@ -6669,6 +6992,7 @@ def preview_quote_sale_contract_draft(qid):
     return _quote_doc_draft_preview(
         quote, doc, f'HĐMB/{quote.quote_code}',
         'view_quote_sale_contract_draft_pdf',
+        'view_quote_sale_contract_draft',
         'download_quote_sale_contract_draft',
         'download_quote_sale_contract_draft_pdf',
         back, QUOTE_SALE_DRAFT_KEY,
@@ -6692,6 +7016,7 @@ def preview_quote_handover_draft(qid):
     return _quote_doc_draft_preview(
         quote, doc, f'BBGH/{quote.quote_code}',
         'view_quote_handover_draft_pdf',
+        'view_quote_handover_draft',
         'download_quote_handover_draft',
         'download_quote_handover_draft_pdf',
         back, QUOTE_HANDOVER_DRAFT_KEY,
@@ -6746,7 +7071,7 @@ def view_quote_handover_draft_pdf():
     path = _draft_docx_path(QUOTE_HANDOVER_DRAFT_KEY)
     if not path:
         abort(404)
-    return send_pdf_inline(ensure_pdf_for_docx(path), 'bien-ban-nhan-hang-nhap.pdf')
+    return send_pdf_inline(pdf_path_for_docx_or_abort(path), 'bien-ban-nhan-hang-nhap.pdf')
 
 @app.route('/quotes/handover/draft/download')
 def download_quote_handover_draft():
@@ -6804,9 +7129,17 @@ def create_order_from_quote(qid):
     if quote_display_status(quote) != 'Đã chốt':
         flash('Vui lòng chốt báo giá trước khi tạo đơn hàng', 'warning')
         return redirect(url_for('quotes'))
-    order, _ = create_order_from_quote_record(quote)
+    order, created = create_order_from_quote_record(quote)
+    stock_deducted, auto_in_lines = apply_quote_stock_deduction(quote, order)
     db.session.commit()
-    flash(f'Đã tạo đơn hàng {order.order_code}', 'success')
+    stock_detail = quote_chot_stock_flash_detail(stock_deducted, auto_in_lines)
+    if created:
+        msg = f'Đã tạo đơn hàng {order.order_code}'
+    else:
+        msg = f'Đơn hàng {order.order_code} đã tồn tại'
+    if stock_detail:
+        msg += f' — {stock_detail}'
+    flash(msg, 'success' if created or stock_detail else 'info')
     return redirect(url_for('order_preview', oid=order.id))
 
 @app.route('/contracts', methods=['GET', 'POST'])
@@ -6859,19 +7192,23 @@ def preview_contract_draft():
     doc = build_contract_doc(customer, code, signed, expired, company_id=company_id)
     clear_contract_draft_temp()
     temp_path = save_temp_docx(doc, 'contract_draft')
+    session[CONTRACT_DRAFT_SESSION_KEY] = str(temp_path)
     try:
-        ensure_pdf_for_docx(temp_path, force=True)
-    except (RuntimeError, FileNotFoundError) as e:
+        urls = prepare_document_preview_urls(
+            temp_path,
+            'view_contract_draft_pdf',
+            'view_contract_draft',
+            'download_contract_draft',
+            'download_contract_draft_pdf',
+        )
+    except FileNotFoundError as e:
         _unlink_preview_file(str(temp_path))
         flash(str(e), 'danger')
         return redirect(url_for('contracts', open_add='contract'))
-    session[CONTRACT_DRAFT_SESSION_KEY] = str(temp_path)
-    return docx_preview_page(
+    return render_document_preview_page(
         code,
         customer.name,
-        url_for('view_contract_draft_pdf'),
-        url_for('download_contract_draft'),
-        url_for('download_contract_draft_pdf'),
+        urls,
         url_for('contracts', open_add='contract'),
         is_draft=True,
     )
@@ -6915,7 +7252,7 @@ def view_contract_draft_pdf():
     path = session.get(CONTRACT_DRAFT_SESSION_KEY)
     if not path or not Path(path).is_file():
         abort(404)
-    return send_pdf_inline(ensure_pdf_for_docx(path), 'hop-dong-nhap.pdf')
+    return send_pdf_inline(pdf_path_for_docx_or_abort(path), 'hop-dong-nhap.pdf')
 
 @app.route('/contracts/preview/download')
 def download_contract_draft():
@@ -6946,22 +7283,21 @@ def preview_contract(cid):
         flash('Không tìm thấy file hợp đồng', 'danger')
         return redirect(url_for('contracts'))
     try:
-        urls = preview_pdf_urls(
+        urls = prepare_document_preview_urls(
             c.file_path,
             'view_contract_pdf',
+            'view_contract',
             'download_contract',
             'download_contract_pdf',
             cid=c.id,
         )
-    except (RuntimeError, FileNotFoundError) as e:
+    except FileNotFoundError as e:
         flash(str(e), 'danger')
         return redirect(url_for('contracts'))
-    return docx_preview_page(
+    return render_document_preview_page(
         c.contract_code,
         c.customer.name,
-        urls['pdf_url'],
-        urls['docx_download_url'],
-        urls['pdf_download_url'],
+        urls,
         app_back_url('contracts'),
     )
 
@@ -6977,8 +7313,10 @@ def view_contract_pdf(cid):
     c = Contract.query.get_or_404(cid)
     if not c.file_path or not Path(c.file_path).is_file():
         abort(404)
-    pdf_path = ensure_pdf_for_docx(c.file_path)
-    return send_pdf_inline(pdf_path, f'{c.contract_code}.pdf')
+    return send_pdf_inline(
+        pdf_path_for_docx_or_abort(c.file_path),
+        f'{c.contract_code}.pdf',
+    )
 
 @app.route('/download/contract/<int:cid>')
 def download_contract(cid):
@@ -7020,8 +7358,14 @@ def orders():
         return orders_redirect()
 
     filters = order_filters_from_request()
-    if filters['customer_id']:
-        session['orders_customer_id'] = filters['customer_id']
+    if request.args.get('clear'):
+        session.pop('orders_customer_id', None)
+        filters['customer_id'] = ''
+    elif 'customer_id' in request.args:
+        if filters['customer_id']:
+            session['orders_customer_id'] = filters['customer_id']
+        else:
+            session.pop('orders_customer_id', None)
     elif session.get('orders_customer_id'):
         try:
             remembered = int(session.get('orders_customer_id'))
@@ -7046,12 +7390,12 @@ def orders():
         'orders.html',
         orders=pagination.items,
         pagination=pagination,
-        stats=order_stats(),
+        stats=order_stats(query),
         filters=filters,
         list_args=list_args,
         export_args=export_args,
         per_page=per_page,
-        customers=customers_for_select(),
+        customers=customers_for_order_filter(),
         order_filter_statuses=ORDER_FILTER_STATUSES,
     )
 
@@ -7372,7 +7716,10 @@ def debt():
     order_page = request.args.get('order_page', 1, type=int)
     per_page = min(max(per_page, 5), 50)
     customer_id = request.args.get('customer_id', type=int)
-    if customer_id:
+    if request.args.get('clear'):
+        session.pop('debt_customer_id', None)
+        customer_id = None
+    elif customer_id:
         session['debt_customer_id'] = customer_id
     elif session.get('debt_customer_id'):
         try:
@@ -7551,11 +7898,13 @@ def create_quote_doc_templates():
     if not TEMPLATE_QUOTE_HANDOVER.exists():
         doc = Document()
         _doc_add_center_heading(doc, 'BIÊN BẢN GIAO NHẬN HÀNG HÓA', level=1)
-        doc.add_paragraph('Số biên bản: {{SO_BIEN_BAN}}')
-        doc.add_paragraph('Báo giá: {{SO_BAO_GIA}} — Ngày giao: {{NGAY_GIAO}}')
-        doc.add_paragraph('BÊN GIAO: {{TEN_BEN_B}}')
-        doc.add_paragraph('BÊN NHẬN: {{TEN_BEN_A}}')
-        doc.add_paragraph('Địa điểm: {{DIA_DIEM}}')
+        doc.add_paragraph('Căn cứ vào hợp đồng mua bán giữa {{TEN_BEN_B}} và {{TEN_BEN_A}}')
+        doc.add_paragraph('Hôm nay, ngày {{NGAY_GIAO}}, tại {{DIA_DIEM}}, chúng tôi đại diện cho các bên ký hợp đồng gồm có:')
+        doc.add_paragraph('BÊN MUA (BÊN A): {{TEN_BEN_A}}')
+        doc.add_paragraph('BÊN BÁN (BÊN B): {{TEN_BEN_B}}')
+        doc.add_paragraph('Đại diện A: {{DAI_DIEN_A}} — Chức vụ: {{CHUC_VU_A}}')
+        doc.add_paragraph('Đại diện B: {{DAI_DIEN_B}} — Chức vụ: {{CHUC_VU_B}}')
+        doc.add_paragraph('(Bảng hàng: dùng {%tr for item in items %} trong file Word thật)')
         doc.save(TEMPLATE_QUOTE_HANDOVER)
 
 def create_template_docx():

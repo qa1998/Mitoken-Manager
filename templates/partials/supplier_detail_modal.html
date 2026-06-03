@@ -17,7 +17,7 @@
 {% set intakes = intake_board.intakes.get(s.id, []) %}
 {% set payments = intake_board.payments.get(s.id, []) %}
 <div class="modal fade supplier-detail-modal" id="detailModal{{ s.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
         <div>
@@ -106,20 +106,33 @@
                     <td class="text-end money {% if balance > 0 %}text-danger fw-semibold{% endif %}">{{ balance|money }}</td>
                     <td>{{ supplier_pay_badge(intake) }}</td>
                     <td class="text-end">
-                      {% if balance > 0 and (intake.total_amount or 0) > 0 %}
-                      <button type="button"
-                              class="btn btn-sm btn-primary supplier-intake-pay-btn"
-                              data-bs-toggle="modal"
-                              data-bs-target="#supplierPaymentModal{{ s.id }}"
-                              data-payment-url="{{ url_for('supplier_intake_payment', sid=s.id, iid=intake.id) }}"
-                              data-intake-code="{{ intake.intake_code or intake.id }}"
-                              data-balance="{{ balance }}"
-                              data-ref="{{ intake.ref_code or '' }}">
-                        <i class="bi bi-wallet2 me-1"></i>Thanh toán
-                      </button>
-                      {% else %}
-                      <span class="text-muted small">—</span>
-                      {% endif %}
+                      <div class="d-inline-flex flex-wrap gap-1 justify-content-end">
+                        {% if balance > 0 and (intake.total_amount or 0) > 0 %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary supplier-intake-pay-btn"
+                                data-bs-toggle="modal"
+                                data-bs-target="#supplierPaymentModal{{ s.id }}"
+                                data-payment-url="{{ url_for('supplier_intake_payment', sid=s.id, iid=intake.id) }}"
+                                data-intake-code="{{ intake.intake_code or intake.id }}"
+                                data-balance="{{ balance }}"
+                                data-ref="{{ intake.ref_code or '' }}">
+                          <i class="bi bi-wallet2 me-1"></i>Thanh toán
+                        </button>
+                        {% endif %}
+                        <form method="post"
+                              action="{{ url_for('delete_supplier_intake', sid=s.id, iid=intake.id) }}"
+                              class="m-0 supplier-intake-delete-form"
+                              data-code="{{ intake.intake_code or intake.id }}">
+                          <input type="hidden" name="_q" value="{{ list_ctx.q }}">
+                          <input type="hidden" name="_page" value="{{ list_ctx.page }}">
+                          <input type="hidden" name="_per_page" value="{{ list_ctx.per_page }}">
+                          <input type="hidden" name="_sort" value="{{ list_ctx.sort }}">
+                          <input type="hidden" name="_order" value="{{ list_ctx.order }}">
+                          <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa phiếu nhập">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </form>
+                      </div>
                     </td>
                   </tr>
                   {% if lines %}
@@ -179,7 +192,7 @@
           </div>
 
           <div class="tab-pane fade" id="supplierPayments{{ s.id }}">
-            <div class="table-responsive">
+            <div class="table-responsive supplier-payments-table-wrap">
               <table class="table table-sm supplier-payments-table mb-0">
                 <thead>
                   <tr>
@@ -215,9 +228,6 @@
             </div>
           </div>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
       </div>
     </div>
   </div>

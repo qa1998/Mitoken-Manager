@@ -46,8 +46,19 @@
     return (parseInt(digits, 10) || 0).toLocaleString('vi-VN');
   }
 
-  function getPriceListType() {
-    var el = document.getElementById('quote-price-list');
+  function resolveQuoteForm(el) {
+    if (!el) return null;
+    if (el.matches && el.matches('form.quote-form')) return el;
+    if (el.closest) return el.closest('form.quote-form');
+    return null;
+  }
+
+  function getFormTbody(form) {
+    return form ? form.querySelector('.quote-items-body') : null;
+  }
+
+  function getPriceListType(form) {
+    var el = form ? form.querySelector('.quote-price-list') : document.getElementById('quote-price-list');
     return el && el.value ? el.value : 'dealer';
   }
 
@@ -68,8 +79,10 @@
   }
 
   function getSelectedProductIds(excludeRow) {
+    var form = resolveQuoteForm(excludeRow);
     var ids = new Set();
-    document.querySelectorAll('#quote-items-body .quote-line-row').forEach(function (row) {
+    if (!form) return ids;
+    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
       if (row === excludeRow) return;
       var input = row.querySelector('input[name="product_id"]');
       if (input && input.value) ids.add(String(input.value));
@@ -83,11 +96,75 @@
     });
   }
 
+  var productPickerScrollHandler = null;
+
+  function dockProductPickerMenu(menu) {
+    if (!menu) return;
+    menu.classList.remove('open', 'is-floating', 'is-drop-up');
+    menu.style.removeProperty('top');
+    menu.style.removeProperty('left');
+    menu.style.removeProperty('width');
+    menu.style.removeProperty('max-height');
+    menu.style.removeProperty('bottom');
+  }
+
+  function positionProductPickerMenu(picker, menu) {
+    var anchor = picker.querySelector('.quote-product-picker-btn, .quote-line-product-display');
+    if (!anchor) return;
+    var rect = anchor.getBoundingClientRect();
+    var gap = 6;
+    var pad = 12;
+    var listMax = 260;
+    var searchH = 54;
+    var spaceBelow = window.innerHeight - rect.bottom - gap - pad;
+    var spaceAbove = rect.top - gap - pad;
+    var dropUp = spaceBelow < 160 && spaceAbove > spaceBelow;
+    var maxH = Math.min(searchH + listMax, dropUp ? spaceAbove : spaceBelow);
+
+    menu.classList.add('is-floating');
+    menu.style.width = Math.max(rect.width, 280) + 'px';
+    menu.style.left = Math.max(pad, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 280) - pad)) + 'px';
+    menu.style.maxHeight = Math.max(maxH, 120) + 'px';
+    if (dropUp) {
+      menu.classList.add('is-drop-up');
+      menu.style.top = 'auto';
+      menu.style.bottom = (window.innerHeight - rect.top + gap) + 'px';
+    } else {
+      menu.classList.remove('is-drop-up');
+      menu.style.bottom = 'auto';
+      menu.style.top = (rect.bottom + gap) + 'px';
+    }
+  }
+
+  function unbindProductPickerScrollListeners() {
+    if (!productPickerScrollHandler) return;
+    window.removeEventListener('scroll', productPickerScrollHandler, true);
+    window.removeEventListener('resize', productPickerScrollHandler);
+    document.querySelectorAll('.quote-lines-table-wrap, .quote-create-body, .modal-body, .modal-dialog-scrollable').forEach(function (el) {
+      el.removeEventListener('scroll', productPickerScrollHandler);
+    });
+    productPickerScrollHandler = null;
+  }
+
+  function bindProductPickerScrollListeners(picker) {
+    unbindProductPickerScrollListeners();
+    productPickerScrollHandler = function () {
+      var menu = picker.querySelector('.quote-product-picker-menu.open');
+      if (menu) positionProductPickerMenu(picker, menu);
+    };
+    window.addEventListener('scroll', productPickerScrollHandler, true);
+    window.addEventListener('resize', productPickerScrollHandler);
+    document.querySelectorAll('.quote-lines-table-wrap, .quote-create-body, .modal-body, .modal-dialog-scrollable').forEach(function (el) {
+      el.addEventListener('scroll', productPickerScrollHandler, { passive: true });
+    });
+  }
+
   function closeAllProductMenus(exceptPicker) {
     document.querySelectorAll('.quote-product-picker-menu.open').forEach(function (menu) {
       if (exceptPicker && exceptPicker.contains(menu)) return;
-      menu.classList.remove('open');
+      dockProductPickerMenu(menu);
     });
+    unbindProductPickerScrollListeners();
   }
 
   function renderProductMenu(picker, row) {
@@ -127,10 +204,12 @@
 
       if (!usedElsewhere) {
         btn.addEventListener('click', function () {
+          var form = resolveQuoteForm(row);
           setRowProduct(row, p);
-          picker.querySelector('.quote-product-picker-menu').classList.remove('open');
+          dockProductPickerMenu(picker.querySelector('.quote-product-picker-menu'));
+          unbindProductPickerScrollListeners();
           syncAllProductMenus();
-          recalcQuoteTotals();
+          recalcQuoteTotals(form);
         });
       }
       list.appendChild(btn);
@@ -149,8 +228,10 @@
   function syncAllProductMenus() {
     document.querySelectorAll('.quote-product-picker').forEach(function (picker) {
       var row = picker.closest('.quote-line-row');
-      if (picker.querySelector('.quote-product-picker-menu.open')) {
+      var menu = picker.querySelector('.quote-product-picker-menu.open');
+      if (menu) {
         renderProductMenu(picker, row);
+        positionProductPickerMenu(picker, menu);
       }
     });
   }
@@ -210,14 +291,18 @@
       '<span class="quote-stock-unit">' + (product.unit || 'cái') + '</span>';
   }
 
-  function setRowProduct(row, product) {
+  function setRowProduct(row, product, options) {
     if (!product) return;
+    options = options || {};
+    var form = resolveQuoteForm(row);
     renderProductCell(row, product);
     row.dataset.productId = String(product.id);
     row.querySelector('.quote-line-unit').textContent = product.unit || 'cái';
-    var price = getProductPrice(product, getPriceListType());
     var priceInput = row.querySelector('input[name="price"]');
-    priceInput.value = formatMoneyInputValue(String(price));
+    if (!options.keepPrice) {
+      var price = getProductPrice(product, getPriceListType(form));
+      priceInput.value = formatMoneyInputValue(String(price));
+    }
     updateRowStock(row, product);
     updateRowAmount(row);
   }
@@ -241,33 +326,44 @@
     row.dataset.amount = String(amount);
   }
 
-  function renumberRows() {
-    document.querySelectorAll('#quote-items-body .quote-line-row').forEach(function (row, idx) {
+  function renumberRows(form) {
+    if (!form) return;
+    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row, idx) {
       row.querySelector('.quote-line-num').textContent = String(idx + 1);
     });
   }
 
-  function recalcQuoteTotals(skipPreview) {
+  function recalcQuoteTotals(form, skipPreview) {
+    if (!form) form = document.getElementById('create-quote-form');
+    if (!form) return;
     var subtotal = 0;
-    document.querySelectorAll('#quote-items-body .quote-line-row').forEach(function (row) {
+    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
       subtotal += parseInt(row.dataset.amount || '0', 10) || 0;
     });
-    var discountPct = parseFloat(document.getElementById('quote-discount-percent').value) || 0;
-    var vatRate = parseFloat(document.getElementById('quote-vat-rate').value) || 0;
+    var discountPctEl = form.querySelector('.quote-discount-percent');
+    var vatRateEl = form.querySelector('.quote-vat-rate');
+    var discountPct = parseFloat(discountPctEl && discountPctEl.value) || 0;
+    var vatRate = parseFloat(vatRateEl && vatRateEl.value) || 0;
     var discount = Math.round((subtotal * discountPct) / 100);
     var afterDiscount = Math.max(subtotal - discount, 0);
     var vat = Math.round((afterDiscount * vatRate) / 100);
     var total = afterDiscount + vat;
 
-    document.getElementById('quote-discount-amount').value = String(discount);
-    document.getElementById('quote-summary-subtotal').textContent = fmtMoney(subtotal);
-    document.getElementById('quote-summary-discount-label').textContent =
-      'Tổng chiết khấu (' + discountPct + '%)';
-    document.getElementById('quote-summary-discount').textContent = fmtMoneySigned(discount);
-    document.getElementById('quote-summary-vat-label').textContent = 'VAT (' + vatRate + '%)';
-    document.getElementById('quote-summary-vat').textContent = fmtMoney(vat);
-    document.getElementById('quote-summary-total').textContent = fmtMoney(total);
-    if (!skipPreview) scheduleQuotePreview();
+    var discountAmount = form.querySelector('.quote-discount-amount');
+    if (discountAmount) discountAmount.value = String(discount);
+    var subtotalEl = form.querySelector('.quote-summary-subtotal');
+    if (subtotalEl) subtotalEl.textContent = fmtMoney(subtotal);
+    var discountLabel = form.querySelector('.quote-summary-discount-label');
+    if (discountLabel) discountLabel.textContent = 'Tổng chiết khấu (' + discountPct + '%)';
+    var discountEl = form.querySelector('.quote-summary-discount');
+    if (discountEl) discountEl.textContent = fmtMoneySigned(discount);
+    var vatLabel = form.querySelector('.quote-summary-vat-label');
+    if (vatLabel) vatLabel.textContent = 'VAT (' + vatRate + '%)';
+    var vatEl = form.querySelector('.quote-summary-vat');
+    if (vatEl) vatEl.textContent = fmtMoney(vat);
+    var totalEl = form.querySelector('.quote-summary-total');
+    if (totalEl) totalEl.textContent = fmtMoney(total);
+    if (!skipPreview && form.id === 'create-quote-form') scheduleQuotePreview();
   }
 
   function getPreviewUrl() {
@@ -280,6 +376,75 @@
     }
   }
 
+  function getCustomerOptionsUrl() {
+    var el = document.getElementById('quote-customer-options-url');
+    if (!el) return '/customers/options.json';
+    try {
+      return JSON.parse(el.textContent || '""') || '/customers/options.json';
+    } catch (e) {
+      return '/customers/options.json';
+    }
+  }
+
+  function getPickCustomerId() {
+    var el = document.getElementById('quote-pick-customer-id');
+    if (!el) return null;
+    try {
+      return JSON.parse(el.textContent || 'null');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function refreshQuoteCustomerOptions(selectedId) {
+    var select = document.getElementById('quote-customer-select');
+    if (!select) return Promise.resolve();
+
+    var current = selectedId != null ? String(selectedId) : select.value || '';
+
+    return fetch(getCustomerOptionsUrl(), {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to load customers');
+        return res.json();
+      })
+      .then(function (data) {
+        var rows = (data && data.customers) || [];
+        select.innerHTML = '<option value="">Khách vãng lai (không cần thông tin)</option>';
+        rows.forEach(function (c) {
+          var opt = document.createElement('option');
+          opt.value = String(c.id);
+          opt.textContent = c.name;
+          select.appendChild(opt);
+        });
+        if (current && rows.some(function (c) { return String(c.id) === current; })) {
+          select.value = current;
+        } else {
+          select.value = '';
+        }
+      })
+      .catch(function () {
+        /* keep existing options */
+      });
+  }
+
+  function openCreateQuoteModalWithCustomer(customerId) {
+    var modalEl = document.getElementById('createQuoteModal');
+    if (!modalEl || !window.bootstrap) return;
+    refreshQuoteCustomerOptions(customerId).finally(function () {
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+  }
+
+  function clearQuoteCustomerPickParam() {
+    var params = new URLSearchParams(window.location.search);
+    if (!params.has('quote_customer_id')) return;
+    params.delete('quote_customer_id');
+    var qs = params.toString();
+    history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+  }
+
   function isPreviewOpen() {
     var panel = document.getElementById('quote-create-preview-panel');
     return panel && !panel.classList.contains('is-hidden');
@@ -287,25 +452,126 @@
 
   function setPreviewOpen(open) {
     var panel = document.getElementById('quote-create-preview-panel');
+    var resizer = document.getElementById('quote-create-resizer');
     var dialog = document.querySelector('#createQuoteModal .quote-create-dialog');
     var btn = document.getElementById('btn-toggle-quote-preview');
     if (!panel) return;
     if (open) {
       panel.classList.remove('is-hidden');
+      if (resizer) resizer.classList.remove('is-hidden');
       if (dialog) dialog.classList.add('has-preview');
       if (btn) {
         btn.classList.add('is-active');
         btn.setAttribute('aria-pressed', 'true');
       }
+      applyQuotePreviewWidth(getStoredPreviewWidth());
       scheduleQuotePreview();
     } else {
       panel.classList.add('is-hidden');
+      if (resizer) resizer.classList.add('is-hidden');
       if (dialog) dialog.classList.remove('has-preview');
       if (btn) {
         btn.classList.remove('is-active');
         btn.setAttribute('aria-pressed', 'false');
       }
     }
+  }
+
+  var PREVIEW_WIDTH_KEY = 'quoteCreatePreviewWidth';
+  var PREVIEW_DOC_WIDTH = 794;
+  var PREVIEW_MIN_WIDTH = 300;
+
+  function getPreviewLayout() {
+    return document.querySelector('#createQuoteModal .quote-create-layout');
+  }
+
+  function getMaxPreviewWidth() {
+    var layout = getPreviewLayout();
+    if (!layout) return 720;
+    return Math.floor(layout.clientWidth * 0.72);
+  }
+
+  function updatePreviewScale(width) {
+    var layout = getPreviewLayout();
+    if (!layout) return;
+    var available = Math.max(width - 24, 200);
+    var scale = Math.min(1, Math.max(0.48, available / PREVIEW_DOC_WIDTH));
+    layout.style.setProperty('--quote-preview-scale', String(Math.round(scale * 1000) / 1000));
+  }
+
+  function applyQuotePreviewWidth(width) {
+    var layout = getPreviewLayout();
+    var panel = document.getElementById('quote-create-preview-panel');
+    if (!layout || !panel) return;
+    var maxW = getMaxPreviewWidth();
+    var w = Math.max(PREVIEW_MIN_WIDTH, Math.min(width || 480, maxW));
+    layout.style.setProperty('--quote-preview-width', w + 'px');
+    panel.style.width = w + 'px';
+    updatePreviewScale(w);
+    try {
+      localStorage.setItem(PREVIEW_WIDTH_KEY, String(w));
+    } catch (e) {}
+    return w;
+  }
+
+  function getStoredPreviewWidth() {
+    try {
+      var saved = parseInt(localStorage.getItem(PREVIEW_WIDTH_KEY), 10);
+      if (saved >= PREVIEW_MIN_WIDTH) return saved;
+    } catch (e) {}
+    var layout = getPreviewLayout();
+    if (layout && layout.clientWidth) {
+      return Math.max(420, Math.floor(layout.clientWidth * 0.42));
+    }
+    return 480;
+  }
+
+  function initQuotePreviewResize() {
+    var layout = getPreviewLayout();
+    var resizer = document.getElementById('quote-create-resizer');
+    if (!layout || !resizer) return;
+
+    applyQuotePreviewWidth(getStoredPreviewWidth());
+
+    var dragging = false;
+
+    function stopDrag() {
+      if (!dragging) return;
+      dragging = false;
+      resizer.classList.remove('is-dragging');
+      document.body.classList.remove('quote-create-resizing');
+    }
+
+    function onMove(clientX) {
+      var rect = layout.getBoundingClientRect();
+      applyQuotePreviewWidth(rect.right - clientX);
+    }
+
+    resizer.addEventListener('mousedown', function (e) {
+      if (!isPreviewOpen() || e.button !== 0) return;
+      dragging = true;
+      resizer.classList.add('is-dragging');
+      document.body.classList.add('quote-create-resizing');
+      onMove(e.clientX);
+      e.preventDefault();
+    });
+
+    resizer.addEventListener('dblclick', function () {
+      applyQuotePreviewWidth(Math.max(480, Math.floor(layout.clientWidth * 0.45)));
+    });
+
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      onMove(e.clientX);
+    });
+
+    document.addEventListener('mouseup', stopDrag);
+    window.addEventListener('blur', stopDrag);
+
+    window.addEventListener('resize', function () {
+      if (!isPreviewOpen()) return;
+      applyQuotePreviewWidth(getStoredPreviewWidth());
+    });
   }
 
   function scheduleQuotePreview() {
@@ -320,7 +586,7 @@
     var host = document.getElementById('quote-create-preview-body');
     if (!form || !host || previewBusy) return;
 
-    recalcQuoteTotals(true);
+    recalcQuoteTotals(form, true);
     previewBusy = true;
     host.innerHTML =
       '<div class="quote-create-preview-loading">' +
@@ -338,6 +604,7 @@
       })
       .then(function (html) {
         host.innerHTML = html;
+        applyQuotePreviewWidth(getStoredPreviewWidth());
       })
       .catch(function () {
         host.innerHTML =
@@ -352,6 +619,7 @@
 
   function initQuotePreviewPanel() {
     var btn = document.getElementById('btn-toggle-quote-preview');
+    initQuotePreviewResize();
     var openByDefault = window.matchMedia('(min-width: 993px)').matches;
     setPreviewOpen(openByDefault);
     if (btn) {
@@ -368,17 +636,19 @@
     }
   }
 
-  function applyPriceListToAllRows() {
-    document.querySelectorAll('#quote-items-body .quote-line-row').forEach(function (row) {
+  function applyPriceListToAllRows(form) {
+    if (!form) form = document.getElementById('create-quote-form');
+    if (!form) return;
+    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
       var productId = row.querySelector('input[name="product_id"]').value;
       if (!productId) return;
       var product = findProduct(productId);
       if (!product) return;
-      var price = getProductPrice(product, getPriceListType());
+      var price = getProductPrice(product, getPriceListType(form));
       row.querySelector('input[name="price"]').value = formatMoneyInputValue(String(price));
       updateRowAmount(row);
     });
-    recalcQuoteTotals();
+    recalcQuoteTotals(form);
   }
 
   function initProductPicker(picker, row) {
@@ -394,11 +664,17 @@
       if (!isOpen) {
         menu.classList.add('open');
         renderProductMenu(picker, row);
+        positionProductPickerMenu(picker, menu);
+        bindProductPickerScrollListeners(picker);
         if (search) {
           search.value = '';
           search.focus();
         }
       }
+    });
+
+    menu.addEventListener('click', function (e) {
+      e.stopPropagation();
     });
 
     if (search) {
@@ -412,29 +688,32 @@
   }
 
   function bindRowInputs(row) {
+    var form = resolveQuoteForm(row);
     row.querySelector('input[name="qty"]').addEventListener('input', function () {
       updateRowAmount(row);
-      recalcQuoteTotals();
+      recalcQuoteTotals(form);
     });
     row.querySelector('input[name="price"]').addEventListener('input', function () {
       updateRowAmount(row);
-      recalcQuoteTotals();
+      recalcQuoteTotals(form);
     });
     row.querySelector('input[name="line_discount"]').addEventListener('input', function () {
       updateRowAmount(row);
-      recalcQuoteTotals();
+      recalcQuoteTotals(form);
     });
     row.querySelector('.btn-remove-quote-row').addEventListener('click', function () {
       row.remove();
-      renumberRows();
+      renumberRows(form);
       syncAllProductMenus();
-      recalcQuoteTotals();
+      recalcQuoteTotals(form);
     });
   }
 
-  function addQuoteRow(product) {
-    var tbody = document.getElementById('quote-items-body');
+  function addQuoteRow(form, product, options) {
+    if (!form) form = document.getElementById('create-quote-form');
+    var tbody = getFormTbody(form);
     if (!tbody) return null;
+    options = options || {};
     rowSeq += 1;
     var row = document.createElement('tr');
     row.className = 'quote-line-row';
@@ -465,19 +744,29 @@
       window.initMoneyInputs(row);
     }
 
-    if (product) setRowProduct(row, product);
-    renumberRows();
+    if (product) {
+      setRowProduct(row, product, options);
+      if (options.qty != null) {
+        row.querySelector('input[name="qty"]').value = String(options.qty);
+      }
+      if (options.price != null) {
+        row.querySelector('input[name="price"]').value = formatMoneyInputValue(String(options.price));
+      }
+      updateRowAmount(row);
+    }
+    renumberRows(form);
     syncAllProductMenus();
-    recalcQuoteTotals();
+    recalcQuoteTotals(form, true);
     return row;
   }
 
-  function resetCreateQuoteForm() {
-    var tbody = document.getElementById('quote-items-body');
+  function resetCreateQuoteForm(form) {
+    if (!form) form = document.getElementById('create-quote-form');
+    var tbody = getFormTbody(form);
     if (tbody) tbody.innerHTML = '';
     rowSeq = 0;
-    addQuoteRow();
-    recalcQuoteTotals();
+    addQuoteRow(form);
+    recalcQuoteTotals(form, true);
     var note = document.getElementById('quote-note-input');
     var noteCount = document.getElementById('quote-note-count');
     if (note && noteCount) {
@@ -490,13 +779,80 @@
     }
   }
 
-  function normalizeRowsBeforeSubmit() {
-    document.querySelectorAll('#quote-items-body .quote-line-row').forEach(function (row) {
+  function normalizeRowsBeforeSubmit(form) {
+    if (!form) return;
+    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
       var priceInput = row.querySelector('input[name="price"]');
       var lineDisc = parseFloat(row.querySelector('input[name="line_discount"]').value) || 0;
       var rawPrice = parseMoneyInput(priceInput.value);
       var effective = Math.round(rawPrice * (1 - lineDisc / 100));
       priceInput.value = effective ? String(effective) : '0';
+    });
+  }
+
+  function loadEditQuoteForm(form) {
+    var dataEl = form.querySelector('.quote-edit-items-data');
+    var items = [];
+    if (dataEl) {
+      try {
+        items = JSON.parse(dataEl.textContent || '[]');
+      } catch (e) {
+        items = [];
+      }
+    }
+    var tbody = getFormTbody(form);
+    if (tbody) tbody.innerHTML = '';
+    if (!items.length) {
+      addQuoteRow(form);
+      return;
+    }
+    items.forEach(function (item) {
+      var product = findProduct(item.product_id);
+      if (!product) return;
+      addQuoteRow(form, product, { keepPrice: true, qty: item.qty, price: item.price });
+    });
+    if (!tbody.children.length) addQuoteRow(form);
+    recalcQuoteTotals(form, true);
+    if (typeof window.initMoneyInputs === 'function') {
+      window.initMoneyInputs(form);
+    }
+  }
+
+  function bindQuoteForm(form) {
+    if (!form || form.dataset.quoteBound === '1') return;
+    form.dataset.quoteBound = '1';
+
+    var addBtn = form.querySelector('.quote-add-row-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        addQuoteRow(form);
+      });
+    }
+
+    var priceList = form.querySelector('.quote-price-list');
+    if (priceList) {
+      priceList.addEventListener('change', function () {
+        applyPriceListToAllRows(form);
+      });
+    }
+
+    form.querySelectorAll('.quote-calc-input').forEach(function (el) {
+      el.addEventListener('input', function () {
+        recalcQuoteTotals(form);
+      });
+    });
+
+    form.addEventListener('submit', function (e) {
+      recalcQuoteTotals(form, true);
+      normalizeRowsBeforeSubmit(form);
+      var hasProduct = false;
+      form.querySelectorAll('.quote-items-body input[name="product_id"]').forEach(function (input) {
+        if (input.value) hasProduct = true;
+      });
+      if (!hasProduct) {
+        e.preventDefault();
+        alert('Vui lòng thêm ít nhất một sản phẩm vào báo giá');
+      }
     });
   }
 
@@ -512,21 +868,7 @@
     quoteCatalog = parseCatalog();
     moveQuoteModalsToBody();
 
-    var btnAdd = document.getElementById('btn-add-quote-row');
-    if (btnAdd) {
-      btnAdd.addEventListener('click', function () {
-        addQuoteRow();
-      });
-    }
-
-    var priceList = document.getElementById('quote-price-list');
-    if (priceList) {
-      priceList.addEventListener('change', applyPriceListToAllRows);
-    }
-
-    document.querySelectorAll('.quote-calc-input').forEach(function (el) {
-      el.addEventListener('input', recalcQuoteTotals);
-    });
+    document.querySelectorAll('form.quote-form').forEach(bindQuoteForm);
 
     var noteInput = document.getElementById('quote-note-input');
     var noteCount = document.getElementById('quote-note-count');
@@ -544,40 +886,62 @@
     if (createModal) {
       initQuotePreviewPanel();
       createModal.addEventListener('shown.bs.modal', function () {
-        var tbody = document.getElementById('quote-items-body');
-        if (tbody && !tbody.children.length) addQuoteRow();
+        var form = document.getElementById('create-quote-form');
+        var tbody = getFormTbody(form);
+        if (tbody && !tbody.children.length) addQuoteRow(form);
         if (typeof window.initMoneyInputs === 'function') {
           window.initMoneyInputs(createModal);
         }
-        if (isPreviewOpen()) scheduleQuotePreview();
+        refreshQuoteCustomerOptions(getPickCustomerId()).finally(function () {
+          if (isPreviewOpen()) scheduleQuotePreview();
+        });
       });
       createModal.addEventListener('hidden.bs.modal', function () {
+        closeAllProductMenus();
         var form = document.getElementById('create-quote-form');
         if (form) form.reset();
-        var priceListEl = document.getElementById('quote-price-list');
+        var priceListEl = form && form.querySelector('.quote-price-list');
         if (priceListEl) priceListEl.value = 'dealer';
-        resetCreateQuoteForm();
+        resetCreateQuoteForm(form);
       });
     }
 
-    var createForm = document.getElementById('create-quote-form');
-    if (createForm) {
-      createForm.addEventListener('submit', function (e) {
-        recalcQuoteTotals();
-        normalizeRowsBeforeSubmit();
-        var hasProduct = false;
-        document.querySelectorAll('#quote-items-body input[name="product_id"]').forEach(function (input) {
-          if (input.value) hasProduct = true;
-        });
-        if (!hasProduct) {
-          e.preventDefault();
-          alert('Vui lòng thêm ít nhất một sản phẩm vào báo giá');
-        }
+    document.querySelectorAll('.quote-edit-modal').forEach(function (modalEl) {
+      modalEl.addEventListener('shown.bs.modal', function () {
+        var form = modalEl.querySelector('form.quote-form');
+        if (form) loadEditQuoteForm(form);
       });
+      modalEl.addEventListener('hidden.bs.modal', function () {
+        closeAllProductMenus();
+      });
+    });
+
+    window.addEventListener('focus', function () {
+      if (!createModal || !createModal.classList.contains('show')) return;
+      refreshQuoteCustomerOptions().then(function () {
+        if (isPreviewOpen()) scheduleQuotePreview();
+      });
+    });
+
+    var pickCustomerId = getPickCustomerId();
+    if (pickCustomerId) {
+      openCreateQuoteModalWithCustomer(pickCustomerId);
+      clearQuoteCustomerPickParam();
     }
 
-    if (document.getElementById('quote-items-body')) {
-      resetCreateQuoteForm();
+    if (document.getElementById('create-quote-form')) {
+      resetCreateQuoteForm(document.getElementById('create-quote-form'));
     }
+
+    document.querySelectorAll('.quote-delete-form').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        var code = form.getAttribute('data-code') || 'báo giá này';
+        var msg =
+          'Xóa báo giá "' +
+          code +
+          '"?\n\nĐơn hàng liên quan (nếu chưa thanh toán) cũng sẽ bị gỡ. Thao tác không thể hoàn tác.';
+        if (!confirm(msg)) e.preventDefault();
+      });
+    });
   });
 })();

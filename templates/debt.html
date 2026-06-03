@@ -188,10 +188,13 @@
 
         <ul class="nav nav-tabs debt-detail-tabs" role="tablist">
           <li class="nav-item">
-            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#debtTabOrders" type="button">Đơn hàng</button>
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#debtTabOrders" type="button">Đơn hàng</button>
           </li>
           <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#debtTabPayments" type="button">Lịch sử thanh toán</button>
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#debtTabPayments" type="button">
+              Lịch sử thanh toán
+              {% if payment_groups %}<span class="badge rounded-pill bg-light text-dark border ms-1">{{ payment_groups|length }}</span>{% endif %}
+            </button>
           </li>
         </ul>
 
@@ -211,7 +214,7 @@
                     <th class="text-end">Đã thanh toán</th>
                     <th class="text-end">Còn lại</th>
                     <th>Trạng thái</th>
-                    <th></th>
+                    <th class="text-end debt-col-actions">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -233,8 +236,34 @@
                       <span class="debt-pay-badge owing">Còn nợ</span>
                       {% endif %}
                     </td>
-                    <td class="text-end">
-                      <a href="{{ url_for('order_preview', oid=o.id) }}" class="debt-row-chevron"><i class="bi bi-chevron-right"></i></a>
+                    <td class="text-end debt-col-actions">
+                      <div class="dropdown debt-row-actions">
+                        <button class="btn btn-light btn-sm btn-action-dots" type="button" data-bs-toggle="dropdown" title="Thao tác">
+                          <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                          <li>
+                            <a class="dropdown-item" href="{{ url_for('order_preview', oid=o.id) }}">
+                              <i class="bi bi-eye me-2"></i>Xem chi tiết
+                            </a>
+                          </li>
+                          {% if bal > 0 %}
+                          <li><hr class="dropdown-divider"></li>
+                          <li>
+                            <form method="post" action="{{ url_for('delete_order', oid=o.id) }}" class="m-0 debt-order-delete-form"
+                                  data-code="{{ o.order_code }}" data-balance="{{ bal|money }}">
+                              <input type="hidden" name="_from" value="debt">
+                              <input type="hidden" name="_customer_id" value="{{ selected.id }}">
+                              <input type="hidden" name="_page" value="{{ pagination.page }}">
+                              <input type="hidden" name="_order_page" value="{{ order_pagination.page if order_pagination else 1 }}">
+                              <button type="submit" class="dropdown-item text-danger">
+                                <i class="bi bi-trash me-2"></i>Xóa công nợ
+                              </button>
+                            </form>
+                          </li>
+                          {% endif %}
+                        </ul>
+                      </div>
                     </td>
                   </tr>
                   {% else %}
@@ -270,8 +299,13 @@
           </div>
 
           <div class="tab-pane fade" id="debtTabPayments">
-            <h6 class="debt-payments-title">Lịch sử thanh toán</h6>
-            <div class="table-responsive">
+            <div class="debt-section-head">
+              <div>
+                <h6 class="debt-payments-title mb-1">Lịch sử thanh toán</h6>
+                <p class="small-muted mb-0">Xóa thanh toán đã ghi nhận nhầm — công nợ đơn hàng sẽ được cập nhật lại.</p>
+              </div>
+            </div>
+            <div class="table-responsive debt-payments-table-wrap">
               <table class="table debt-payments-table">
                 <thead>
                   <tr>
@@ -280,6 +314,7 @@
                     <th>Phương thức</th>
                     <th>Ghi chú</th>
                     <th class="text-center">Chứng từ</th>
+                    <th class="text-end debt-col-actions">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -309,9 +344,21 @@
                       <span class="text-muted">—</span>
                       {% endif %}
                     </td>
+                    <td class="text-end">
+                      <form method="post" action="{{ url_for('delete_debt_payment', pid=g.receipt_pid) }}"
+                            class="d-inline debt-payment-delete-form"
+                            data-amount="{{ g.total|money }}"
+                            data-kind="{{ g.kind }}">
+                        <input type="hidden" name="_page" value="{{ pagination.page }}">
+                        <input type="hidden" name="_order_page" value="{{ order_pagination.page if order_pagination else 1 }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger debt-payment-delete-btn" title="Xóa thanh toán">
+                          <i class="bi bi-trash me-1"></i>Xóa
+                        </button>
+                      </form>
+                    </td>
                   </tr>
                   {% else %}
-                  <tr><td colspan="5" class="text-center text-muted py-4">Chưa có lịch sử thanh toán</td></tr>
+                  <tr><td colspan="6" class="text-center text-muted py-4">Chưa có lịch sử thanh toán</td></tr>
                   {% endfor %}
                 </tbody>
               </table>
@@ -389,4 +436,41 @@
 </div>
 {% endif %}
 
+{% endblock %}
+{% block extra_js %}
+<script>
+document.querySelectorAll('.debt-payment-delete-form').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    var amount = form.getAttribute('data-amount') || '';
+    var isBatch = form.getAttribute('data-kind') === 'batch';
+    var msg =
+      'Xóa thanh toán ' +
+      amount +
+      '?\n\n' +
+      (isBatch
+        ? 'Toàn bộ lần phân bổ thanh toán này sẽ bị gỡ và công nợ các đơn được cập nhật lại.'
+        : 'Công nợ đơn hàng sẽ được cập nhật lại.') +
+      '\n\nThao tác không thể hoàn tác.';
+    if (!confirm(msg)) e.preventDefault();
+  });
+});
+
+document.querySelectorAll('.debt-order-delete-form').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    var code = form.getAttribute('data-code') || 'đơn này';
+    var balance = form.getAttribute('data-balance') || '';
+    var msg =
+      'Xóa công nợ đơn ' +
+      code +
+      ' (' +
+      balance +
+      ')?\n\nĐơn hàng và các khoản thanh toán liên quan cũng sẽ bị xóa. Thao tác không thể hoàn tác.';
+    if (!confirm(msg)) e.preventDefault();
+  });
+});
+
+if (typeof initTableDropdowns === 'function') {
+  initTableDropdowns(document.querySelector('.debt-page'));
+}
+</script>
 {% endblock %}

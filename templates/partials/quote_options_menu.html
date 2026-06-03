@@ -29,9 +29,19 @@
       </a>
     </li>
     <li>
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editSaleContract{{ quote.id }}">
+        <i class="bi bi-pencil me-2"></i>Sửa HĐ mua bán
+      </button>
+    </li>
+    <li>
       <a class="dropdown-item" href="{{ url_for('preview_quote_handover', qid=quote.id) }}" target="_blank">
         <i class="bi bi-clipboard-check me-2"></i>Biên bản nhận hàng
       </a>
+    </li>
+    <li>
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editHandover{{ quote.id }}">
+        <i class="bi bi-pencil me-2"></i>Sửa biên bản giao nhận
+      </button>
     </li>
     {% if show_status_actions %}
     <li><hr class="dropdown-divider"></li>
@@ -67,6 +77,16 @@
     </li>
     {% endif %}
     {% endif %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <form method="post" action="{{ url_for('delete_quote', qid=quote.id) }}" class="m-0 quote-delete-form"
+            data-code="{{ quote.quote_code }}">
+        <input type="hidden" name="_tab" value="{{ tab }}">
+        <button type="submit" class="dropdown-item text-danger">
+          <i class="bi bi-trash me-2"></i>Xóa báo giá
+        </button>
+      </form>
+    </li>
   </ul>
 </div>
 {% endmacro %}
@@ -90,9 +110,19 @@
       </a>
     </li>
     <li>
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editSaleContract{{ quote.id }}">
+        <i class="bi bi-pencil me-2"></i>Sửa HĐ mua bán
+      </button>
+    </li>
+    <li>
       <a class="dropdown-item" href="{{ url_for('preview_quote_handover', qid=quote.id) }}" target="_blank">
         <i class="bi bi-clipboard-check me-2"></i>Biên bản nhận hàng
       </a>
+    </li>
+    <li>
+      <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editHandover{{ quote.id }}">
+        <i class="bi bi-pencil me-2"></i>Sửa biên bản giao nhận
+      </button>
     </li>
     {% if st == 'Mới tạo' %}
     <li><hr class="dropdown-divider"></li>
@@ -116,6 +146,17 @@
       </a>
     </li>
     {% endif %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <form method="post" action="{{ url_for('delete_quote', qid=quote.id) }}" class="m-0 quote-delete-form"
+            data-code="{{ quote.quote_code }}">
+        <input type="hidden" name="_from" value="preview">
+        <input type="hidden" name="_tab" value="list">
+        <button type="submit" class="dropdown-item text-danger">
+          <i class="bi bi-trash me-2"></i>Xóa báo giá
+        </button>
+      </form>
+    </li>
     <li><hr class="dropdown-divider"></li>
     <li>
       <a class="dropdown-item" href="{{ url_for('quotes') }}">

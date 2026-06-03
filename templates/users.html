@@ -1,0 +1,142 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="panel-card">
+  <div class="panel-card-head">
+    <div class="section-header mb-0">
+      <div class="page-header-icon"><i class="bi bi-person-gear"></i></div>
+      <div>
+        <h2 class="section-title">Người dùng</h2>
+        <p class="small-muted mb-0">Admin phân quyền bán hàng và quản lý kho</p>
+      </div>
+    </div>
+  </div>
+
+  <form method="post" class="row g-3 align-items-end mt-2">
+    <div class="col-md-3">
+      <label class="form-label-custom">Tên đăng nhập</label>
+      <input type="text" name="username" class="form-control" required minlength="3" placeholder="vd: sale01">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label-custom">Họ tên</label>
+      <input type="text" name="full_name" class="form-control" placeholder="Nguyễn Văn A">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label-custom">Vai trò</label>
+      <select name="role" class="form-select">
+        {% for key, label in roles.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label-custom">Mật khẩu</label>
+      <input type="password" name="password" class="form-control" required minlength="6" placeholder="Tối thiểu 6 ký tự">
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg me-1"></i> Thêm</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel-card">
+  <div class="table-responsive">
+    <table class="table customer-table mb-0">
+      <thead>
+        <tr>
+          <th>Tên đăng nhập</th>
+          <th>Họ tên</th>
+          <th>Vai trò</th>
+          <th>Trạng thái</th>
+          <th>Ngày tạo</th>
+          <th class="text-end">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td class="fw-semibold">{{ u.username }}</td>
+          <td>{{ u.full_name or '—' }}</td>
+          <td><span class="badge bg-light text-dark border">{{ roles.get(u.role, u.role) }}</span></td>
+          <td>
+            {% if u.is_active %}
+            <span class="badge bg-success-subtle text-success">Đang hoạt động</span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary">Đã khóa</span>
+            {% endif %}
+          </td>
+          <td class="text-nowrap">{{ u.created_at.strftime('%d/%m/%Y') if u.created_at else '—' }}</td>
+          <td class="text-end">
+            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editUser{{ u.id }}">
+              <i class="bi bi-pencil"></i>
+            </button>
+            {% if u.id != current_user.id %}
+            <form method="post" action="{{ url_for('toggle_user_active', uid=u.id) }}" class="d-inline">
+              <button type="submit" class="btn btn-sm btn-outline-secondary" title="{% if u.is_active %}Khóa{% else %}Mở khóa{% endif %}">
+                <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-fill"></i>
+              </button>
+            </form>
+            <form method="post" action="{{ url_for('delete_user', uid=u.id) }}" class="d-inline" onsubmit="return confirm('Xóa tài khoản {{ u.username }}?');">
+              <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">Chưa có người dùng</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% for u in users %}
+<div class="modal fade" id="editUser{{ u.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_user', uid=u.id) }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Cập nhật {{ u.username }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label-custom">Họ tên</label>
+            <input type="text" name="full_name" class="form-control" value="{{ u.full_name }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Vai trò</label>
+            <select name="role" class="form-select" {% if u.id == current_user.id %}disabled{% endif %}>
+              {% for key, label in roles.items() %}
+              <option value="{{ key }}" {% if u.role == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            {% if u.id == current_user.id %}
+            <input type="hidden" name="role" value="{{ u.role }}">
+            {% endif %}
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Mật khẩu mới</label>
+            <input type="password" name="password" class="form-control" minlength="6" placeholder="Để trống nếu không đổi">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<div class="panel-card bg-light border-0">
+  <h6 class="mb-2">Phân quyền</h6>
+  <ul class="small-muted mb-0 ps-3">
+    <li><strong>Quản trị</strong> — toàn quyền, quản lý người dùng và thông tin công ty</li>
+    <li><strong>Bán hàng</strong> — khách hàng, báo giá, đơn hàng, công nợ, hợp đồng</li>
+    <li><strong>Quản lý kho</strong> — sản phẩm, danh mục, thương hiệu, kho hàng</li>
+  </ul>
+</div>
+
+{% endblock %}

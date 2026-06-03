@@ -11,23 +11,23 @@
         </div>
       </div>
       <div class="quote-create-layout">
-        <form method="post" action="{{ url_for('quotes') }}" id="create-quote-form" class="quote-create-form">
+        <form method="post" action="{{ url_for('quotes') }}" id="create-quote-form" class="quote-form quote-create-form">
           <div class="quote-create-body">
             <div class="quote-create-top">
               <div class="quote-create-meta-grid">
                 <div class="quote-meta-field quote-meta-customer">
-                  <label class="form-label-custom">Khách hàng <span class="text-danger">*</span></label>
+                  <label class="form-label-custom">Khách hàng</label>
                   <div class="quote-meta-input-row">
                     <div class="input-icon-wrap flex-grow-1">
                       <i class="bi bi-person"></i>
-                      <select name="customer_id" class="form-select" required id="quote-customer-select">
-                        <option value="">Chọn khách hàng</option>
+                      <select name="customer_id" class="form-select" id="quote-customer-select">
+                        <option value="" selected>Khách vãng lai (không cần thông tin)</option>
                         {% for c in customers %}
                         <option value="{{ c.id }}">{{ c.name }}</option>
                         {% endfor %}
                       </select>
                     </div>
-                    <a href="{{ url_for('customers') }}" target="_blank" class="btn btn-outline-primary btn-sm text-nowrap flex-shrink-0 quote-add-customer-btn">
+                    <a href="{{ url_for('customers', from='quotes') }}" target="_blank" class="btn btn-outline-primary btn-sm text-nowrap flex-shrink-0 quote-add-customer-btn" id="quote-add-customer-link">
                       <i class="bi bi-plus-lg"></i> Thêm KH
                     </a>
                   </div>
@@ -36,7 +36,7 @@
                   <label class="form-label-custom">Bảng giá <span class="text-danger">*</span></label>
                   <div class="input-icon-wrap">
                     <i class="bi bi-tag"></i>
-                    <select class="form-select" id="quote-price-list">
+                    <select class="form-select quote-price-list" id="quote-price-list">
                       <option value="dealer" selected>Giá sỉ / đại lý</option>
                       <option value="project">Giá công trình</option>
                       <option value="retail">Giá lẻ</option>
@@ -45,12 +45,12 @@
                 </div>
                 <div class="quote-meta-field quote-meta-narrow">
                   <label class="form-label-custom">VAT (%)</label>
-                  <input name="vat_rate" type="number" min="0" max="100" class="form-control quote-calc-input text-center" id="quote-vat-rate" value="0">
+                  <input name="vat_rate" type="number" min="0" max="100" class="form-control quote-calc-input quote-vat-rate text-center" id="quote-vat-rate" value="0">
                 </div>
                 <div class="quote-meta-field quote-meta-narrow">
                   <label class="form-label-custom">CK (%)</label>
-                  <input type="number" min="0" max="100" class="form-control quote-calc-input text-center" id="quote-discount-percent" value="0">
-                  <input type="hidden" name="discount" id="quote-discount-amount" value="0">
+                  <input type="number" min="0" max="100" class="form-control quote-calc-input quote-discount-percent text-center" id="quote-discount-percent" value="0">
+                  <input type="hidden" name="discount" class="quote-discount-amount" id="quote-discount-amount" value="0">
                 </div>
                 <div class="quote-meta-field">
                   <label class="form-label-custom">Hiệu lực đến</label>
@@ -92,7 +92,7 @@
                       <th class="col-actions text-end">Thao tác</th>
                     </tr>
                   </thead>
-                  <tbody id="quote-items-body"></tbody>
+                  <tbody class="quote-items-body" id="quote-items-body"></tbody>
                 </table>
               </div>
               <button type="button" class="btn btn-outline-primary btn-sm quote-add-row-btn" id="btn-add-quote-row">
@@ -104,19 +104,19 @@
               <div class="quote-create-summary">
                 <div class="quote-summary-line">
                   <span>Tổng tiền hàng</span>
-                  <span id="quote-summary-subtotal">0 đ</span>
+                  <span class="quote-summary-subtotal" id="quote-summary-subtotal">0 đ</span>
                 </div>
                 <div class="quote-summary-line is-discount">
-                  <span id="quote-summary-discount-label">Tổng chiết khấu (0%)</span>
-                  <span id="quote-summary-discount">-0 đ</span>
+                  <span class="quote-summary-discount-label" id="quote-summary-discount-label">Tổng chiết khấu (0%)</span>
+                  <span class="quote-summary-discount" id="quote-summary-discount">-0 đ</span>
                 </div>
                 <div class="quote-summary-line">
-                  <span id="quote-summary-vat-label">VAT (0%)</span>
-                  <span id="quote-summary-vat">0 đ</span>
+                  <span class="quote-summary-vat-label" id="quote-summary-vat-label">VAT (0%)</span>
+                  <span class="quote-summary-vat" id="quote-summary-vat">0 đ</span>
                 </div>
                 <div class="quote-summary-grand">
                   <span>Tổng thanh toán</span>
-                  <span id="quote-summary-total">0 đ</span>
+                  <span class="quote-summary-total" id="quote-summary-total">0 đ</span>
                 </div>
               </div>
               <div class="quote-create-actions">
@@ -131,6 +131,10 @@
             </div>
           </div>
         </form>
+
+        <div class="quote-create-resizer" id="quote-create-resizer" role="separator" aria-orientation="vertical" aria-label="Kéo để thay đổi kích thước xem trước" title="Kéo để chỉnh rộng/hẹp · Double-click để đặt lại" tabindex="0">
+          <span class="quote-create-resizer-grip"></span>
+        </div>
 
         <aside class="quote-create-preview" id="quote-create-preview-panel">
           <div class="quote-create-preview-head">
@@ -151,3 +155,7 @@
 
 <script type="application/json" id="quote-catalog-data">{{ quote_catalog|tojson }}</script>
 <script type="application/json" id="quote-preview-url">{{ url_for('quote_create_preview')|tojson }}</script>
+<script type="application/json" id="quote-customer-options-url">{{ url_for('customer_options_json')|tojson }}</script>
+{% if quote_customer_id %}
+<script type="application/json" id="quote-pick-customer-id">{{ quote_customer_id|tojson }}</script>
+{% endif %}

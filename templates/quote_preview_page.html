@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from 'partials/quote_status_cell.html' import quote_status_cell %}
 {% from 'partials/quote_options_menu.html' import quote_doc_options_dropdown %}
+{% from 'partials/quote_doc_edit_modals.html' import quote_doc_edit_modals %}
 {% block extra_css %}
 <link href="{{ url_for('static', filename='css/quote_print.css') }}" rel="stylesheet">
 {% endblock %}
@@ -9,7 +10,7 @@
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
     <div>
       <h3 class="mb-1">Báo giá {{ quote.quote_code }}</h3>
-      <p class="small-muted mb-2">{{ quote.customer.name }}</p>
+      <p class="small-muted mb-2">{{ quote_customer_label(quote) }}</p>
       {{ quote_status_cell(quote) }}
     </div>
     <div>
@@ -20,4 +21,5 @@
 <div class="quote-preview-page-body">
   {% include 'partials/quote_document.html' %}
 </div>
+{{ quote_doc_edit_modals(quote, companies, active_company_id, doc_tab, 'preview') }}
 {% endblock %}

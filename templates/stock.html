@@ -109,6 +109,15 @@
           </select>
         </div>
         <div class="col-md-3 col-lg-2">
+          <label class="form-label-custom">Nhà cung cấp</label>
+          <select name="supplier_id" class="form-select">
+            <option value="">Tất cả</option>
+            {% for s in all_suppliers %}
+            <option value="{{ s.id }}" {% if filters.supplier_id and filters.supplier_id|int == s.id %}selected{% endif %}>{{ s.code }} — {{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
           <label class="form-label-custom">Từ ngày</label>
           <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
         </div>
@@ -167,6 +176,7 @@
             <th>Loại</th>
             <th>Lý do</th>
             <th>Kho</th>
+            <th>Nhà cung cấp</th>
             <th class="text-end">Số lượng</th>
             <th>Chứng từ</th>
           </tr>
@@ -193,11 +203,16 @@
             </td>
             <td>{{ m.method or 'Nhập tay' }}</td>
             <td><span class="warehouse-label"><i class="bi bi-building"></i> {{ m.warehouse or 'Kho chính' }}</span></td>
+            <td>
+              {% if m.supplier %}
+              <span class="supplier-label"><i class="bi bi-truck"></i> {{ m.supplier.name }}</span>
+              {% else %}—{% endif %}
+            </td>
             <td class="text-end {% if m.movement_type == 'IN' %}text-stock-in{% else %}text-stock-out{% endif %}">{{ m.qty }}</td>
             <td>{{ m.ref_code or '—' }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="9" class="text-center text-muted py-5">Chưa có lịch sử xuất nhập</td></tr>
+          <tr><td colspan="10" class="text-center text-muted py-5">Chưa có lịch sử xuất nhập</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -312,6 +327,7 @@
 <input type="hidden" name="_movement_type" value="{{ filters.movement_type }}">
 <input type="hidden" name="_method" value="{{ filters.method }}">
 <input type="hidden" name="_warehouse" value="{{ filters.warehouse }}">
+<input type="hidden" name="_supplier_id" value="{{ filters.supplier_id }}">
 <input type="hidden" name="_date_from" value="{{ filters.date_from }}">
 <input type="hidden" name="_date_to" value="{{ filters.date_to }}">
 <input type="hidden" name="_q" value="{{ filters.q }}">
@@ -364,6 +380,15 @@
             <div class="col-6">
               <label class="form-label-custom">Mã chứng từ</label>
               <input type="text" name="ref_code" class="form-control" placeholder="VD: PN-001">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Nhà cung cấp</label>
+              <select name="supplier_id" class="form-select">
+                <option value="">— Không chọn —</option>
+                {% for s in all_suppliers %}
+                <option value="{{ s.id }}">{{ s.code }} — {{ s.name }}</option>
+                {% endfor %}
+              </select>
             </div>
             <div class="col-12">
               <label class="form-label-custom">Ghi chú</label>

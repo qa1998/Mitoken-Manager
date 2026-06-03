@@ -1,6 +1,7 @@
 {% from 'partials/product_image_upload_panel.html' import product_image_upload_panel as product_image_gallery %}
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
+{% from 'partials/product_suppliers_panel.html' import product_suppliers_panel %}
 
 {% macro product_redirect_fields() %}
 {% if from_detail|default(false) %}
@@ -17,7 +18,7 @@
 {% endmacro %}
 
 <div class="modal fade product-page-modal" id="productPrice{{ p.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <form method="post" action="{{ url_for('update_price', pid=p.id) }}">
         {{ product_redirect_fields() }}
@@ -27,31 +28,8 @@
         </div>
         <div class="modal-body">
           <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label-custom">Giá lẻ</label>
-              <div class="money-input-wrap">
-                <input type="text"
-                       name="retail_price"
-                       class="form-control money-input"
-                       inputmode="numeric"
-                       autocomplete="off"
-                       value="{% if p.retail_price %}{{ p.retail_price|money_plain }}{% endif %}"
-                       placeholder="0">
-                <span class="money-input-suffix">đ</span>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label-custom">Giá công trình</label>
-              <div class="money-input-wrap">
-                <input type="text"
-                       name="project_price"
-                       class="form-control money-input"
-                       inputmode="numeric"
-                       autocomplete="off"
-                       value="{% if p.project_price %}{{ p.project_price|money_plain }}{% endif %}"
-                       placeholder="0">
-                <span class="money-input-suffix">đ</span>
-              </div>
+            <div class="col-12">
+              {{ product_price_setup(p) }}
             </div>
           </div>
         </div>
@@ -65,12 +43,12 @@
 </div>
 
 <div class="modal fade product-page-modal" id="productStock{{ p.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <form method="post" action="{{ url_for('adjust_product_stock', pid=p.id) }}">
         {{ product_redirect_fields() }}
         <div class="modal-header">
-          <h5 class="modal-title">Chỉnh tồn kho — {{ p.name }}</h5>
+          <h5 class="modal-title">Chỉnh tồn kho &amp; giá — {{ p.name }}</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
@@ -95,15 +73,61 @@
                 {% endfor %}
               </select>
             </div>
+            <div class="col-12 product-stock-supplier-wrap">
+              <label class="form-label-custom">Nhà cung cấp <span class="text-muted fw-normal">(khi nhập kho)</span></label>
+              <select name="supplier_id" class="form-select">
+                <option value="">— Không chọn —</option>
+                {% set ps_links = product_suppliers.get(p.id, []) %}
+                {% set linked_ids = ps_links|map(attribute='supplier_id')|list %}
+                {% if ps_links %}
+                <optgroup label="NCC của sản phẩm">
+                  {% for link in ps_links %}
+                  <option value="{{ link.supplier_id }}">{{ link.supplier.code }} — {{ link.supplier.name }}{% if link.cost_price %} ({{ link.cost_price|money }}){% endif %}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
+                {% if all_suppliers|rejectattr('id', 'in', linked_ids)|list %}
+                <optgroup label="NCC khác">
+                  {% for s in all_suppliers if s.id not in linked_ids %}
+                  <option value="{{ s.id }}">{{ s.code }} — {{ s.name }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
+              </select>
+            </div>
             <div class="col-12">
               <label class="form-label-custom">Ghi chú</label>
               <input type="text" name="note" class="form-control" placeholder="Tùy chọn">
             </div>
           </div>
+          <hr class="my-4">
+          <p class="form-label-custom mb-2">Cập nhật giá <span class="text-muted fw-normal">(điền nếu giá thay đổi — lưu kèm lịch sử)</span></p>
+          {{ product_price_setup(p) }}
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-primary">Cập nhật tồn</button>
+          <button type="submit" class="btn btn-primary">Lưu tồn kho &amp; giá</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade product-page-modal" id="productSuppliers{{ p.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_product_suppliers', pid=p.id) }}">
+        {{ product_redirect_fields() }}
+        <div class="modal-header">
+          <h5 class="modal-title">Nhà cung cấp &amp; so sánh giá — {{ p.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {{ product_suppliers_panel(links=product_suppliers.get(p.id, []), suppliers=all_suppliers) }}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu nhà cung cấp</button>
         </div>
       </form>
     </div>
@@ -211,6 +235,9 @@
             </div>
             <div class="col-12">
               {{ product_price_setup(p) }}
+            </div>
+            <div class="col-12">
+              {{ product_suppliers_panel(links=product_suppliers.get(p.id, []), suppliers=all_suppliers) }}
             </div>
           </div>
         </div>

@@ -240,6 +240,10 @@ function initProductStockMethodSelects() {
         methodSel.appendChild(opt);
       });
       if (!methodSel.value && list.length) methodSel.value = list[0];
+      var supplierWrap = typeSel.closest('form').querySelector('.product-stock-supplier-wrap');
+      if (supplierWrap) {
+        supplierWrap.style.display = typeSel.value === 'IN' ? '' : 'none';
+      }
     }
     typeSel.addEventListener('change', syncMethods);
     syncMethods();
@@ -857,11 +861,125 @@ function initProductDetailGallery() {
   });
 }
 
+function fillProductSupplierSelect(select, suppliers, keepValue) {
+  if (!select) return;
+  var current = keepValue != null ? String(keepValue) : select.value || '';
+  select.innerHTML = '<option value="">— Chọn NCC —</option>';
+  (suppliers || []).forEach(function (s) {
+    var opt = document.createElement('option');
+    opt.value = String(s.id);
+    opt.textContent = (s.code || '') + ' — ' + (s.name || '');
+    select.appendChild(opt);
+  });
+  if (current && Array.from(select.options).some(function (o) { return o.value === current; })) {
+    select.value = current;
+  }
+}
+
+function refreshProductSupplierSelectOptions(panel) {
+  if (!panel) return Promise.resolve();
+  return fetch('/suppliers/options.json', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  })
+    .then(function (res) {
+      if (!res.ok) throw new Error('Failed to load suppliers');
+      return res.json();
+    })
+    .then(function (data) {
+      var rows = (data && data.suppliers) || [];
+      panel.querySelectorAll('select[name="ps_supplier_id"]').forEach(function (sel) {
+        fillProductSupplierSelect(sel, rows);
+      });
+      var tpl = panel.querySelector('.product-supplier-row-template select[name="ps_supplier_id"]');
+      if (tpl) fillProductSupplierSelect(tpl, rows);
+      var empty = panel.querySelector('.product-suppliers-empty');
+      if (empty && !rows.length && !panel.querySelector('.product-suppliers-body .product-supplier-row')) {
+        empty.classList.remove('d-none');
+      }
+    })
+    .catch(function () { /* keep server-rendered options */ });
+}
+
+function bindProductSupplierRow(row) {
+  var select = row.querySelector('select[name="ps_supplier_id"]');
+  var radio = row.querySelector('input[name="ps_primary_supplier_id"]');
+  var removeBtn = row.querySelector('.product-supplier-remove-btn');
+  if (select && radio) {
+    radio.value = select.value || '';
+    select.addEventListener('change', function () {
+      radio.value = select.value || '';
+    });
+  }
+  if (removeBtn) {
+    removeBtn.addEventListener('click', function () {
+      var panel = row.closest('[data-product-suppliers-panel]');
+      var wasPrimary = radio && radio.checked;
+      row.remove();
+      if (panel) updateProductSuppliersEmpty(panel);
+      if (wasPrimary && panel) {
+        var firstRadio = panel.querySelector('.product-suppliers-body input[name="ps_primary_supplier_id"]');
+        if (firstRadio) firstRadio.checked = true;
+      }
+    });
+  }
+}
+
+function updateProductSuppliersEmpty(panel) {
+  var tbody = panel.querySelector('.product-suppliers-body');
+  var empty = panel.querySelector('.product-suppliers-empty');
+  if (!tbody || !empty) return;
+  empty.classList.toggle('d-none', tbody.children.length > 0);
+}
+
+function initProductSuppliersPanel(panel) {
+  if (!panel) return;
+  panel.querySelectorAll('.product-supplier-row').forEach(function (row) {
+    if (row.dataset.supplierRowInit === '1') return;
+    row.dataset.supplierRowInit = '1';
+    bindProductSupplierRow(row);
+  });
+  updateProductSuppliersEmpty(panel);
+  var addBtn = panel.querySelector('.product-suppliers-add-btn');
+  if (addBtn && addBtn.dataset.bound !== '1') {
+    addBtn.dataset.bound = '1';
+    addBtn.addEventListener('click', function () {
+      var tbody = panel.querySelector('.product-suppliers-body');
+      var tpl = panel.querySelector('.product-supplier-row-template');
+      if (!tbody || !tpl || !tpl.content) return;
+      var row = tpl.content.firstElementChild.cloneNode(true);
+      tbody.appendChild(row);
+      row.dataset.supplierRowInit = '1';
+      bindProductSupplierRow(row);
+      if (typeof window.initMoneyInputs === 'function') {
+        window.initMoneyInputs(row);
+      }
+      var select = row.querySelector('select[name="ps_supplier_id"]');
+      if (select) select.focus();
+      var radios = panel.querySelectorAll('input[name="ps_primary_supplier_id"]');
+      if (radios.length === 1) radios[0].checked = true;
+      updateProductSuppliersEmpty(panel);
+    });
+  }
+}
+
+function initProductSuppliersPanels(root) {
+  (root || document).querySelectorAll('[data-product-suppliers-panel]').forEach(initProductSuppliersPanel);
+}
+
+document.addEventListener('shown.bs.modal', function (e) {
+  e.target.querySelectorAll('[data-product-suppliers-panel]').forEach(function (panel) {
+    refreshProductSupplierSelectOptions(panel).finally(function () {
+      initProductSuppliersPanel(panel);
+    });
+  });
+});
+
 document.addEventListener('DOMContentLoaded', function () {
   initProductModalActions();
   initProductTableRowClick();
   initProductMultiImages();
   initProductDetailGallery();
+  initProductSuppliersPanels();
   initProductStockMethodSelects();
   initCategoryPickers();
   initTaxonomyPickers();

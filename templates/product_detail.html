@@ -20,11 +20,19 @@
       <button type="button" class="btn btn-light btn-product-detail-edit js-open-product-modal" data-modal-target="#productEdit{{ p.id }}">
         <i class="bi bi-pencil me-2"></i>Chỉnh sửa
       </button>
+      <button type="button" class="btn btn-light js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+        <i class="bi bi-truck me-2"></i>NCC
+      </button>
       <div class="dropdown">
-        <button class="btn btn-light btn-product-detail-more" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        <button class="btn btn-light btn-product-detail-more" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed","placement":"bottom-end"}' aria-expanded="false">
           <i class="bi bi-three-dots"></i>
         </button>
         <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
+          <li>
+            <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+              <i class="bi bi-truck me-2"></i>Nhà cung cấp &amp; so sánh giá
+            </button>
+          </li>
           <li>
             <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
               <i class="bi bi-tag me-2"></i>Sửa giá
@@ -32,7 +40,7 @@
           </li>
           <li>
             <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productStock{{ p.id }}">
-              <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho
+              <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho &amp; giá
             </button>
           </li>
           <li>
@@ -177,6 +185,55 @@
               </div>
             </div>
           </div>
+        </section>
+
+        {% set ps_links = product_suppliers.get(p.id, []) %}
+        {% set ps_summary = product_supplier_summary(ps_links) %}
+        <section class="product-detail-block" id="product-suppliers-compare">
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <h3 class="product-detail-block-title mb-0">So sánh giá nhà cung cấp</h3>
+            <button type="button" class="btn btn-outline-primary btn-sm js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+              <i class="bi bi-truck me-1"></i>{% if ps_links %}Sửa NCC{% else %}Thêm NCC{% endif %}
+            </button>
+          </div>
+          {% if ps_links %}
+          {% set min_cost = ps_links|map(attribute='cost_price')|min %}
+          <div class="table-responsive product-suppliers-compare-wrap">
+            <table class="table table-sm product-suppliers-compare-table mb-0">
+              <thead>
+                <tr>
+                  <th>Nhà cung cấp</th>
+                  <th>Mã SP (NCC)</th>
+                  <th class="text-end">Giá nhập</th>
+                  <th>Ghi chú</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for link in ps_links %}
+                <tr class="{% if link.cost_price and link.cost_price == min_cost and min_cost > 0 %}is-cheapest{% endif %}{% if link.is_primary %} is-primary{% endif %}">
+                  <td>
+                    <span class="fw-semibold">{{ link.supplier.name }}</span>
+                    <span class="small-muted d-block">{{ link.supplier.code }}{% if link.supplier.phone %} · {{ link.supplier.phone }}{% endif %}</span>
+                    {% if link.is_primary %}<span class="badge bg-primary-subtle text-primary product-supplier-primary-badge">Ưu tiên</span>{% endif %}
+                    {% if link.cost_price and link.cost_price == min_cost and min_cost > 0 %}<span class="badge bg-success-subtle text-success product-supplier-cheapest-badge">Rẻ nhất</span>{% endif %}
+                  </td>
+                  <td>{{ link.supplier_sku or '—' }}</td>
+                  <td class="text-end money fw-semibold">{{ link.cost_price|money }}</td>
+                  <td class="small-muted">{{ link.note or '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="product-suppliers-compare-empty">
+            <p class="mb-2">Chưa gắn nhà cung cấp cho sản phẩm này.</p>
+            <p class="small-muted mb-3">Thêm 2 NCC trở lên để so sánh giá nhập ngay tại đây.</p>
+            <button type="button" class="btn btn-primary btn-sm js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+              <i class="bi bi-plus-lg me-1"></i>Thêm nhà cung cấp
+            </button>
+          </div>
+          {% endif %}
         </section>
 
         <section class="product-detail-block">

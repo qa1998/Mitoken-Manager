@@ -1,48 +1,166 @@
 {% extends 'base.html' %}
+{% macro contract_form_fields(companies, customers, quotes, active_company_id, today, year_end, contract=none) %}
+<div class="row g-3 align-items-end">
+  {% if contract %}
+  <input type="hidden" name="contract_id" value="{{ contract.id }}">
+  {% endif %}
+  <div class="col-md-4">
+    <label class="form-label-custom">Công ty (Bên B) <span class="text-danger">*</span></label>
+    <select name="company_id" class="form-select" required>
+      {% for co in companies %}
+      <option value="{{ co.id }}" {% if (contract and contract.company_id == co.id) or (not contract and co.id == active_company_id) %}selected{% endif %}>
+        {{ co.short_name or co.name }}{% if co.is_default %} — mặc định{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    {% if not contract %}<div class="form-text">Hoặc đổi nhanh tại sidebar bên trái</div>{% endif %}
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Khách hàng (Bên A) <span class="text-danger">*</span></label>
+    <select name="customer_id" class="form-select" required>
+      <option value="">Chọn khách hàng</option>
+      {% for c in customers %}
+      <option value="{{ c.id }}" {% if contract and contract.customer_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Số hợp đồng</label>
+    <input name="contract_code" class="form-control" value="{{ contract.contract_code if contract else '' }}" placeholder="Tự động nếu bỏ trống">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label-custom">Ngày ký</label>
+    <input type="date" name="signed_date" class="form-control" value="{{ contract.signed_date.isoformat() if contract and contract.signed_date else today }}">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label-custom">Hết hiệu lực</label>
+    <input type="date" name="expired_date" class="form-control" value="{{ contract.expired_date.isoformat() if contract and contract.expired_date else year_end }}">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label-custom">Gắn báo giá</label>
+    <select name="quote_id" class="form-select">
+      <option value="">Không gắn</option>
+      {% for q in quotes %}
+      <option value="{{ q.id }}" {% if contract and contract.quote_id == q.id %}selected{% endif %}>{{ q.quote_code }} — {{ q.customer.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+{% endmacro %}
 {% block content %}
-<h3>Hợp đồng</h3>
-<div class="card p-3 mb-3">
-  <form method="post" class="row g-2">
-    <div class="col-md-3">
-      <select name="customer_id" class="form-select" required>
-        <option value="">Chọn khách hàng</option>
-        {% for c in customers %}
-        <option value="{{ c.id }}">{{ c.name }}</option>
-        {% endfor %}
-      </select>
+
+<div class="panel-card mb-3">
+  <div class="section-header mb-0">
+    <div class="page-header-icon"><i class="bi bi-file-earmark-ruled"></i></div>
+    <div>
+      <h2 class="section-title">Hợp đồng</h2>
+      <p class="small-muted mb-0">Tạo và chỉnh sửa hợp đồng — chọn công ty (Bên B) trước khi lưu</p>
     </div>
-    <div class="col-md-2"><input name="contract_code" class="form-control" placeholder="Số HĐ tự động nếu bỏ trống"></div>
-    <div class="col-md-2"><input type="date" name="signed_date" class="form-control" value="{{ today }}"></div>
-    <div class="col-md-2"><input type="date" name="expired_date" class="form-control" value="{{ year_end }}"></div>
-    <div class="col-md-2">
-      <select name="quote_id" class="form-select">
-        <option value="">Không gắn BG</option>
-        {% for q in quotes %}
-        <option value="{{ q.id }}">{{ q.quote_code }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-3 d-flex gap-2">
-      <button type="submit" formaction="{{ url_for('preview_contract_draft') }}" formtarget="_blank" class="btn btn-outline-secondary flex-grow-1">Xem trước</button>
-      <button type="submit" class="btn btn-primary flex-grow-1">Tạo</button>
+  </div>
+</div>
+
+<div class="panel-card mb-3">
+  <h5 class="panel-card-title mb-3">Tạo hợp đồng mới</h5>
+  <form method="post">
+    {{ contract_form_fields(companies, customers, quotes, active_company_id, today, year_end) }}
+    <div class="row g-3 mt-1">
+      <div class="col-md-3 ms-auto d-flex gap-2">
+        <button type="submit" formaction="{{ url_for('preview_contract_draft') }}" formtarget="_blank" class="btn btn-outline-secondary flex-grow-1">Xem trước</button>
+        <button type="submit" class="btn btn-primary flex-grow-1">Tạo HĐ</button>
+      </div>
     </div>
   </form>
 </div>
-<div class="card p-3">
-  <table class="table">
-    <tr><th>Số HĐ</th><th>Khách</th><th>Ngày ký</th><th>Hết hạn</th><th></th></tr>
-    {% for c in contracts %}
-    <tr>
-      <td>{{ c.contract_code }}</td>
-      <td>{{ c.customer.name }}</td>
-      <td>{{ c.signed_date.strftime('%d/%m/%Y') }}</td>
-      <td>{{ c.expired_date.strftime('%d/%m/%Y') if c.expired_date else '' }}</td>
-      <td class="text-nowrap">
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('preview_contract', cid=c.id) }}" target="_blank">Xem</a>
-        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('download_contract', cid=c.id) }}">Tải Word</a>
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
+
+<div class="panel-card">
+  <h5 class="panel-card-title mb-3">Hợp đồng đã tạo</h5>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Số HĐ</th>
+          <th>Khách hàng</th>
+          <th>Công ty (Bên B)</th>
+          <th>Loại</th>
+          <th>Ngày ký</th>
+          <th>Hết hạn</th>
+          <th class="text-end">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in contracts %}
+        <tr>
+          <td class="fw-semibold">{{ c.contract_code }}</td>
+          <td>{{ c.customer.name }}</td>
+          <td class="small-muted">{{ c.company.short_name or c.company.name if c.company else company.short_name or company.name }}</td>
+          <td>
+            {% if c.contract_type == 'framework' %}
+            <span class="badge bg-light text-dark border">Nguyên tắc</span>
+            {% else %}
+            <span class="badge bg-primary-subtle text-primary border">Hợp đồng</span>
+            {% endif %}
+          </td>
+          <td class="text-nowrap">{{ c.signed_date.strftime('%d/%m/%Y') if c.signed_date else '—' }}</td>
+          <td class="text-nowrap">{{ c.expired_date.strftime('%d/%m/%Y') if c.expired_date else '—' }}</td>
+          <td class="text-end text-nowrap">
+            <div class="dropdown">
+              <button class="btn btn-sm btn-light btn-action-dots" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-three-dots-vertical"></i>
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                <li>
+                  <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editContract{{ c.id }}">
+                    <i class="bi bi-pencil me-2"></i>Chỉnh sửa
+                  </button>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('preview_contract', cid=c.id) }}" target="_blank">
+                    <i class="bi bi-eye me-2"></i>Xem
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="{{ url_for('download_contract', cid=c.id) }}">
+                    <i class="bi bi-download me-2"></i>Tải Word
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có hợp đồng</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
+
+{% for c in contracts %}
+<div class="modal fade" id="editContract{{ c.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_contract', cid=c.id) }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Chỉnh sửa {{ c.contract_code }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {{ contract_form_fields(companies, customers, quotes, active_company_id, today, year_end, contract=c) }}
+          <p class="small-muted mt-3 mb-0">
+            <i class="bi bi-info-circle me-1"></i>
+            Lưu thay đổi sẽ tạo lại file Word với thông tin khách hàng, công ty và ngày ký mới nhất.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" formaction="{{ url_for('preview_contract_draft') }}" formtarget="_blank" class="btn btn-outline-secondary">Xem trước</button>
+          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
 {% endblock %}

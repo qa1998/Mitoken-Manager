@@ -1,4 +1,6 @@
 {% extends 'base.html' %}
+{% from 'partials/quote_edit_modal.html' import quote_edit_modal %}
+{% from 'partials/quote_doc_edit_modals.html' import quote_doc_edit_modals %}
 {% from 'partials/quote_status_cell.html' import quote_status_cell %}
 {% from 'partials/quote_options_menu.html' import quote_options_dropdown %}
 {% macro quote_sort_th(label, field, extra_class='') %}
@@ -159,7 +161,7 @@
           {% set st = quote_display_status(q) %}
           <tr>
             <td><a href="{{ url_for('quote_preview', qid=q.id) }}" class="quote-code-link">{{ q.quote_code }}</a></td>
-            <td class="quote-customer-name">{{ q.customer.name }}</td>
+            <td class="quote-customer-name">{{ quote_customer_label(q) }}</td>
             <td class="text-nowrap">{{ q.created_at.strftime('%d/%m/%Y') }}</td>
             <td class="text-nowrap">{{ quote_valid_until(q).strftime('%d/%m/%Y') }}</td>
             <td class="text-end fw-semibold money text-nowrap">{{ q.total|money }}</td>
@@ -217,60 +219,8 @@
 {% include 'partials/quote_create_modal.html' %}
 
 {% for q in quotes %}
-<div class="modal fade quote-page-modal" id="editQuote{{ q.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
-    <div class="modal-content">
-      <form method="post" action="{{ url_for('update_quote', qid=q.id) }}">
-        <input type="hidden" name="_tab" value="{{ filters.tab }}">
-        <div class="modal-header">
-          <h5 class="modal-title">Chỉnh sửa {{ q.quote_code }}</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label-custom">Khách hàng</label>
-              <select name="customer_id" class="form-select" required>
-                {% for c in customers %}
-                <option value="{{ c.id }}" {% if c.id == q.customer_id %}selected{% endif %}>{{ c.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label-custom">Trạng thái</label>
-              <select name="status" class="form-select">
-                {% for s in quote_filter_statuses %}
-                <option value="{{ s }}" {% if q.status == s %}selected{% endif %}>{{ s }}</option>
-                {% endfor %}
-                {% if q.status == 'Nháp' %}<option value="Nháp" selected>Nháp</option>{% endif %}
-              </select>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">VAT %</label>
-              <input name="vat_rate" class="form-control" value="{{ q.vat_rate }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Chiết khấu</label>
-              <input name="discount" class="form-control" value="{{ q.discount }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Hiệu lực đến</label>
-              <input type="date" name="valid_until" class="form-control" value="{{ quote_valid_until(q).isoformat() }}">
-            </div>
-            <div class="col-12">
-              <label class="form-label-custom">Ghi chú</label>
-              <textarea name="note" class="form-control" rows="2">{{ q.note or '' }}</textarea>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
+{{ quote_edit_modal(q, filters.tab) }}
+{{ quote_doc_edit_modals(q, companies, active_company_id, filters.tab) }}
 {% endfor %}
 
 {% endblock %}

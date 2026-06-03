@@ -1,40 +1,67 @@
 <aside class="sidebar">
   <div class="sidebar-brand">
     <span class="sidebar-brand-logo"><i class="bi bi-box-seam-fill"></i></span>
-    <span class="sidebar-brand-text">Business Web</span>
+    <span class="sidebar-brand-text">QUẢN LÝ<br>BÁN HÀNG</span>
   </div>
 
+  {% if company_list %}
   <div class="sidebar-company-block">
-    <label class="sidebar-company-label" for="sidebarCompanySelect">Công ty</label>
-    <div class="sidebar-select-wrap">
-      <i class="bi bi-building sidebar-select-icon"></i>
-      <select id="sidebarCompanySelect" class="sidebar-company-select" onchange="if(this.value){window.location.href=this.value}">
-        <option value="" selected>{{ company.short_name or company.name or 'Chọn công ty' }}</option>
-        <option value="{{ url_for('company_settings') }}">Chỉnh sửa thông tin công ty</option>
-      </select>
-      <i class="bi bi-chevron-down sidebar-select-chevron"></i>
-    </div>
+    <form method="post" action="{{ url_for('switch_company') }}" id="sidebar-company-form">
+      <input type="hidden" name="_back" value="{{ request.full_path if request.query_string else request.path }}">
+      <div class="sidebar-select-wrap">
+        <i class="bi bi-building sidebar-select-icon"></i>
+        <select id="sidebarCompanySelect" name="company_id" class="sidebar-company-select" onchange="this.form.submit()" title="Công ty đang dùng">
+          {% for c in company_list %}
+          <option value="{{ c.id }}" {% if c.id == active_company_id %}selected{% endif %}>{{ c.short_name or c.name }}</option>
+          {% endfor %}
+        </select>
+        <i class="bi bi-chevron-down sidebar-select-chevron"></i>
+      </div>
+    </form>
   </div>
+  {% endif %}
 
   <nav class="sidebar-nav">
-    {% set nav_items = [
-      ('dashboard', url_for('dashboard'), 'Dashboard', 'bi-house-door'),
-      ('customers', url_for('customers'), 'Khách hàng', 'bi-people'),
-      ('products', url_for('products'), 'Sản phẩm', 'bi-box-seam'),
-      ('quotes', url_for('quotes'), 'Báo giá', 'bi-file-earmark-text'),
-      ('orders', url_for('orders'), 'Đơn hàng', 'bi-cart3'),
-      ('stock', url_for('stock'), 'Kho hàng', 'bi-building'),
-      ('debt', url_for('debt'), 'Công nợ', 'bi-wallet2'),
-    ] %}
-    {% for endpoint, href, label, icon in nav_items %}
-    <a href="{{ href }}" class="sidebar-link{% if nav_endpoint == endpoint %} active{% endif %}">
-      <i class="bi {{ icon }}"></i>
-      <span>{{ label }}</span>
+    {% for section in sidebar_sections %}
+    {% if section.title %}
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">{{ section.title }}</div>
+    </div>
+    {% endif %}
+    {% for item in section.links %}
+    <a href="{{ item.href }}" class="sidebar-link{% if item.active %} active{% endif %}">
+      <i class="bi {{ item.icon }}"></i>
+      <span>{{ item.label }}</span>
     </a>
     {% endfor %}
-    <a href="{{ url_for('company_settings') }}" class="sidebar-link{% if nav_endpoint == 'company_settings' %} active{% endif %}">
-      <i class="bi bi-gear"></i>
-      <span>Thông tin công ty</span>
-    </a>
+    {% endfor %}
   </nav>
+
+  {% if current_user %}
+  <div class="sidebar-footer">
+    <div class="dropdown dropup sidebar-user-dropdown">
+      <button type="button" class="sidebar-user-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+        <span class="sidebar-user-avatar">{{ (current_user.username[:2] if current_user.username else 'U')|upper }}</span>
+        <span class="sidebar-user-meta">
+          <span class="sidebar-user-name">{{ current_user.full_name or current_user.username }}</span>
+          <span class="sidebar-user-role">{{ user_role_label }}</span>
+        </span>
+        <i class="bi bi-chevron-down sidebar-user-chevron"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-dark sidebar-user-menu">
+        {% if current_user.role == 'admin' and active_company_id %}
+        <li><a class="dropdown-item" href="{{ url_for('company_settings', id=active_company_id) }}"><i class="bi bi-building me-2"></i>Quản lý công ty</a></li>
+        <li><hr class="dropdown-divider"></li>
+        {% endif %}
+        <li>
+          <form method="post" action="{{ url_for('logout') }}" class="m-0">
+            <button type="submit" class="dropdown-item text-danger">
+              <i class="bi bi-box-arrow-right me-2"></i>Đăng xuất
+            </button>
+          </form>
+        </li>
+      </ul>
+    </div>
+  </div>
+  {% endif %}
 </aside>

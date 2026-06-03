@@ -1,0 +1,326 @@
+{% extends 'base.html' %}
+{% macro sort_th(label, field) %}
+<th>
+  <a href="{{ sort_url(field) }}" class="th-sort {% if sort == field %}active {{ order }}{% endif %}">
+    {{ label }}
+    <span class="sort-icons">
+      <i class="bi bi-caret-up-fill"></i>
+      <i class="bi bi-caret-down-fill"></i>
+    </span>
+  </a>
+</th>
+{% endmacro %}
+{% macro supplier_form_fields(s=None, prefix='') %}
+<div class="row g-3">
+  <div class="col-md-4">
+    <label class="form-label-custom">Tên nhà cung cấp <span class="text-danger">*</span></label>
+    <input type="text" name="name" class="form-control" required value="{{ s.name if s else '' }}" placeholder="VD: Công ty TNHH ABC">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Mã NCC</label>
+    <input type="text" name="code" class="form-control" value="{{ s.code if s else '' }}" placeholder="Để trống để tự sinh mã">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Mã số thuế</label>
+    <input type="text" name="tax_code" class="form-control" value="{{ s.tax_code if s else '' }}">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Người liên hệ</label>
+    <input type="text" name="contact_person" class="form-control" value="{{ s.contact_person if s else '' }}">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Số điện thoại</label>
+    <input type="text" name="phone" class="form-control" value="{{ s.phone if s else '' }}">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Email</label>
+    <input type="email" name="email" class="form-control" value="{{ s.email if s else '' }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label-custom">Địa chỉ</label>
+    <input type="text" name="address" class="form-control" value="{{ s.address if s else '' }}">
+  </div>
+  <div class="col-md-6">
+    <label class="form-label-custom">Số tài khoản</label>
+    <input type="text" name="bank_account" class="form-control" value="{{ s.bank_account if s else '' }}">
+  </div>
+  <div class="col-md-6">
+    <label class="form-label-custom">Ngân hàng</label>
+    <input type="text" name="bank_name" class="form-control" value="{{ s.bank_name if s else '' }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label-custom">Ghi chú</label>
+    <textarea name="note" class="form-control" rows="2" placeholder="Tùy chọn">{{ s.note if s else '' }}</textarea>
+  </div>
+  {% if s %}
+  <div class="col-md-4">
+    <label class="form-label-custom">Trạng thái</label>
+    <select name="is_active" class="form-select">
+      <option value="1" {% if s.is_active %}selected{% endif %}>Đang hoạt động</option>
+      <option value="0" {% if not s.is_active %}selected{% endif %}>Ngừng hoạt động</option>
+    </select>
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+{% block content %}
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="stock-stat-card">
+      <div class="stock-stat-icon stat-blue"><i class="bi bi-truck"></i></div>
+      <div>
+        <div class="stock-stat-label">Tổng NCC</div>
+        <div class="stock-stat-value">{{ stats.total|int }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stock-stat-card">
+      <div class="stock-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
+      <div>
+        <div class="stock-stat-label">Đang hoạt động</div>
+        <div class="stock-stat-value text-success">{{ stats.active|int }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stock-stat-card">
+      <div class="stock-stat-icon stat-orange"><i class="bi bi-box-arrow-in-down"></i></div>
+      <div>
+        <div class="stock-stat-label">Có phiếu nhập</div>
+        <div class="stock-stat-value">{{ stats.with_movements|int }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel-card">
+  <div class="section-header">
+    <div class="page-header-icon"><i class="bi bi-truck"></i></div>
+    <div>
+      <h2 class="section-title">Nhà cung cấp</h2>
+      <p class="small-muted mb-0">Quản lý thông tin nhà cung cấp và liên kết phiếu nhập kho</p>
+    </div>
+  </div>
+
+  <form method="post" class="mt-4 supplier-form">
+    {{ supplier_form_fields() }}
+    <div class="form-footer-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i> Thêm nhà cung cấp
+      </button>
+      <button type="reset" class="btn btn-refresh-form">
+        <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
+      </button>
+    </div>
+  </form>
+</div>
+
+<div class="panel-card">
+  <div class="table-toolbar">
+    <div class="section-header section-header-sm mb-0">
+      <div class="page-header-icon page-header-icon-sm"><i class="bi bi-list-ul"></i></div>
+      <h5 class="section-title mb-0">Danh sách nhà cung cấp</h5>
+    </div>
+    <form method="get" class="list-search-form">
+      <input type="hidden" name="per_page" value="{{ per_page }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="order" value="{{ order }}">
+      <div class="input-icon-wrap list-search-wrap">
+        <i class="bi bi-search"></i>
+        <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Tìm theo tên, mã, MST, SĐT...">
+      </div>
+    </form>
+  </div>
+
+  <div class="customer-table-wrap">
+    <table class="table customer-table">
+      <thead>
+        <tr>
+          {{ sort_th('Mã', 'code') }}
+          {{ sort_th('Tên', 'name') }}
+          <th>MST</th>
+          <th>Người liên hệ</th>
+          {{ sort_th('SĐT', 'phone') }}
+          <th>Phiếu nhập</th>
+          <th>Trạng thái</th>
+          <th class="text-end">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in suppliers %}
+        {% set inbound = inbound_stats.get(s.id, {}) %}
+        <tr>
+          <td><code class="sku-code">{{ s.code }}</code></td>
+          <td class="col-name">{{ s.name }}</td>
+          <td>{{ s.tax_code or '—' }}</td>
+          <td>{{ s.contact_person or '—' }}</td>
+          <td class="col-phone">
+            {% if s.phone %}
+            <a href="tel:{{ s.phone }}">{{ s.phone }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if inbound.count %}
+            <span class="badge bg-light text-dark border">{{ inbound.count }} phiếu · {{ inbound.qty|int }} SP</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if s.is_active %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle">Hoạt động</span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary border">Ngừng</span>
+            {% endif %}
+          </td>
+          <td class="text-end table-actions-cell">
+            <div class="dropdown">
+              <button class="btn btn-outline-secondary btn-action-dots" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-three-dots-vertical"></i>
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#detailModal{{ s.id }}"><i class="bi bi-eye me-2"></i>Chi tiết</button></li>
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editModal{{ s.id }}"><i class="bi bi-pencil me-2"></i>Cập nhật</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <form method="post" action="{{ url_for('delete_supplier', sid=s.id) }}" class="m-0 supplier-delete-form" data-name="{{ s.name }}">
+                    <input type="hidden" name="_q" value="{{ q }}">
+                    <input type="hidden" name="_page" value="{{ pagination.page }}">
+                    <input type="hidden" name="_per_page" value="{{ per_page }}">
+                    <input type="hidden" name="_sort" value="{{ sort }}">
+                    <input type="hidden" name="_order" value="{{ order }}">
+                    <button type="submit" class="dropdown-item text-danger">
+                      <i class="bi bi-trash me-2"></i>Xóa
+                    </button>
+                  </form>
+                </li>
+              </ul>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" class="text-center text-muted py-5">Chưa có nhà cung cấp</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    {% if pagination.total > 0 %}
+    {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+    {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
+    <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} kết quả</span>
+    {% else %}
+    <span>Chưa có dữ liệu</span>
+    {% endif %}
+    <div class="table-footer-right">
+      {% if pagination.pages > 1 %}
+      <nav>
+        <ul class="pagination pagination-custom mb-0">
+          <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('suppliers', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
+          </li>
+          {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+          {% if p %}
+          <li class="page-item {% if p == pagination.page %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('suppliers', page=p, **list_args) }}">{{ p }}</a>
+          </li>
+          {% else %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+          {% endif %}
+          {% endfor %}
+          <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('suppliers', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
+          </li>
+        </ul>
+      </nav>
+      {% endif %}
+      <form method="get" class="per-page-select per-page-footer">
+        <input type="hidden" name="q" value="{{ q }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="order" value="{{ order }}">
+        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+          <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+          <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+          <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+        </select>
+        <span>/ trang</span>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% for s in suppliers %}
+<div class="modal fade" id="editModal{{ s.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_supplier', sid=s.id) }}" class="supplier-form">
+        <input type="hidden" name="_q" value="{{ q }}">
+        <input type="hidden" name="_page" value="{{ pagination.page }}">
+        <input type="hidden" name="_per_page" value="{{ per_page }}">
+        <input type="hidden" name="_sort" value="{{ sort }}">
+        <input type="hidden" name="_order" value="{{ order }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Cập nhật — {{ s.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {{ supplier_form_fields(s) }}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="detailModal{{ s.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ s.name }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="row mb-0 supplier-detail-dl">
+          <dt class="col-sm-4">Mã NCC</dt><dd class="col-sm-8"><code>{{ s.code }}</code></dd>
+          <dt class="col-sm-4">MST</dt><dd class="col-sm-8">{{ s.tax_code or '—' }}</dd>
+          <dt class="col-sm-4">Người liên hệ</dt><dd class="col-sm-8">{{ s.contact_person or '—' }}</dd>
+          <dt class="col-sm-4">SĐT</dt><dd class="col-sm-8">{{ s.phone or '—' }}</dd>
+          <dt class="col-sm-4">Email</dt><dd class="col-sm-8">{{ s.email or '—' }}</dd>
+          <dt class="col-sm-4">Địa chỉ</dt><dd class="col-sm-8">{{ s.address or '—' }}</dd>
+          <dt class="col-sm-4">Ngân hàng</dt><dd class="col-sm-8">{{ s.bank_name or '—' }}{% if s.bank_account %} · {{ s.bank_account }}{% endif %}</dd>
+          <dt class="col-sm-4">Ghi chú</dt><dd class="col-sm-8">{{ s.note or '—' }}</dd>
+          <dt class="col-sm-4">Trạng thái</dt>
+          <dd class="col-sm-8">{% if s.is_active %}<span class="text-success">Đang hoạt động</span>{% else %}<span class="text-muted">Ngừng hoạt động</span>{% endif %}</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.supplier-delete-form').forEach(function(form) {
+  form.addEventListener('submit', function(e) {
+    var name = form.getAttribute('data-name') || 'nhà cung cấp này';
+    if (!confirm('Xóa nhà cung cấp "' + name + '"? Hành động không thể hoàn tác.')) {
+      e.preventDefault();
+    }
+  });
+});
+</script>
+{% endblock %}

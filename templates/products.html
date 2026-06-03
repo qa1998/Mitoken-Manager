@@ -3,6 +3,7 @@
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_image_upload_panel.html' import product_image_upload_panel %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
+{% from 'partials/product_suppliers_panel.html' import product_suppliers_panel %}
 {% block title %}Sản phẩm — Business Web{% endblock %}
 {% block content %}
 
@@ -112,6 +113,7 @@
             <th>Danh mục</th>
             <th>Thương hiệu</th>
             <th>Giá bán</th>
+            <th>NCC / giá nhập</th>
             <th>Bảo hành</th>
             <th>Trạng thái</th>
             <th class="text-end">Thao tác</th>
@@ -137,13 +139,27 @@
             </td>
             <td>{{ product_brand_name(p) or '—' }}</td>
             <td class="money product-price-td">{{ p.retail_price|money }}</td>
+            <td class="product-supplier-list-cell">
+              {% set ps_links = product_suppliers.get(p.id, []) %}
+              {% set ps_summary = product_supplier_summary(ps_links) %}
+              {% if ps_summary.count %}
+              <button type="button" class="btn btn-link btn-sm p-0 text-start product-supplier-list-btn js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+                <span class="d-block fw-semibold">{{ ps_summary.count }} NCC</span>
+                <span class="d-block small-muted">Rẻ nhất: {{ ps_summary.min_cost|money }}</span>
+              </button>
+              {% else %}
+              <button type="button" class="btn btn-link btn-sm p-0 text-muted js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+                + Thêm NCC
+              </button>
+              {% endif %}
+            </td>
             <td>{{ p.warranty or '—' }}</td>
             <td>
               <span class="product-status-pill status-{{ sale_key }}">{{ sale_label }}</span>
             </td>
             <td class="text-end table-actions-cell">
               <div class="dropdown">
-                <button class="btn btn-light btn-action-dots" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <button class="btn btn-light btn-action-dots" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed","placement":"bottom-end"}' aria-expanded="false">
                   <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
@@ -153,13 +169,18 @@
                     </a>
                   </li>
                   <li>
+                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
+                      <i class="bi bi-truck me-2"></i>Nhà cung cấp &amp; so sánh giá
+                    </button>
+                  </li>
+                  <li>
                     <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
                       <i class="bi bi-pencil me-2"></i>Sửa giá
                     </button>
                   </li>
                   <li>
                     <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productStock{{ p.id }}">
-                      <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho
+                      <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho &amp; giá
                     </button>
                   </li>
                   <li>
@@ -204,7 +225,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="9" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
+          <tr><td colspan="10" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -320,6 +341,9 @@
             </div>
             <div class="col-12">
               {{ product_price_setup() }}
+            </div>
+            <div class="col-12">
+              {{ product_suppliers_panel(suppliers=all_suppliers) }}
             </div>
           </div>
         </div>

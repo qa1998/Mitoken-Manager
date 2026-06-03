@@ -1,0 +1,96 @@
+{% macro quote_doc_edit_modals(quote, companies, active_company_id, doc_tab='list', back='list') %}
+{% set doc_company = quote.doc_company_id or active_company_id %}
+{% set sale_signed = quote_sale_contract_signed_on(quote).isoformat() %}
+{% set handover_on = quote_handover_on(quote).isoformat() %}
+{% set handover_place = quote.handover_place or quote.customer.address or '' %}
+
+<div class="modal fade quote-page-modal" id="editSaleContract{{ quote.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_quote_sale_contract', qid=quote.id) }}">
+        <input type="hidden" name="_tab" value="{{ doc_tab }}">
+        <input type="hidden" name="_back" value="{{ back }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Hợp đồng mua bán — {{ quote.quote_code }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted">Khách hàng: <strong>{{ quote.customer.name }}</strong> · Hàng hóa & giá lấy từ báo giá (chỉnh tại mục Sửa báo giá).</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">Công ty (Bên B) <span class="text-danger">*</span></label>
+              <select name="company_id" class="form-select" required>
+                {% for co in companies %}
+                <option value="{{ co.id }}" {% if co.id == doc_company %}selected{% endif %}>{{ co.short_name or co.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Ngày ký hợp đồng</label>
+              <input type="date" name="signed_date" class="form-control" value="{{ sale_signed }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Điều 2 — Thời hạn giao hàng</label>
+              <textarea name="delivery_note" class="form-control" rows="2" placeholder="Bên B giao hàng cho Bên A...">{{ quote.sale_contract_delivery_note or '' }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Điều 3 — Phương thức thanh toán</label>
+              <textarea name="payment_note" class="form-control" rows="2" placeholder="Thanh toán theo thỏa thuận...">{{ quote.sale_contract_payment_note or '' }}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" formaction="{{ url_for('preview_quote_sale_contract_draft', qid=quote.id) }}" formtarget="_blank" class="btn btn-outline-secondary">Xem trước</button>
+          <button type="submit" class="btn btn-primary">Lưu HĐ mua bán</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade quote-page-modal" id="editHandover{{ quote.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_quote_handover', qid=quote.id) }}">
+        <input type="hidden" name="_tab" value="{{ doc_tab }}">
+        <input type="hidden" name="_back" value="{{ back }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Biên bản giao nhận — {{ quote.quote_code }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted">Khách hàng: <strong>{{ quote.customer.name }}</strong> · Danh sách hàng lấy từ báo giá.</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">Công ty (Bên giao) <span class="text-danger">*</span></label>
+              <select name="company_id" class="form-select" required>
+                {% for co in companies %}
+                <option value="{{ co.id }}" {% if co.id == doc_company %}selected{% endif %}>{{ co.short_name or co.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Ngày giao nhận</label>
+              <input type="date" name="handover_date" class="form-control" value="{{ handover_on }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Địa điểm giao nhận</label>
+              <input type="text" name="handover_place" class="form-control" value="{{ handover_place }}" placeholder="Địa chỉ giao hàng">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Tình trạng hàng hóa</label>
+              <textarea name="condition_note" class="form-control" rows="2" placeholder="Mới 100%, nguyên đai kiện...">{{ quote.handover_condition_note or '' }}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" formaction="{{ url_for('preview_quote_handover_draft', qid=quote.id) }}" formtarget="_blank" class="btn btn-outline-secondary">Xem trước</button>
+          <button type="submit" class="btn btn-primary">Lưu biên bản</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endmacro %}

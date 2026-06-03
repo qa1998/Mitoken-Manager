@@ -10,7 +10,8 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.request import urlopen
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response, session
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response, session, abort
 from werkzeug.utils import secure_filename
 from sqlalchemy import func, or_
 from flask_sqlalchemy import SQLAlchemy
@@ -31,6 +32,7 @@ PRODUCT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'products'
 COMPANY_LOGO_DIR = BASE_DIR / 'static' / 'uploads' / 'company'
 CONTRACT_SIGNED_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'contracts' / 'signed'
 CONTRACT_DRAFT_SESSION_KEY = 'contract_draft_doc_path'
+ACTIVE_COMPANY_SESSION_KEY = 'active_company_id'
 TEMP_DOC_DIR = BASE_DIR / 'instance' / 'temp_docs'
 DOCX_MIMETYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ORDER_HANDOVER_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'orders' / 'handover'
@@ -129,8 +131,16 @@ class Quote(db.Model):
     valid_until = db.Column(db.Date, nullable=True)
     sale_contract_path = db.Column(db.String(512), default='')
     handover_doc_path = db.Column(db.String(512), default='')
+    doc_company_id = db.Column(db.Integer, db.ForeignKey('company_profile.id'), nullable=True)
+    sale_contract_signed_date = db.Column(db.Date, nullable=True)
+    sale_contract_payment_note = db.Column(db.Text, default='')
+    sale_contract_delivery_note = db.Column(db.Text, default='')
+    handover_date = db.Column(db.Date, nullable=True)
+    handover_place = db.Column(db.Text, default='')
+    handover_condition_note = db.Column(db.Text, default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer = db.relationship('Customer')
+    doc_company = db.relationship('CompanyProfile', foreign_keys=[doc_company_id])
     items = db.relationship('QuoteItem', cascade='all, delete-orphan', backref='quote')
 
 class QuoteItem(db.Model):
@@ -151,6 +161,7 @@ class Contract(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     contract_code = db.Column(db.String(80), unique=True, nullable=False)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey('company_profile.id'), nullable=True)
     contract_type = db.Column(db.String(20), default='framework')
     quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=True)
     signed_date = db.Column(db.Date, default=date.today)
@@ -161,6 +172,7 @@ class Contract(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer = db.relationship('Customer')
     quote = db.relationship('Quote')
+    company = db.relationship('CompanyProfile')
 
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -201,11 +213,44 @@ class CompanyProfile(db.Model):
     director_name = db.Column(db.String(120), default='')
     director_title = db.Column(db.String(80), default='Giám đốc')
     logo_path = db.Column(db.String(255), default='')
+    is_default = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Supplier(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(80), unique=True, nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    tax_code = db.Column(db.String(64), default='')
+    contact_person = db.Column(db.String(120), default='')
+    phone = db.Column(db.String(64), default='')
+    email = db.Column(db.String(120), default='')
+    address = db.Column(db.Text, default='')
+    bank_account = db.Column(db.String(120), default='')
+    bank_name = db.Column(db.String(255), default='')
+    note = db.Column(db.Text, default='')
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ProductSupplier(db.Model):
+    __tablename__ = 'product_supplier'
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=False)
+    cost_price = db.Column(db.Integer, default=0)
+    supplier_sku = db.Column(db.String(120), default='')
+    note = db.Column(db.String(255), default='')
+    is_primary = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    product = db.relationship('Product', backref=db.backref('supplier_links', lazy='dynamic', cascade='all, delete-orphan'))
+    supplier = db.relationship('Supplier')
+    __table_args__ = (db.UniqueConstraint('product_id', 'supplier_id', name='uq_product_supplier'),)
 
 class StockMovement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=True)
     movement_type = db.Column(db.String(20), nullable=False)  # IN/OUT
     qty = db.Column(db.Integer, default=0)
     ref_code = db.Column(db.String(80), default='')
@@ -214,6 +259,227 @@ class StockMovement(db.Model):
     note = db.Column(db.String(255), default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     product = db.relationship('Product')
+    supplier = db.relationship('Supplier')
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    full_name = db.Column(db.String(120), default='')
+    role = db.Column(db.String(20), default='sales', nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+USER_ROLES = {
+    'admin': 'Quản trị viên',
+    'sales': 'Bán hàng',
+    'warehouse': 'Quản lý kho',
+}
+
+ADMIN_ONLY_ENDPOINTS = frozenset({
+    'company_settings',
+    'company_create',
+    'company_delete',
+    'users',
+    'update_user',
+    'toggle_user_active',
+    'delete_user',
+    'products_delete_all',
+    'delete_customer',
+})
+
+SALES_ENDPOINTS = frozenset({
+    'dashboard',
+    'customers',
+    'customer_options_json',
+    'update_customer',
+    'upload_customer_signed_contract',
+    'delete_customer_signed_contract',
+    'preview_customer_framework_contract',
+    'preview_customer_signed_contract',
+    'download_customer_framework_contract',
+    'download_customer_signed_contract',
+    'view_customer_framework_contract',
+    'view_customer_signed_contract',
+    'quotes',
+    'quote_create_preview',
+    'quotes_export',
+    'quote_preview',
+    'quote_print',
+    'update_quote',
+    'update_quote_status',
+    'delete_quote',
+    'create_order_from_quote',
+    'preview_quote_sale_contract',
+    'preview_quote_handover',
+    'view_quote_sale_contract',
+    'view_quote_handover',
+    'download_quote_sale_contract',
+    'download_quote_handover',
+    'update_quote_sale_contract',
+    'update_quote_handover',
+    'preview_quote_sale_contract_draft',
+    'preview_quote_handover_draft',
+    'view_quote_sale_contract_draft',
+    'download_quote_sale_contract_draft',
+    'view_quote_handover_draft',
+    'download_quote_handover_draft',
+    'orders',
+    'orders_export',
+    'order_preview',
+    'order_print',
+    'update_order_status',
+    'complete_order',
+    'delete_order',
+    'view_order_handover_scan',
+    'add_payment',
+    'debt',
+    'debt_allocate_payment',
+    'debt_export',
+    'delete_debt_payment',
+    'view_payment_receipt',
+    'contracts',
+    'preview_contract',
+    'preview_contract_draft',
+    'view_contract',
+    'view_contract_draft',
+    'download_contract',
+    'download_contract_draft',
+    'update_contract',
+})
+
+WAREHOUSE_ENDPOINTS = frozenset({
+    'dashboard',
+    'products',
+    'product_detail',
+    'update_product',
+    'update_price',
+    'update_product_suppliers',
+    'toggle_product_active',
+    'delete_product',
+    'adjust_product_stock',
+    'products_export',
+    'products_import_template',
+    'products_import_preview',
+    'products_import_confirm',
+    'products_import_cancel',
+    'stock',
+    'stock_export',
+    'create_category',
+    'delete_category',
+    'categories_export',
+    'categories_import_template',
+    'categories_import_preview',
+    'categories_import_confirm',
+    'categories_import_cancel',
+    'create_brand',
+    'delete_brand',
+    'suppliers',
+    'update_supplier',
+    'delete_supplier',
+    'supplier_options_json',
+    'supplier_debt',
+})
+
+SIDEBAR_SECTIONS = [
+    {
+        'title': None,
+        'items': [
+            {'key': 'dashboard', 'endpoint': 'dashboard', 'label': 'Dashboard', 'icon': 'bi-house-door'},
+        ],
+    },
+    {
+        'title': 'DANH MỤC',
+        'items': [
+            {'key': 'customers', 'endpoint': 'customers', 'label': 'Khách hàng', 'icon': 'bi-people'},
+            {'key': 'suppliers', 'endpoint': 'suppliers', 'label': 'Nhà cung cấp', 'icon': 'bi-truck'},
+            {'key': 'products', 'endpoint': 'products', 'label': 'Sản phẩm', 'icon': 'bi-box-seam'},
+        ],
+    },
+    {
+        'title': 'KINH DOANH',
+        'items': [
+            {'key': 'quotes', 'endpoint': 'quotes', 'label': 'Báo giá', 'icon': 'bi-file-earmark-text'},
+            {'key': 'orders', 'endpoint': 'orders', 'label': 'Đơn hàng', 'icon': 'bi-cart3'},
+            {'key': 'contracts', 'endpoint': 'contracts', 'label': 'Hợp đồng', 'icon': 'bi-file-earmark-ruled'},
+        ],
+    },
+    {
+        'title': 'KHO VẬN',
+        'items': [
+            {'key': 'stock', 'endpoint': 'stock', 'label': 'Tồn kho', 'icon': 'bi-boxes', 'url_args': {'tab': 'inventory'}},
+            {'key': 'stock_in', 'endpoint': 'stock', 'label': 'Nhập hàng', 'icon': 'bi-box-arrow-in-down', 'url_args': {'tab': 'history', 'movement_type': 'IN'}},
+            {'key': 'stock_out', 'endpoint': 'stock', 'label': 'Xuất hàng', 'icon': 'bi-box-arrow-up', 'url_args': {'tab': 'history', 'movement_type': 'OUT'}},
+            {'key': 'stocktake', 'endpoint': 'stock', 'label': 'Kiểm kê', 'icon': 'bi-clipboard-check', 'url_args': {'tab': 'inventory', 'mode': 'stocktake'}},
+        ],
+    },
+    {
+        'title': 'TÀI CHÍNH',
+        'items': [
+            {'key': 'debt', 'endpoint': 'debt', 'label': 'Công nợ khách hàng', 'icon': 'bi-wallet2'},
+            {'key': 'supplier_debt', 'endpoint': 'supplier_debt', 'label': 'Công nợ nhà cung cấp', 'icon': 'bi-wallet2'},
+        ],
+    },
+    {
+        'title': 'HỆ THỐNG',
+        'items': [
+            {'key': 'users', 'endpoint': 'users', 'label': 'Người dùng', 'icon': 'bi-people'},
+            {'key': 'company_settings', 'endpoint': 'company_settings', 'label': 'Thông tin công ty', 'icon': 'bi-gear'},
+        ],
+    },
+]
+
+ROLE_NAV_KEYS = {
+    'admin': {
+        'dashboard', 'customers', 'suppliers', 'products', 'quotes', 'orders', 'contracts',
+        'stock', 'stock_in', 'stock_out', 'stocktake', 'debt', 'supplier_debt', 'users', 'company_settings',
+    },
+    'sales': {'dashboard', 'customers', 'quotes', 'orders', 'contracts', 'debt'},
+    'warehouse': {'dashboard', 'suppliers', 'products', 'stock', 'stock_in', 'stock_out', 'stocktake'},
+}
+
+def get_current_user():
+    uid = session.get('user_id')
+    if not uid:
+        return None
+    user = db.session.get(User, uid)
+    if not user or not user.is_active:
+        return None
+    return user
+
+def role_can_access(role, endpoint):
+    if endpoint in ('login', 'logout', 'static', 'switch_company', None):
+        return True
+    if role == 'admin':
+        return True
+    if endpoint in ADMIN_ONLY_ENDPOINTS:
+        return False
+    if role == 'sales':
+        return endpoint in SALES_ENDPOINTS
+    if role == 'warehouse':
+        return endpoint in WAREHOUSE_ENDPOINTS
+    return False
+
+def default_home_for_role(role):
+    if role == 'warehouse':
+        return url_for('stock')
+    if role == 'sales':
+        return url_for('quotes')
+    return url_for('dashboard')
+
+def safe_next_url(target):
+    if not target:
+        return None
+    parsed = urlparse(target)
+    if parsed.scheme or parsed.netloc:
+        return None
+    return target
+
+def set_user_password(user, raw_password):
+    user.password_hash = generate_password_hash(raw_password)
+
+def verify_user_password(user, raw_password):
+    return check_password_hash(user.password_hash, raw_password)
 
 def money(v):
     try:
@@ -227,8 +493,72 @@ def money_plain(v):
     except Exception:
         return '0'
 
+_DIGITS = ('không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín')
+
+def _read_hundreds(n, full=False):
+    n = int(n)
+    if n == 0:
+        return 'không' if full else ''
+    if n < 10:
+        return _DIGITS[n]
+    if n < 20:
+        if n == 10:
+            return 'mười'
+        if n == 15:
+            return 'mười lăm'
+        return 'mười ' + _DIGITS[n % 10]
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        text = _DIGITS[tens] + ' mươi'
+        if ones == 0:
+            return text
+        if ones == 1:
+            return text + ' mốt'
+        if ones == 4:
+            return text + ' tư'
+        if ones == 5:
+            return text + ' lăm'
+        return text + ' ' + _DIGITS[ones]
+    hundreds, rem = divmod(n, 100)
+    text = _DIGITS[hundreds] + ' trăm'
+    if rem == 0:
+        return text
+    if rem < 10:
+        return text + ' lẻ ' + _DIGITS[rem]
+    return text + ' ' + _read_hundreds(rem)
+
+def money_in_words(amount):
+    try:
+        n = int(amount)
+    except (TypeError, ValueError):
+        return 'Không đồng'
+    if n == 0:
+        return 'Không đồng'
+    if n < 0:
+        return 'Âm ' + money_in_words(-n)
+
+    parts = []
+    scales = ('', ' nghìn', ' triệu', ' tỷ')
+    chunks = []
+    temp = n
+    while temp > 0:
+        chunks.append(temp % 1000)
+        temp //= 1000
+    for idx in range(len(chunks) - 1, -1, -1):
+        block = chunks[idx]
+        if block == 0:
+            continue
+        block_text = _read_hundreds(block, full=(idx < len(chunks) - 1))
+        if block_text:
+            parts.append(block_text + scales[idx])
+    text = ' '.join(parts).strip()
+    if not text:
+        return 'Không đồng'
+    return text[0].upper() + text[1:] + ' đồng'
+
 app.jinja_env.filters['money'] = money
 app.jinja_env.filters['money_plain'] = money_plain
+app.jinja_env.filters['money_in_words'] = money_in_words
 
 STATUS_FLASH_CATEGORIES = {
     'Đã chốt': 'success',
@@ -678,6 +1008,7 @@ def company_bank_display(row):
 
 def company_profile_to_dict(row):
     return {
+        'id': row.id,
         'name': row.name or '',
         'short_name': row.short_name or '',
         'address': row.address or '',
@@ -690,33 +1021,113 @@ def company_profile_to_dict(row):
         'director': row.director_title or 'Giám đốc',
         'director_name': row.director_name or '',
         'logo_url': url_for('static', filename=row.logo_path) if row.logo_path else None,
+        'is_default': bool(row.is_default),
     }
 
-def ensure_company_profile():
+def ensure_company_columns():
+    from sqlalchemy import inspect, text
     db.create_all()
-    row = CompanyProfile.query.get(1)
-    if row:
-        return row
-    d = DEFAULT_COMPANY_PROFILE
-    row = CompanyProfile(
-        id=1,
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('company_profile')}
+    except Exception:
+        return
+    with db.engine.begin() as conn:
+        if 'is_default' not in cols:
+            conn.execute(text('ALTER TABLE company_profile ADD COLUMN is_default BOOLEAN DEFAULT 0'))
+        if 'created_at' not in cols:
+            conn.execute(text('ALTER TABLE company_profile ADD COLUMN created_at DATETIME'))
+    if CompanyProfile.query.count() and not CompanyProfile.query.filter_by(is_default=True).first():
+        first = CompanyProfile.query.order_by(CompanyProfile.id.asc()).first()
+        if first:
+            first.is_default = True
+            db.session.commit()
+
+def _company_from_defaults(**overrides):
+    d = {**DEFAULT_COMPANY_PROFILE, **overrides}
+    return CompanyProfile(
         name=d['name'],
-        short_name=d['short_name'],
-        tax_code=d['tax_code'],
-        address=d['address'],
-        phone=d['phone'],
-        email=d['email'],
-        bank_account=d['bank_account'],
-        bank_name=d['bank_name'],
+        short_name=d.get('short_name', ''),
+        tax_code=d.get('tax_code', ''),
+        address=d.get('address', ''),
+        phone=d.get('phone', ''),
+        email=d.get('email', ''),
+        bank_account=d.get('bank_account', ''),
+        bank_name=d.get('bank_name', ''),
         director_name=d.get('director_name', ''),
         director_title=d.get('director_title', 'Giám đốc'),
     )
-    db.session.add(row)
-    db.session.commit()
-    return row
 
-def get_company_profile():
-    return company_profile_to_dict(ensure_company_profile())
+def ensure_company_profiles():
+    ensure_company_columns()
+    if CompanyProfile.query.count() == 0:
+        row = _company_from_defaults(is_default=True)
+        db.session.add(row)
+        db.session.commit()
+    return CompanyProfile.query.order_by(CompanyProfile.is_default.desc(), CompanyProfile.name).all()
+
+def list_company_profiles():
+    ensure_company_profiles()
+    return CompanyProfile.query.order_by(CompanyProfile.is_default.desc(), CompanyProfile.name).all()
+
+def get_company_row(company_id=None):
+    ensure_company_profiles()
+    if company_id:
+        return CompanyProfile.query.get(company_id)
+    cid = session.get(ACTIVE_COMPANY_SESSION_KEY)
+    if cid:
+        row = CompanyProfile.query.get(cid)
+        if row:
+            return row
+    row = CompanyProfile.query.filter_by(is_default=True).first()
+    if row:
+        return row
+    return CompanyProfile.query.order_by(CompanyProfile.id.asc()).first()
+
+def get_company_profile(company_id=None):
+    row = get_company_row(company_id)
+    if not row:
+        ensure_company_profiles()
+        row = get_company_row()
+    return company_profile_to_dict(row) if row else {}
+
+def resolve_company_id_from_form():
+    cid = request.form.get('company_id', type=int)
+    if cid and CompanyProfile.query.get(cid):
+        return cid
+    row = get_company_row()
+    return row.id if row else None
+
+def apply_company_form(row, form, files):
+    row.name = form.get('name', '').strip()
+    if not row.name:
+        raise ValueError('Vui lòng nhập tên công ty')
+    row.short_name = form.get('short_name', '').strip()
+    row.tax_code = form.get('tax_code', '').strip()
+    row.address = form.get('address', '').strip()
+    row.phone = form.get('phone', '').strip()
+    row.email = form.get('email', '').strip()
+    row.bank_account = form.get('bank_account', '').strip()
+    row.bank_name = form.get('bank_name', '').strip()
+    row.director_name = form.get('director_name', '').strip()
+    row.director_title = form.get('director_title', '').strip() or 'Giám đốc'
+    if form.get('remove_logo') == '1' and row.logo_path:
+        old = BASE_DIR / 'static' / row.logo_path
+        if old.exists():
+            old.unlink(missing_ok=True)
+        row.logo_path = ''
+    if not save_company_logo(row, files.get('logo') if files else None):
+        raise ValueError('logo')
+    row.updated_at = datetime.utcnow()
+
+def delete_company_logo_files(row):
+    if row.logo_path:
+        old = BASE_DIR / 'static' / row.logo_path
+        if old.exists():
+            old.unlink(missing_ok=True)
+
+def ensure_company_profile():
+    """Giữ tương thích code cũ — trả về công ty đang chọn."""
+    return get_company_row()
 
 def save_company_logo(row, file_storage):
     if not file_storage or not file_storage.filename:
@@ -741,18 +1152,92 @@ def save_company_logo(row, file_storage):
     row.logo_path = rel_path
     return True
 
+def resolve_active_nav_key():
+    ep = request.endpoint
+    if ep != 'stock':
+        endpoint_keys = {
+            'dashboard': 'dashboard',
+            'customers': 'customers',
+            'suppliers': 'suppliers',
+            'products': 'products',
+            'quotes': 'quotes',
+            'orders': 'orders',
+            'contracts': 'contracts',
+            'debt': 'debt',
+            'supplier_debt': 'supplier_debt',
+            'users': 'users',
+            'company_settings': 'company_settings',
+        }
+        return endpoint_keys.get(ep, ep)
+    tab = request.args.get('tab', 'inventory')
+    mtype = request.args.get('movement_type', '')
+    if tab == 'history' and mtype == 'IN':
+        return 'stock_in'
+    if tab == 'history' and mtype == 'OUT':
+        return 'stock_out'
+    if request.args.get('mode') == 'stocktake':
+        return 'stocktake'
+    return 'stock'
+
+def build_sidebar_sections(user):
+    if not user:
+        return []
+    allowed = ROLE_NAV_KEYS.get(user.role, set())
+    active_key = resolve_active_nav_key()
+    sections = []
+    for block in SIDEBAR_SECTIONS:
+        items = []
+        for item in block['items']:
+            if user.role != 'admin' and item['key'] not in allowed:
+                continue
+            url_args = dict(item.get('url_args') or {})
+            items.append({
+                'key': item['key'],
+                'href': url_for(item['endpoint'], **url_args),
+                'label': item['label'],
+                'icon': item['icon'],
+                'active': item['key'] == active_key,
+            })
+        if items:
+            sections.append({'title': block['title'], 'links': items})
+    return sections
+
 @app.context_processor
 def inject_company():
     try:
-        company = get_company_profile()
+        row = get_company_row()
+        company = company_profile_to_dict(row) if row else {}
+        company_list = list_company_profiles()
     except Exception:
         d = DEFAULT_COMPANY_PROFILE
         bank = f"Số TK: {d['bank_account']} - {d['bank_name']}" if d.get('bank_account') else d.get('bank_name', '')
         company = {**d, 'bank': bank, 'director': d.get('director_title', 'Giám đốc'), 'logo_url': None}
+        company_list = []
+        row = None
+    user = get_current_user()
     return {
         'company': company,
+        'company_list': company_list,
+        'active_company_id': row.id if row else None,
         'nav_endpoint': request.endpoint,
+        'active_nav_key': resolve_active_nav_key(),
+        'current_user': user,
+        'user_role_label': USER_ROLES.get(user.role, '') if user else '',
+        'sidebar_sections': build_sidebar_sections(user),
     }
+
+@app.before_request
+def enforce_auth():
+    endpoint = request.endpoint
+    if endpoint in ('login', 'static') or endpoint is None:
+        return
+    user = get_current_user()
+    if not user:
+        session.pop('user_id', None)
+        return redirect(url_for('login', next=request.full_path if request.query_string else request.path))
+    if not role_can_access(user.role, endpoint):
+        flash('Bạn không có quyền truy cập chức năng này', 'danger')
+        return redirect(default_home_for_role(user.role))
 
 def ensure_quote_columns():
     from sqlalchemy import inspect, text
@@ -767,6 +1252,20 @@ def ensure_quote_columns():
             conn.execute(text("ALTER TABLE quote ADD COLUMN sale_contract_path VARCHAR(512) DEFAULT ''"))
         if 'handover_doc_path' not in cols:
             conn.execute(text("ALTER TABLE quote ADD COLUMN handover_doc_path VARCHAR(512) DEFAULT ''"))
+        if 'doc_company_id' not in cols:
+            conn.execute(text('ALTER TABLE quote ADD COLUMN doc_company_id INTEGER REFERENCES company_profile(id)'))
+        if 'sale_contract_signed_date' not in cols:
+            conn.execute(text('ALTER TABLE quote ADD COLUMN sale_contract_signed_date DATE'))
+        if 'sale_contract_payment_note' not in cols:
+            conn.execute(text("ALTER TABLE quote ADD COLUMN sale_contract_payment_note TEXT DEFAULT ''"))
+        if 'sale_contract_delivery_note' not in cols:
+            conn.execute(text("ALTER TABLE quote ADD COLUMN sale_contract_delivery_note TEXT DEFAULT ''"))
+        if 'handover_date' not in cols:
+            conn.execute(text('ALTER TABLE quote ADD COLUMN handover_date DATE'))
+        if 'handover_place' not in cols:
+            conn.execute(text("ALTER TABLE quote ADD COLUMN handover_place TEXT DEFAULT ''"))
+        if 'handover_condition_note' not in cols:
+            conn.execute(text("ALTER TABLE quote ADD COLUMN handover_condition_note TEXT DEFAULT ''"))
 
 def quote_status_key(status):
     return QUOTE_STATUS_KEYS.get(status or '', 'new')
@@ -1137,6 +1636,7 @@ def group_payments_for_display(payments):
                 'total': sum(i.amount or 0 for i in items),
                 'receipt_pid': head.id,
                 'receipt_path': head.receipt_path,
+                'payment_ids': [i.id for i in items_sorted],
                 'allocations': [
                     {'order_code': i.order.order_code if i.order else '—', 'amount': i.amount or 0}
                     for i in items_sorted
@@ -1153,6 +1653,7 @@ def group_payments_for_display(payments):
                     'total': p.amount or 0,
                     'receipt_pid': p.id,
                     'receipt_path': p.receipt_path,
+                    'payment_ids': [p.id],
                 })
     return groups
 
@@ -1320,11 +1821,51 @@ def quotes_redirect(**extra):
     f.update(extra)
     return redirect(url_for('quotes', **{k: v for k, v in f.items() if v}))
 
+def parse_quote_line_items_from_form(quote=None):
+    line_items = []
+    stopped_names = []
+    existing_ids = {i.product_id for i in quote.items} if quote else set()
+    for product_id, qty, price in zip(
+        request.form.getlist('product_id'),
+        request.form.getlist('qty'),
+        request.form.getlist('price'),
+    ):
+        if not product_id:
+            continue
+        p = Product.query.get(int(product_id))
+        if not p:
+            continue
+        if not product_is_active(p) and p.id not in existing_ids:
+            stopped_names.append(p.name or p.sku)
+            continue
+        qv = max(parse_int(qty, 1), 1)
+        pv = parse_int(price, p.retail_price)
+        line_items.append((p, qv, pv, qv * pv))
+    return line_items, stopped_names
+
+def apply_quote_line_items(quote, line_items):
+    for old in list(quote.items):
+        db.session.delete(old)
+    subtotal = 0
+    for p, qv, pv, amount in line_items:
+        subtotal += amount
+        db.session.add(QuoteItem(
+            quote_id=quote.id,
+            product_id=p.id,
+            product_name=p.name,
+            sku=p.sku,
+            unit=p.unit,
+            qty=qv,
+            price=pv,
+            amount=amount,
+        ))
+    quote.subtotal = subtotal
+
 def build_quote_preview_from_form():
     customer_id = request.form.get('customer_id', type=int)
     customer = Customer.query.get(customer_id) if customer_id else None
     if not customer:
-        customer = SimpleNamespace(name='Chưa chọn khách hàng', phone='', address='')
+        customer = SimpleNamespace(name=WALKIN_CUSTOMER_NAME, phone='', address='')
 
     vat_rate = parse_int(request.form.get('vat_rate'), 0)
     discount = parse_int(request.form.get('discount'), 0)
@@ -1375,6 +1916,7 @@ def build_quote_preview_from_form():
     quote = SimpleNamespace(
         quote_code='BG-NHÁP',
         created_at=datetime.now(),
+        customer_id=customer_id,
         customer=customer,
         vat_rate=vat_rate,
         discount=discount,
@@ -1387,31 +1929,14 @@ def build_quote_preview_from_form():
     return quote, valid_until
 
 def create_quote_from_form():
-    customer_id = int(request.form['customer_id'])
+    customer_id = resolve_quote_customer_id(request.form.get('customer_id'))
     vat_rate = parse_int(request.form.get('vat_rate'), 10)
     discount = parse_int(request.form.get('discount'), 0)
     is_draft = request.form.get('save_draft') == '1'
     status = 'Nháp' if is_draft else request.form.get('status', 'Mới tạo') or 'Mới tạo'
     valid_raw = request.form.get('valid_until', '').strip()
     valid_until = datetime.strptime(valid_raw, '%Y-%m-%d').date() if valid_raw else date.today() + timedelta(days=30)
-    line_items = []
-    stopped_names = []
-    for product_id, qty, price in zip(
-        request.form.getlist('product_id'),
-        request.form.getlist('qty'),
-        request.form.getlist('price'),
-    ):
-        if not product_id:
-            continue
-        p = Product.query.get(int(product_id))
-        if not p:
-            continue
-        if not product_is_active(p):
-            stopped_names.append(p.name or p.sku)
-            continue
-        qv = parse_int(qty, 1)
-        pv = parse_int(price, p.retail_price)
-        line_items.append((p, qv, pv, qv * pv))
+    line_items, stopped_names = parse_quote_line_items_from_form()
     if stopped_names:
         names = ', '.join(stopped_names[:5])
         extra = f' và {len(stopped_names) - 5} sản phẩm khác' if len(stopped_names) > 5 else ''
@@ -1429,18 +1954,12 @@ def create_quote_from_form():
     )
     db.session.add(quote)
     db.session.flush()
-    subtotal = 0
-    for p, qv, pv, amount in line_items:
-        subtotal += amount
-        db.session.add(QuoteItem(
-            quote_id=quote.id, product_id=p.id, product_name=p.name, sku=p.sku,
-            unit=p.unit, qty=qv, price=pv, amount=amount,
-        ))
-    quote.subtotal = subtotal
-    quote.vat_amount = int(max(subtotal - discount, 0) * vat_rate / 100)
-    quote.total = max(subtotal - discount, 0) + quote.vat_amount
+    apply_quote_line_items(quote, line_items)
+    quote.vat_amount = int(max(quote.subtotal - discount, 0) * vat_rate / 100)
+    quote.total = max(quote.subtotal - discount, 0) + quote.vat_amount
     generate_quote_documents(quote, commit=False)
     db.session.commit()
+    set_quote_session_customer(quote)
     return quote
 
 DEFAULT_WAREHOUSE = 'Kho chính'
@@ -1523,6 +2042,179 @@ def ensure_stock_movement_columns():
             conn.execute(text("ALTER TABLE stock_movement ADD COLUMN method VARCHAR(80) DEFAULT 'Nhập tay'"))
         if 'warehouse' not in cols:
             conn.execute(text("ALTER TABLE stock_movement ADD COLUMN warehouse VARCHAR(80) DEFAULT 'Kho chính'"))
+        if 'supplier_id' not in cols:
+            conn.execute(text("ALTER TABLE stock_movement ADD COLUMN supplier_id INTEGER REFERENCES supplier(id)"))
+
+def active_suppliers():
+    return Supplier.query.filter_by(is_active=True).order_by(Supplier.name).all()
+
+app.jinja_env.globals['active_suppliers'] = active_suppliers
+
+def ensure_product_supplier_schema():
+    db.create_all()
+
+def product_suppliers_map(product_ids):
+    ensure_product_supplier_schema()
+    if not product_ids:
+        return {}
+    rows = (
+        ProductSupplier.query.filter(ProductSupplier.product_id.in_(product_ids))
+        .join(Supplier)
+        .order_by(ProductSupplier.cost_price.asc(), Supplier.name.asc())
+        .all()
+    )
+    out = {}
+    for row in rows:
+        out.setdefault(row.product_id, []).append(row)
+    return out
+
+def product_supplier_links(product):
+    ensure_product_supplier_schema()
+    return (
+        ProductSupplier.query.filter_by(product_id=product.id)
+        .join(Supplier)
+        .order_by(ProductSupplier.cost_price.asc(), Supplier.name.asc())
+        .all()
+    )
+
+def product_supplier_summary(links):
+    if not links:
+        return {'count': 0, 'min_cost': 0, 'cheapest_name': ''}
+    cheapest = min(links, key=lambda link: (link.cost_price or 0, link.supplier_id))
+    return {
+        'count': len(links),
+        'min_cost': cheapest.cost_price or 0,
+        'cheapest_name': cheapest.supplier.name if cheapest.supplier else '',
+    }
+
+app.jinja_env.globals['product_supplier_summary'] = product_supplier_summary
+
+def apply_product_suppliers_from_form(product):
+    ensure_product_supplier_schema()
+    supplier_ids = request.form.getlist('ps_supplier_id')
+    cost_prices = request.form.getlist('ps_cost_price')
+    supplier_skus = request.form.getlist('ps_supplier_sku')
+    notes = request.form.getlist('ps_note')
+    primary_id = parse_supplier_id(request.form.get('ps_primary_supplier_id'))
+
+    ProductSupplier.query.filter_by(product_id=product.id).delete(synchronize_session=False)
+    seen = set()
+    for idx, sid_raw in enumerate(supplier_ids):
+        sid = parse_supplier_id(sid_raw)
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        db.session.add(ProductSupplier(
+            product_id=product.id,
+            supplier_id=sid,
+            cost_price=parse_int(cost_prices[idx] if idx < len(cost_prices) else 0, 0),
+            supplier_sku=(supplier_skus[idx] if idx < len(supplier_skus) else '').strip(),
+            note=(notes[idx] if idx < len(notes) else '').strip(),
+            is_primary=(sid == primary_id),
+        ))
+
+    links = ProductSupplier.query.filter_by(product_id=product.id).all()
+    if links and not any(link.is_primary for link in links):
+        cheapest = min(links, key=lambda link: (link.cost_price or 0, link.supplier_id))
+        cheapest.is_primary = True
+
+def parse_supplier_id(value):
+    if value is None or value == '':
+        return None
+    try:
+        sid = int(value)
+    except (TypeError, ValueError):
+        return None
+    if sid <= 0:
+        return None
+    return sid if Supplier.query.get(sid) else None
+
+def supplier_list_params():
+    q = request.args.get('q', '').strip()
+    per_page = request.args.get('per_page', 10, type=int)
+    per_page = per_page if per_page in (10, 25, 50, 100) else 10
+    page = request.args.get('page', 1, type=int)
+    sort = request.args.get('sort', 'created_at')
+    order = request.args.get('order', 'desc')
+    if sort not in ('name', 'code', 'phone', 'created_at'):
+        sort = 'created_at'
+    if order not in ('asc', 'desc'):
+        order = 'desc'
+    return q, per_page, page, sort, order
+
+def supplier_sort_url(field, q, per_page, sort, order):
+    new_order = 'asc' if sort == field and order == 'desc' else 'desc'
+    if sort != field:
+        new_order = 'asc'
+    return url_for('suppliers', q=q, per_page=per_page, sort=field, order=new_order)
+
+def apply_supplier_form(s, is_new=False):
+    s.name = request.form.get('name', '').strip()
+    code = request.form.get('code', '').strip()
+    if code:
+        s.code = code
+    elif is_new and not getattr(s, 'code', None):
+        s.code = next_code('NCC', Supplier, 'code')
+    s.tax_code = request.form.get('tax_code', '').strip()
+    s.contact_person = request.form.get('contact_person', '').strip()
+    s.phone = request.form.get('phone', '').strip()
+    s.email = request.form.get('email', '').strip()
+    s.address = request.form.get('address', '').strip()
+    s.bank_account = request.form.get('bank_account', '').strip()
+    s.bank_name = request.form.get('bank_name', '').strip()
+    s.note = request.form.get('note', '').strip()
+    if 'is_active' in request.form:
+        s.is_active = request.form.get('is_active') == '1'
+    elif is_new:
+        s.is_active = True
+
+def validate_supplier_form():
+    name = request.form.get('name', '').strip()
+    if not name:
+        return False, 'Vui lòng nhập tên nhà cung cấp'
+    code = request.form.get('code', '').strip()
+    if code:
+        q = Supplier.query.filter(Supplier.code == code)
+        sid = (request.view_args or {}).get('sid')
+        if sid:
+            q = q.filter(Supplier.id != sid)
+        if q.first():
+            return False, f'Mã NCC "{code}" đã tồn tại'
+    return True, ''
+
+def suppliers_redirect_after_save(message=None, category='success'):
+    if message:
+        flash(message, category)
+    src = request.form if request.method == 'POST' else request.args
+    return redirect(url_for(
+        'suppliers',
+        q=src.get('_q', ''),
+        page=src.get('_page', 1, type=int) or 1,
+        per_page=src.get('_per_page', 10, type=int) or 10,
+        sort=src.get('_sort', 'created_at'),
+        order=src.get('_order', 'desc'),
+    ))
+
+def supplier_stats():
+    total = Supplier.query.count()
+    active = Supplier.query.filter_by(is_active=True).count()
+    with_movements = db.session.query(func.count(func.distinct(StockMovement.supplier_id))).filter(
+        StockMovement.supplier_id.isnot(None),
+    ).scalar() or 0
+    return {'total': total, 'active': active, 'with_movements': with_movements}
+
+def supplier_inbound_counts(supplier_ids):
+    if not supplier_ids:
+        return {}
+    rows = db.session.query(
+        StockMovement.supplier_id,
+        func.count(StockMovement.id),
+        func.coalesce(func.sum(StockMovement.qty), 0),
+    ).filter(
+        StockMovement.supplier_id.in_(supplier_ids),
+        StockMovement.movement_type == 'IN',
+    ).group_by(StockMovement.supplier_id).all()
+    return {sid: {'count': cnt, 'qty': int(qty or 0)} for sid, cnt, qty in rows}
 
 def movement_qty_sum(product_id, movement_type, date_from=None, date_to=None, before_date=None):
     q = db.session.query(func.coalesce(func.sum(StockMovement.qty), 0)).filter(
@@ -1587,6 +2279,7 @@ def stock_filters_from_request():
         'movement_type': request.args.get('movement_type', ''),
         'method': request.args.get('method', ''),
         'warehouse': request.args.get('warehouse', ''),
+        'supplier_id': request.args.get('supplier_id', ''),
         'date_from': request.args.get('date_from', ''),
         'date_to': request.args.get('date_to', ''),
         'q': request.args.get('q', '').strip(),
@@ -1605,6 +2298,7 @@ def stock_redirect_after_save(message=None, category='success'):
         movement_type=src.get('_movement_type') or src.get('movement_type') or '',
         method=src.get('_method') or src.get('method') or '',
         warehouse=src.get('_warehouse') or src.get('warehouse') or '',
+        supplier_id=src.get('_supplier_id') or src.get('supplier_id') or '',
         date_from=src.get('_date_from') or src.get('date_from') or '',
         date_to=src.get('_date_to') or src.get('date_to') or '',
         q=src.get('_q') or src.get('q') or '',
@@ -1793,9 +2487,9 @@ def normalize_contract_party_tables(doc):
             changed = True
     return changed
 
-def contract_mapping(customer, code, signed, expired):
+def contract_mapping(customer, code, signed, expired, company_id=None):
     is_company = getattr(customer, 'customer_type', 'company') != 'individual'
-    company = get_company_profile()
+    company = get_company_profile(company_id)
     return {
         '{{SO_HOP_DONG}}': code,
         '{{NGAY_KY}}': signed.strftime('%d/%m/%Y'),
@@ -1831,6 +2525,8 @@ def ensure_contract_columns():
             conn.execute(text("ALTER TABLE contract ADD COLUMN signed_scan_path VARCHAR(255) DEFAULT ''"))
         if 'signed_scan_uploaded_at' not in cols:
             conn.execute(text('ALTER TABLE contract ADD COLUMN signed_scan_uploaded_at DATETIME'))
+        if 'company_id' not in cols:
+            conn.execute(text('ALTER TABLE contract ADD COLUMN company_id INTEGER'))
 
 def delete_contract_scan_file(scan_path):
     if not scan_path:
@@ -2084,8 +2780,8 @@ def quote_customer_party_lines(customer):
         lines.append(f'{"MST" if is_company else "CCCD"}: {mst}')
     return lines
 
-def quote_seller_party_lines():
-    company = get_company_profile()
+def quote_seller_party_lines(company_id=None):
+    company = get_company_profile(company_id)
     lines = [
         f'Tên: {company["name"]}',
         f'Đại diện: {company.get("director_name") or "—"}    Chức vụ: {company.get("director") or "Giám đốc"}',
@@ -2098,12 +2794,60 @@ def quote_seller_party_lines():
         lines.append(f'MST: {company["tax_code"]}')
     return lines
 
+def quote_doc_company_id(quote):
+    if quote.doc_company_id:
+        return quote.doc_company_id
+    row = get_company_row()
+    return row.id if row else None
+
+def quote_sale_contract_signed_on(quote):
+    if quote.sale_contract_signed_date:
+        return quote.sale_contract_signed_date
+    return quote.created_at.date() if quote.created_at else date.today()
+
+def quote_handover_on(quote):
+    if quote.handover_date:
+        return quote.handover_date
+    return date.today()
+
+def quote_handover_place_text(quote):
+    place = (quote.handover_place or '').strip()
+    if place:
+        return place
+    return (quote.customer.address or '').strip() or 'địa điểm giao hàng'
+
+def parse_optional_date(value):
+    value = (value or '').strip()
+    if not value:
+        return None
+    return datetime.strptime(value, '%Y-%m-%d').date()
+
+def apply_quote_sale_contract_form(quote):
+    quote.doc_company_id = resolve_company_id_from_form()
+    quote.sale_contract_signed_date = parse_optional_date(request.form.get('signed_date'))
+    quote.sale_contract_payment_note = request.form.get('payment_note', '').strip()
+    quote.sale_contract_delivery_note = request.form.get('delivery_note', '').strip()
+
+def apply_quote_handover_form(quote):
+    quote.doc_company_id = resolve_company_id_from_form()
+    quote.handover_date = parse_optional_date(request.form.get('handover_date'))
+    quote.handover_place = request.form.get('handover_place', '').strip()
+    quote.handover_condition_note = request.form.get('condition_note', '').strip()
+
+def quote_doc_redirect(qid):
+    if request.form.get('_back') == 'preview':
+        return redirect(url_for('quote_preview', qid=qid))
+    return quotes_redirect(tab=request.form.get('_tab', 'list'))
+
 def build_quote_sale_contract_doc(quote):
     customer = quote.customer
     items = list(quote.items)
-    signed = quote.created_at.date() if quote.created_at else date.today()
+    signed = quote_sale_contract_signed_on(quote)
     valid = quote_valid_until(quote)
     subtotal_net = max(quote.subtotal - quote.discount, 0)
+    company_id = quote_doc_company_id(quote)
+    payment_note = (quote.sale_contract_payment_note or '').strip() or 'Thanh toán theo thỏa thuận giữa hai bên / theo báo giá đính kèm.'
+    delivery_note = (quote.sale_contract_delivery_note or '').strip() or 'Bên B giao hàng cho Bên A trong thời gian thỏa thuận sau khi hợp đồng có hiệu lực.'
     doc = Document()
     _doc_add_center_heading(doc, 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM', level=2)
     p = doc.add_paragraph('Độc lập - Tự do - Hạnh phúc')
@@ -2113,7 +2857,7 @@ def build_quote_sale_contract_doc(quote):
     doc.add_paragraph(f'Căn cứ báo giá số {quote.quote_code} ngày {signed.strftime("%d/%m/%Y")}.')
     doc.add_paragraph(f'Hôm nay, ngày {signed.strftime("%d/%m/%Y")}, chúng tôi gồm:')
     _doc_add_party_block(doc, 'BÊN MUA (BÊN A):', quote_customer_party_lines(customer))
-    _doc_add_party_block(doc, 'BÊN BÁN (BÊN B):', quote_seller_party_lines())
+    _doc_add_party_block(doc, 'BÊN BÁN (BÊN B):', quote_seller_party_lines(company_id))
     doc.add_paragraph('Hai bên thống nhất ký kết hợp đồng mua bán với nội dung sau:')
     doc.add_paragraph('Điều 1. Hàng hóa, số lượng, chất lượng, giá')
     _doc_add_quote_items_table(doc, items, include_price=True)
@@ -2121,9 +2865,9 @@ def build_quote_sale_contract_doc(quote):
     doc.add_paragraph(f'VAT ({quote.vat_rate or 0}%): {money(quote.vat_amount)}')
     doc.add_paragraph(f'Tổng giá trị thanh toán: {money(quote.total)}')
     doc.add_paragraph('Điều 2. Thời hạn giao hàng')
-    doc.add_paragraph('Bên B giao hàng cho Bên A trong thời gian thỏa thuận sau khi hợp đồng có hiệu lực.')
+    doc.add_paragraph(delivery_note)
     doc.add_paragraph('Điều 3. Phương thức thanh toán')
-    doc.add_paragraph('Thanh toán theo thỏa thuận giữa hai bên / theo báo giá đính kèm.')
+    doc.add_paragraph(payment_note)
     doc.add_paragraph('Điều 4. Điều khoản chung')
     doc.add_paragraph('Hợp đồng có hiệu lực kể từ ngày ký đến hết ngày ' + valid.strftime('%d/%m/%Y') + '.')
     doc.add_paragraph('Hợp đồng được lập thành 02 bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản.')
@@ -2135,23 +2879,51 @@ def build_quote_sale_contract_doc(quote):
 def build_quote_handover_doc(quote):
     customer = quote.customer
     items = list(quote.items)
-    signed = date.today()
+    signed = quote_handover_on(quote)
+    place = quote_handover_place_text(quote)
+    company_id = quote_doc_company_id(quote)
+    condition = (quote.handover_condition_note or '').strip() or 'Mới 100%, nguyên đai kiện, đúng chủng loại và số lượng.'
     doc = Document()
     _doc_add_center_heading(doc, 'BIÊN BẢN GIAO NHẬN HÀNG HÓA', level=1)
     doc.add_paragraph(f'Số biên bản: BBGH/{quote.quote_code}')
     doc.add_paragraph(f'Căn cứ báo giá / hợp đồng mua bán liên quan số {quote.quote_code}.')
-    doc.add_paragraph(f'Hôm nay, ngày {signed.strftime("%d/%m/%Y")}, tại {customer.address or "địa điểm giao hàng"}, chúng tôi gồm:')
-    _doc_add_party_block(doc, 'BÊN GIAO HÀNG (BÊN B):', quote_seller_party_lines())
+    doc.add_paragraph(f'Hôm nay, ngày {signed.strftime("%d/%m/%Y")}, tại {place}, chúng tôi gồm:')
+    _doc_add_party_block(doc, 'BÊN GIAO HÀNG (BÊN B):', quote_seller_party_lines(company_id))
     _doc_add_party_block(doc, 'BÊN NHẬN HÀNG (BÊN A):', quote_customer_party_lines(customer))
     doc.add_paragraph('Hai bên cùng lập biên bản giao nhận hàng hóa với chi tiết sau:')
     _doc_add_quote_items_table(doc, items, include_price=False)
-    doc.add_paragraph('Tình trạng hàng hóa: Mới 100%, nguyên đai kiện, đúng chủng loại và số lượng.')
+    doc.add_paragraph(f'Tình trạng hàng hóa: {condition}')
     doc.add_paragraph('Biên bản này là căn cứ nghiệm thu giao nhận hàng hóa giữa hai bên.')
     doc.add_paragraph('Biên bản được lập thành 02 bản, mỗi bên giữ 01 bản có giá trị như nhau.')
     table = doc.add_table(rows=1, cols=2)
     table.rows[0].cells[0].text = 'BÊN GIAO HÀNG (BÊN B)\n\n\n\n(Ký, đóng dấu)'
     table.rows[0].cells[1].text = 'BÊN NHẬN HÀNG (BÊN A)\n\n\n\n(Ký, ghi rõ họ tên)'
     return doc
+
+def regenerate_quote_sale_contract(quote, commit=False):
+    old_path = quote.sale_contract_path
+    doc = build_quote_sale_contract_doc(quote)
+    quote.sale_contract_path = str(save_quote_docx(doc, quote, 'hop-dong-mua-ban'))
+    if old_path and old_path != quote.sale_contract_path and Path(old_path).is_file():
+        Path(old_path).unlink(missing_ok=True)
+    if commit:
+        db.session.commit()
+    return quote
+
+def regenerate_quote_handover(quote, commit=False):
+    old_path = quote.handover_doc_path
+    doc = build_quote_handover_doc(quote)
+    quote.handover_doc_path = str(save_quote_docx(doc, quote, 'bien-ban-nhan-hang'))
+    if old_path and old_path != quote.handover_doc_path and Path(old_path).is_file():
+        Path(old_path).unlink(missing_ok=True)
+    if commit:
+        db.session.commit()
+    return quote
+
+app.jinja_env.globals['quote_sale_contract_signed_on'] = quote_sale_contract_signed_on
+app.jinja_env.globals['quote_handover_on'] = quote_handover_on
+app.jinja_env.globals['quote_handover_place_text'] = quote_handover_place_text
+app.jinja_env.globals['quote_doc_company_id'] = quote_doc_company_id
 
 def save_quote_docx(doc, quote, suffix):
     QUOTE_DOCS_DIR.mkdir(parents=True, exist_ok=True)
@@ -2161,10 +2933,8 @@ def save_quote_docx(doc, quote, suffix):
     return out_path
 
 def generate_quote_documents(quote, commit=True):
-    sale_doc = build_quote_sale_contract_doc(quote)
-    hand_doc = build_quote_handover_doc(quote)
-    quote.sale_contract_path = str(save_quote_docx(sale_doc, quote, 'hop-dong-mua-ban'))
-    quote.handover_doc_path = str(save_quote_docx(hand_doc, quote, 'bien-ban-nhan-hang'))
+    regenerate_quote_sale_contract(quote, commit=False)
+    regenerate_quote_handover(quote, commit=False)
     if commit:
         db.session.commit()
     return quote
@@ -2183,30 +2953,33 @@ def get_framework_contract(customer_id):
         contract_type=CONTRACT_TYPE_FRAMEWORK,
     ).order_by(Contract.created_at.desc()).first()
 
-def create_framework_contract_for_customer(customer, commit=True):
+def create_framework_contract_for_customer(customer, commit=True, company_id=None):
     ensure_contract_columns()
     contract = get_framework_contract(customer.id)
     signed, expired = default_contract_dates()
+    cid = company_id or (get_company_row().id if get_company_row() else None)
     if contract:
         code = contract.contract_code
         signed = contract.signed_date or signed
         expired = contract.expired_date or expired
     else:
         code = next_code('HD', Contract, 'contract_code')
-    doc = build_contract_doc(customer, code, signed, expired)
-    out_path = save_contract_docx(doc, code)
+    out_path = apply_contract_doc(contract, customer, code, signed, expired, cid)
     if contract:
-        contract.file_path = str(out_path)
+        contract.file_path = out_path
         contract.signed_date = signed
         contract.expired_date = expired
+        if cid:
+            contract.company_id = cid
     else:
         contract = Contract(
             contract_code=code,
             customer_id=customer.id,
+            company_id=cid,
             contract_type=CONTRACT_TYPE_FRAMEWORK,
             signed_date=signed,
             expired_date=expired,
-            file_path=str(out_path),
+            file_path=out_path,
         )
         db.session.add(contract)
     if commit:
@@ -2265,59 +3038,229 @@ def ensure_contract_template_layout():
     if normalize_contract_party_tables(doc):
         doc.save(TEMPLATE_DOCX)
 
-def build_contract_doc(customer, code, signed, expired):
+def build_contract_doc(customer, code, signed, expired, company_id=None):
     ensure_contract_template_layout()
     doc = Document(TEMPLATE_DOCX)
     normalize_contract_party_tables(doc)
-    replace_docx_text(doc, contract_mapping(customer, code, signed, expired))
+    replace_docx_text(doc, contract_mapping(customer, code, signed, expired, company_id=company_id))
     return doc
 
-def parse_contract_form():
+def parse_contract_form(contract=None):
     customer = Customer.query.get_or_404(int(request.form['customer_id']))
     signed = datetime.strptime(request.form.get('signed_date'), '%Y-%m-%d').date()
     expired_raw = request.form.get('expired_date')
     expired = datetime.strptime(expired_raw, '%Y-%m-%d').date() if expired_raw else None
-    code = request.form.get('contract_code') or next_code('HD', Contract, 'contract_code')
+    code = (request.form.get('contract_code') or '').strip()
+    if not code:
+        code = contract.contract_code if contract else next_code('HD', Contract, 'contract_code')
+    dup_q = Contract.query.filter(Contract.contract_code == code)
+    if contract:
+        dup_q = dup_q.filter(Contract.id != contract.id)
+    if dup_q.first():
+        raise ValueError(f'Số hợp đồng "{code}" đã tồn tại')
     quote_id = request.form.get('quote_id') or None
-    return customer, code, signed, expired, quote_id
+    company_id = resolve_company_id_from_form()
+    return customer, code, signed, expired, quote_id, company_id
+
+def apply_contract_doc(contract, customer, code, signed, expired, company_id):
+    old_path = contract.file_path if contract else ''
+    doc = build_contract_doc(customer, code, signed, expired, company_id=company_id)
+    out_path = save_contract_docx(doc, code)
+    new_path = str(out_path)
+    if old_path and old_path != new_path and Path(old_path).is_file():
+        Path(old_path).unlink(missing_ok=True)
+    return new_path
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    user = get_current_user()
+    if user:
+        return redirect(default_home_for_role(user.role))
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        user = User.query.filter_by(username=username).first()
+        if not user or not user.is_active or not verify_user_password(user, password):
+            flash('Tên đăng nhập hoặc mật khẩu không đúng', 'danger')
+            return redirect(url_for('login', next=request.form.get('next', '')))
+        session.clear()
+        session['user_id'] = user.id
+        dest = safe_next_url(request.form.get('next', '')) or default_home_for_role(user.role)
+        flash(f'Xin chào, {user.full_name or user.username}', 'success')
+        return redirect(dest)
+    return render_template('login.html', next=request.args.get('next', ''))
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    flash('Đã đăng xuất', 'secondary')
+    return redirect(url_for('login'))
+
+@app.route('/users', methods=['GET', 'POST'])
+def users():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip().lower()
+        full_name = request.form.get('full_name', '').strip()
+        role = request.form.get('role', 'sales').strip()
+        password = request.form.get('password', '')
+        if role not in USER_ROLES:
+            flash('Vai trò không hợp lệ', 'warning')
+            return redirect(url_for('users'))
+        if not username or len(username) < 3:
+            flash('Tên đăng nhập phải có ít nhất 3 ký tự', 'warning')
+            return redirect(url_for('users'))
+        if len(password) < 6:
+            flash('Mật khẩu phải có ít nhất 6 ký tự', 'warning')
+            return redirect(url_for('users'))
+        if User.query.filter_by(username=username).first():
+            flash('Tên đăng nhập đã tồn tại', 'warning')
+            return redirect(url_for('users'))
+        user = User(username=username, full_name=full_name or username, role=role)
+        set_user_password(user, password)
+        db.session.add(user)
+        db.session.commit()
+        flash(f'Đã tạo tài khoản {username}', 'success')
+        return redirect(url_for('users'))
+    return render_template(
+        'users.html',
+        users=User.query.order_by(User.created_at.desc()).all(),
+        roles=USER_ROLES,
+    )
+
+@app.route('/users/<int:uid>/update', methods=['POST'])
+def update_user(uid):
+    user = User.query.get_or_404(uid)
+    current = get_current_user()
+    full_name = request.form.get('full_name', '').strip()
+    role = request.form.get('role', user.role).strip()
+    password = request.form.get('password', '').strip()
+    if role not in USER_ROLES:
+        flash('Vai trò không hợp lệ', 'warning')
+        return redirect(url_for('users'))
+    if user.id == current.id and role != 'admin':
+        flash('Không thể tự hạ quyền quản trị của chính mình', 'warning')
+        return redirect(url_for('users'))
+    user.full_name = full_name or user.username
+    user.role = role
+    if password:
+        if len(password) < 6:
+            flash('Mật khẩu mới phải có ít nhất 6 ký tự', 'warning')
+            return redirect(url_for('users'))
+        set_user_password(user, password)
+    db.session.commit()
+    flash(f'Đã cập nhật tài khoản {user.username}', 'success')
+    return redirect(url_for('users'))
+
+@app.route('/users/<int:uid>/toggle', methods=['POST'])
+def toggle_user_active(uid):
+    user = User.query.get_or_404(uid)
+    current = get_current_user()
+    if user.id == current.id:
+        flash('Không thể khóa tài khoản đang đăng nhập', 'warning')
+        return redirect(url_for('users'))
+    user.is_active = not user.is_active
+    db.session.commit()
+    flash(
+        f'Đã {"kích hoạt" if user.is_active else "khóa"} tài khoản {user.username}',
+        'success' if user.is_active else 'secondary',
+    )
+    return redirect(url_for('users'))
+
+@app.route('/users/<int:uid>/delete', methods=['POST'])
+def delete_user(uid):
+    user = User.query.get_or_404(uid)
+    current = get_current_user()
+    if user.id == current.id:
+        flash('Không thể xóa tài khoản đang đăng nhập', 'warning')
+        return redirect(url_for('users'))
+    name = user.username
+    db.session.delete(user)
+    db.session.commit()
+    flash(f'Đã xóa tài khoản {name}', 'success')
+    return redirect(url_for('users'))
 
 @app.route('/company', methods=['GET', 'POST'])
 def company_settings():
-    row = ensure_company_profile()
+    companies = ensure_company_profiles()
+    edit_id = request.args.get('id', type=int)
     if request.method == 'POST':
-        row.name = request.form.get('name', '').strip()
-        if not row.name:
-            flash('Vui lòng nhập tên công ty', 'warning')
-            return redirect(url_for('company_settings'))
-        row.short_name = request.form.get('short_name', '').strip()
-        row.tax_code = request.form.get('tax_code', '').strip()
-        row.address = request.form.get('address', '').strip()
-        row.phone = request.form.get('phone', '').strip()
-        row.email = request.form.get('email', '').strip()
-        row.bank_account = request.form.get('bank_account', '').strip()
-        row.bank_name = request.form.get('bank_name', '').strip()
-        row.director_name = request.form.get('director_name', '').strip()
-        row.director_title = request.form.get('director_title', '').strip() or 'Giám đốc'
-        if request.form.get('remove_logo') == '1' and row.logo_path:
-            old = BASE_DIR / 'static' / row.logo_path
-            if old.exists():
-                old.unlink(missing_ok=True)
-            row.logo_path = ''
-        if not save_company_logo(row, request.files.get('logo')):
-            return redirect(url_for('company_settings'))
-        row.updated_at = datetime.utcnow()
+        cid = request.form.get('company_id', type=int)
+        row = CompanyProfile.query.get_or_404(cid)
+        try:
+            apply_company_form(row, request.form, request.files)
+        except ValueError as e:
+            if str(e) == 'logo':
+                return redirect(url_for('company_settings', id=cid))
+            flash(str(e), 'warning')
+            return redirect(url_for('company_settings', id=cid))
+        if request.form.get('set_default') == '1':
+            CompanyProfile.query.update({CompanyProfile.is_default: False})
+            row.is_default = True
         db.session.commit()
         flash('Đã lưu thông tin công ty', 'success')
-        return redirect(url_for('company_settings'))
-    profile = company_profile_to_dict(row)
+        return redirect(url_for('company_settings', id=row.id))
+    if not edit_id and companies:
+        active = session.get(ACTIVE_COMPANY_SESSION_KEY)
+        edit_id = active if any(c.id == active for c in companies) else companies[0].id
+    row = CompanyProfile.query.get(edit_id) if edit_id else None
+    profile = company_profile_to_dict(row) if row else {}
     banks = fetch_vietqr_banks()
     return render_template(
         'company.html',
+        companies=companies,
         profile=profile,
         row=row,
+        edit_id=edit_id,
         banks=banks,
         bank_value_set=bank_value_set(banks),
     )
+
+@app.route('/company/new', methods=['POST'])
+def company_create():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Vui lòng nhập tên công ty mới', 'warning')
+        return redirect(url_for('company_settings'))
+    row = CompanyProfile(name=name, short_name=request.form.get('short_name', '').strip())
+    if CompanyProfile.query.count() == 0:
+        row.is_default = True
+    db.session.add(row)
+    db.session.commit()
+    session[ACTIVE_COMPANY_SESSION_KEY] = row.id
+    flash(f'Đã thêm công ty {name}', 'success')
+    return redirect(url_for('company_settings', id=row.id))
+
+@app.route('/company/<int:cid>/delete', methods=['POST'])
+def company_delete(cid):
+    row = CompanyProfile.query.get_or_404(cid)
+    if CompanyProfile.query.count() <= 1:
+        flash('Phải giữ ít nhất một công ty', 'warning')
+        return redirect(url_for('company_settings', id=cid))
+    delete_company_logo_files(row)
+    was_default = row.is_default
+    was_active = session.get(ACTIVE_COMPANY_SESSION_KEY) == cid
+    name = row.name
+    db.session.delete(row)
+    db.session.commit()
+    remaining = CompanyProfile.query.order_by(CompanyProfile.id).first()
+    if remaining and (was_default or was_active):
+        remaining.is_default = True
+        session[ACTIVE_COMPANY_SESSION_KEY] = remaining.id
+        db.session.commit()
+    elif was_active:
+        session.pop(ACTIVE_COMPANY_SESSION_KEY, None)
+    flash(f'Đã xóa công ty {name}', 'success')
+    return redirect(url_for('company_settings', id=remaining.id if remaining else None))
+
+@app.route('/company/switch', methods=['POST'])
+def switch_company():
+    cid = request.form.get('company_id', type=int)
+    if cid and CompanyProfile.query.get(cid):
+        session[ACTIVE_COMPANY_SESSION_KEY] = cid
+        c = CompanyProfile.query.get(cid)
+        flash(f'Đang dùng công ty: {c.short_name or c.name}', 'secondary')
+    back = request.form.get('_back') or request.referrer or url_for('dashboard')
+    return redirect(back)
 
 @app.route('/')
 def dashboard():
@@ -2351,14 +3294,72 @@ def parse_customer_type():
     t = request.form.get('customer_type', 'company').strip()
     return t if t in ('company', 'individual') else 'company'
 
+WALKIN_CUSTOMER_TYPE = 'walkin'
+WALKIN_CUSTOMER_NAME = 'Khách vãng lai'
+
+def ensure_walkin_customer():
+    ensure_customer_columns()
+    c = Customer.query.filter_by(customer_type=WALKIN_CUSTOMER_TYPE).first()
+    if not c:
+        c = Customer(
+            name=WALKIN_CUSTOMER_NAME,
+            customer_type=WALKIN_CUSTOMER_TYPE,
+            note='Hệ thống — báo giá không chọn khách hàng',
+        )
+        db.session.add(c)
+        db.session.commit()
+    return c
+
+def is_walkin_customer(customer):
+    if customer is None:
+        return True
+    return getattr(customer, 'customer_type', '') == WALKIN_CUSTOMER_TYPE
+
+def quote_customer_label(quote_or_customer):
+    if hasattr(quote_or_customer, 'customer'):
+        customer = quote_or_customer.customer
+    else:
+        customer = quote_or_customer
+    if is_walkin_customer(customer):
+        return WALKIN_CUSTOMER_NAME
+    return customer.name if customer else WALKIN_CUSTOMER_NAME
+
+def customers_for_select():
+    ensure_walkin_customer()
+    return Customer.query.filter(Customer.customer_type != WALKIN_CUSTOMER_TYPE).order_by(Customer.name).all()
+
+def resolve_quote_customer_id(raw):
+    if raw is None or str(raw).strip() == '':
+        return ensure_walkin_customer().id
+    try:
+        cid = int(raw)
+    except (TypeError, ValueError):
+        return ensure_walkin_customer().id
+    c = Customer.query.get(cid)
+    if not c:
+        return ensure_walkin_customer().id
+    return cid
+
+def set_quote_session_customer(quote):
+    if quote.customer_id and not is_walkin_customer(quote.customer):
+        session['debt_customer_id'] = quote.customer_id
+        session['orders_customer_id'] = quote.customer_id
+
 def customer_is_company(customer):
     return getattr(customer, 'customer_type', 'company') != 'individual'
 
 def customer_type_label(customer):
-    return 'Cá nhân' if getattr(customer, 'customer_type', '') == 'individual' else 'Công ty'
+    t = getattr(customer, 'customer_type', '')
+    if t == 'individual':
+        return 'Cá nhân'
+    if t == WALKIN_CUSTOMER_TYPE:
+        return 'Vãng lai'
+    return 'Công ty'
 
 app.jinja_env.globals['customer_is_company'] = customer_is_company
 app.jinja_env.globals['customer_type_label'] = customer_type_label
+app.jinja_env.globals['is_walkin_customer'] = is_walkin_customer
+app.jinja_env.globals['quote_customer_label'] = quote_customer_label
 app.jinja_env.globals['contract_signed_scan_url'] = contract_signed_scan_url
 app.jinja_env.globals['signed_scan_is_pdf'] = signed_scan_is_pdf
 VIETQR_BANKS_URL = 'https://api.vietqr.io/v2/banks'
@@ -2439,9 +3440,11 @@ def apply_customer_form(customer):
         customer.representative = ''
         customer.position = ''
 
-def customers_redirect_after_save(message=None, category='success'):
+def customers_redirect_after_save(message=None, category='success', new_customer_id=None):
     if message:
         flash(message, category)
+    if request.form.get('_from') == 'quotes' and new_customer_id:
+        return redirect(url_for('quotes', quote_customer_id=new_customer_id))
     return redirect(url_for(
         'customers',
         q=request.form.get('_q', ''),
@@ -2466,9 +3469,9 @@ def customers():
         db.session.flush()
         create_framework_contract_for_customer(c, commit=False)
         db.session.commit()
-        return customers_redirect_after_save('Đã thêm khách hàng và hợp đồng nguyên tắc')
+        return customers_redirect_after_save('Đã thêm khách hàng và hợp đồng nguyên tắc', new_customer_id=c.id)
     q, per_page, page, sort, order = customer_list_params()
-    query = Customer.query
+    query = Customer.query.filter(Customer.customer_type != WALKIN_CUSTOMER_TYPE)
     if q:
         like = f'%{q}%'
         query = query.filter(or_(
@@ -2499,12 +3502,110 @@ def customers():
         banks=banks,
         bank_value_set=bank_value_set(banks),
         sort_url=lambda field: customer_sort_url(field, q, per_page, sort, order),
+        from_quotes=request.args.get('from') == 'quotes',
     )
+
+@app.route('/customers/options.json')
+def customer_options_json():
+    rows = customers_for_select()
+    return {
+        'customers': [
+            {'id': c.id, 'name': c.name, 'phone': c.phone or ''}
+            for c in rows
+        ],
+    }
+
+@app.route('/suppliers', methods=['GET', 'POST'])
+def suppliers():
+    ensure_stock_movement_columns()
+    if request.method == 'POST':
+        ok, msg = validate_supplier_form()
+        if not ok:
+            flash(msg, 'warning')
+            return redirect(url_for('suppliers'))
+        s = Supplier()
+        apply_supplier_form(s, is_new=True)
+        db.session.add(s)
+        db.session.commit()
+        return suppliers_redirect_after_save('Đã thêm nhà cung cấp')
+    q, per_page, page, sort, order = supplier_list_params()
+    query = Supplier.query
+    if q:
+        like = f'%{q}%'
+        query = query.filter(or_(
+            Supplier.name.ilike(like),
+            Supplier.code.ilike(like),
+            Supplier.tax_code.ilike(like),
+            Supplier.phone.ilike(like),
+            Supplier.contact_person.ilike(like),
+        ))
+    sort_col = getattr(Supplier, sort)
+    query = query.order_by(sort_col.asc() if order == 'asc' else sort_col.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    supplier_ids = [s.id for s in pagination.items]
+    inbound_stats = supplier_inbound_counts(supplier_ids)
+    list_args = {'q': q, 'per_page': per_page, 'sort': sort, 'order': order}
+    return render_template(
+        'suppliers.html',
+        pagination=pagination,
+        suppliers=pagination.items,
+        inbound_stats=inbound_stats,
+        stats=supplier_stats(),
+        q=q,
+        per_page=per_page,
+        sort=sort,
+        order=order,
+        list_args=list_args,
+        sort_url=lambda field: supplier_sort_url(field, q, per_page, sort, order),
+    )
+
+@app.route('/suppliers/options.json')
+def supplier_options_json():
+    rows = active_suppliers()
+    return {
+        'suppliers': [
+            {'id': s.id, 'code': s.code, 'name': s.name, 'phone': s.phone or ''}
+            for s in rows
+        ],
+    }
+
+@app.route('/suppliers/<int:sid>/update', methods=['POST'])
+def update_supplier(sid):
+    ensure_stock_movement_columns()
+    s = Supplier.query.get_or_404(sid)
+    ok, msg = validate_supplier_form()
+    if not ok:
+        flash(msg, 'warning')
+        return suppliers_redirect_after_save('')
+    apply_supplier_form(s)
+    db.session.commit()
+    return suppliers_redirect_after_save('Đã cập nhật nhà cung cấp')
+
+@app.route('/suppliers/<int:sid>/delete', methods=['POST'])
+def delete_supplier(sid):
+    ensure_stock_movement_columns()
+    s = Supplier.query.get_or_404(sid)
+    linked = StockMovement.query.filter_by(supplier_id=s.id).count()
+    product_links = ProductSupplier.query.filter_by(supplier_id=s.id).count()
+    if linked or product_links:
+        parts = []
+        if product_links:
+            parts.append(f'{product_links} sản phẩm')
+        if linked:
+            parts.append(f'{linked} phiếu nhập kho')
+        flash('Không thể xóa — NCC đang liên kết: ' + ', '.join(parts), 'danger')
+        return suppliers_redirect_after_save('')
+    db.session.delete(s)
+    db.session.commit()
+    return suppliers_redirect_after_save('Đã xóa nhà cung cấp')
 
 @app.route('/customers/<int:cid>/update', methods=['POST'])
 def update_customer(cid):
     ensure_customer_columns()
     c = Customer.query.get_or_404(cid)
+    if is_walkin_customer(c):
+        flash('Không thể chỉnh sửa khách hàng hệ thống', 'warning')
+        return customers_redirect_after_save('')
     ok, msg = validate_customer_form()
     if not ok:
         flash(msg, 'warning')
@@ -2700,10 +3801,32 @@ PRICE_TYPE_LABELS = {
     'cost_price': 'Giá nhập',
 }
 
+PRODUCT_PRICE_FIELDS = ('cost_price', 'project_price', 'dealer_price', 'retail_price')
+
 def price_type_label(key):
     return PRICE_TYPE_LABELS.get(key, key)
 
 app.jinja_env.globals['price_type_label'] = price_type_label
+
+def apply_product_price_from_form(product, note='', fields=None):
+    """Cập nhật giá từ form; ghi PriceHistory khi có thay đổi. Trả về list field đã đổi."""
+    changed = []
+    for field in fields or PRODUCT_PRICE_FIELDS:
+        if field not in request.form:
+            continue
+        old = getattr(product, field) or 0
+        new = parse_int(request.form.get(field), old)
+        if new != old:
+            db.session.add(PriceHistory(
+                product_id=product.id,
+                price_type=field,
+                old_price=old,
+                new_price=new,
+                note=note,
+            ))
+            setattr(product, field, new)
+            changed.append(field)
+    return changed
 
 def apply_product_form(product):
     product.name = request.form.get('name', '').strip()
@@ -3114,6 +4237,37 @@ def delete_order_record(order, reset_quote=True):
     if reset_quote and quote and quote_display_status(quote) == 'Đã chốt':
         quote.status = 'Mới tạo'
 
+def delete_quote_record(quote):
+    order = get_quote_order(quote)
+    if order and (order.paid_amount or 0) > 0:
+        raise ValueError(
+            f'Báo giá đang liên kết đơn {order.order_code} đã có thanh toán công nợ. '
+            'Xóa thanh toán công nợ trước.'
+        )
+    if order:
+        delete_order_record(order, reset_quote=False)
+    delete_quote_doc_files(quote)
+    db.session.delete(quote)
+
+def reverse_payment_record(payment):
+    order = payment.order
+    if order:
+        order.paid_amount = max(int(order.paid_amount or 0) - int(payment.amount or 0), 0)
+    delete_payment_record_files(payment)
+    db.session.delete(payment)
+
+def delete_payment_group(payment_id):
+    payment = Payment.query.get_or_404(payment_id)
+    customer_id = payment.order.customer_id if payment.order else None
+    if payment.batch_id:
+        payments = Payment.query.filter_by(batch_id=payment.batch_id).all()
+    else:
+        payments = [payment]
+    total = sum(p.amount or 0 for p in payments)
+    for p in payments:
+        reverse_payment_record(p)
+    return customer_id, len(payments), total
+
 def delete_product_record(product):
     affected_ids = [
         row[0] for row in db.session.query(QuoteItem.quote_id).filter_by(product_id=product.id).distinct().all()
@@ -3121,6 +4275,7 @@ def delete_product_record(product):
     delete_all_product_image_files(product)
     QuoteItem.query.filter_by(product_id=product.id).delete(synchronize_session=False)
     StockMovement.query.filter_by(product_id=product.id).delete(synchronize_session=False)
+    ProductSupplier.query.filter_by(product_id=product.id).delete(synchronize_session=False)
     PriceHistory.query.filter_by(product_id=product.id).delete(synchronize_session=False)
     db.session.delete(product)
     for qid in affected_ids:
@@ -3145,6 +4300,7 @@ def delete_all_products_data():
     product_count = Product.query.count()
     QuoteItem.query.delete()
     StockMovement.query.delete()
+    ProductSupplier.query.delete()
     PriceHistory.query.delete()
     Product.query.delete()
     Brand.query.delete()
@@ -3731,6 +4887,7 @@ def products():
         if not save_product_images(p, request.files.getlist('images')):
             db.session.rollback()
             return redirect(url_for('products'))
+        apply_product_suppliers_from_form(p)
         db.session.commit()
         flash('Đã thêm sản phẩm', 'success')
         return redirect(url_for('products'))
@@ -3741,9 +4898,6 @@ def products():
     query = apply_product_filters(Product.query, filters)
     pagination = query.order_by(Product.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     categories = Category.query.order_by(Category.name).all()
-    if not parent_categories():
-        seed_product_taxonomy()
-        categories = Category.query.order_by(Category.name).all()
     list_args = {k: v for k, v in filters.items() if v}
     list_args['per_page'] = per_page
     export_args = {k: v for k, v in list_args.items() if k != 'page'}
@@ -3752,6 +4906,9 @@ def products():
         ids = [p.id for p in pagination.items]
         for h in PriceHistory.query.filter(PriceHistory.product_id.in_(ids)).order_by(PriceHistory.created_at.desc()).all():
             price_histories.setdefault(h.product_id, []).append(h)
+        product_suppliers = product_suppliers_map(ids)
+    else:
+        product_suppliers = {}
     return render_template(
         'products.html',
         pagination=pagination,
@@ -3770,8 +4927,10 @@ def products():
         taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
         brands_catalog_json=json.dumps(brands_catalog_json(), ensure_ascii=False),
         price_histories=price_histories,
+        product_suppliers=product_suppliers,
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
+        all_suppliers=active_suppliers(),
         import_preview_payload=get_product_import_session(),
         show_import_preview=bool(request.args.get('import_preview')),
         category_import_preview_payload=get_category_import_session(),
@@ -3789,14 +4948,17 @@ def product_detail(pid):
         .limit(50)
         .all(),
     }
+    product_suppliers = {p.id: product_supplier_links(p)}
     return render_template(
         'product_detail.html',
         p=p,
         parent_categories=parent_categories(),
         brands_list=Brand.query.order_by(Brand.name).all(),
         price_histories=price_histories,
+        product_suppliers=product_suppliers,
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
+        all_suppliers=active_suppliers(),
         filters={},
         pagination=type('Pg', (), {'page': 1})(),
         per_page=10,
@@ -3826,20 +4988,25 @@ def update_product(pid):
         delete_all_product_image_files(p)
     if not save_product_images(p, request.files.getlist('images')):
         return products_redirect_after_save()
+    apply_product_suppliers_from_form(p)
     db.session.commit()
     return products_redirect_after_save('Đã cập nhật sản phẩm')
 
 @app.route('/products/<int:pid>/price', methods=['POST'])
 def update_price(pid):
     p = Product.query.get_or_404(pid)
-    for field in ('retail_price', 'project_price'):
-        old = getattr(p, field)
-        new = parse_int(request.form.get(field), old)
-        if new != old:
-            db.session.add(PriceHistory(product_id=p.id, price_type=field, old_price=old, new_price=new, note=''))
-            setattr(p, field, new)
+    changed = apply_product_price_from_form(p)
     db.session.commit()
-    return products_redirect_after_save('Đã cập nhật giá')
+    if changed:
+        return products_redirect_after_save('Đã cập nhật giá')
+    return products_redirect_after_save('Không có thay đổi giá', 'info')
+
+@app.route('/products/<int:pid>/suppliers', methods=['POST'])
+def update_product_suppliers(pid):
+    p = Product.query.get_or_404(pid)
+    apply_product_suppliers_from_form(p)
+    db.session.commit()
+    return products_redirect_after_save('Đã cập nhật nhà cung cấp')
 
 @app.route('/products/export')
 def products_export():
@@ -3988,6 +5155,9 @@ def delete_customer(cid):
     ensure_customer_columns()
     ensure_contract_columns()
     c = Customer.query.get_or_404(cid)
+    if is_walkin_customer(c):
+        flash('Không thể xóa khách hàng hệ thống', 'warning')
+        return customers_redirect_after_save()
     name = c.name
     delete_customer_record(c)
     db.session.commit()
@@ -4003,6 +5173,12 @@ def delete_order(oid):
     delete_order_record(o, reset_quote=True)
     db.session.commit()
     flash(f'Đã xóa đơn hàng / hóa đơn {code}', 'success')
+    if request.form.get('_from') == 'debt':
+        return debt_redirect(
+            customer_id=request.form.get('_customer_id', type=int),
+            page=request.form.get('_page', 1, type=int) or 1,
+            order_page=request.form.get('_order_page', 1, type=int) or 1,
+        )
     if request.form.get('_from') == 'preview':
         return redirect(url_for('orders'))
     return orders_redirect(page=request.form.get('_page', 1, type=int) or 1)
@@ -4021,8 +5197,10 @@ def adjust_product_stock(pid):
         p.stock += qty
     else:
         p.stock -= qty
+    supplier_id = parse_supplier_id(request.form.get('supplier_id')) if mtype == 'IN' else None
     db.session.add(StockMovement(
         product_id=p.id,
+        supplier_id=supplier_id,
         movement_type=mtype,
         qty=qty,
         ref_code=request.form.get('ref_code', '').strip(),
@@ -4030,9 +5208,31 @@ def adjust_product_stock(pid):
         warehouse=DEFAULT_WAREHOUSE,
         note=request.form.get('note', '').strip(),
     ))
+    stock_note = request.form.get('note', '').strip()
+    price_note = f'Cùng lúc {("nhập" if mtype == "IN" else "xuất")} kho' + (f': {stock_note}' if stock_note else '')
+    price_changed = apply_product_price_from_form(p, note=price_note)
     db.session.commit()
     label = 'nhập' if mtype == 'IN' else 'xuất'
+    if price_changed:
+        return products_redirect_after_save(f'Đã {label} kho và cập nhật giá')
     return products_redirect_after_save(f'Đã {label} kho thành công')
+
+@app.route('/quotes/<int:qid>/delete', methods=['POST'])
+def delete_quote(qid):
+    ensure_quote_columns()
+    quote = Quote.query.get_or_404(qid)
+    code = quote.quote_code
+    tab = request.form.get('_tab') or ('draft' if quote.status == 'Nháp' else 'list')
+    try:
+        delete_quote_record(quote)
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return quotes_redirect(tab=tab)
+    db.session.commit()
+    flash(f'Đã xóa báo giá {code}', 'success')
+    if request.form.get('_from') == 'preview':
+        return redirect(url_for('quotes', tab=tab))
+    return quotes_redirect(tab=tab)
 
 @app.route('/quotes/preview', methods=['POST'])
 def quote_create_preview():
@@ -4059,7 +5259,10 @@ def quotes():
             return redirect(url_for('quotes', tab='list'))
         flash('Đã lưu nháp báo giá' if quote.status == 'Nháp' else 'Đã tạo báo giá',
               'secondary' if quote.status == 'Nháp' else 'success')
-        return redirect(url_for('quotes', tab='draft' if quote.status == 'Nháp' else 'list'))
+        redirect_args = {'tab': 'draft' if quote.status == 'Nháp' else 'list'}
+        if not is_walkin_customer(quote.customer):
+            redirect_args['quote_customer_id'] = quote.customer_id
+        return redirect(url_for('quotes', **redirect_args))
 
     filters = quote_filters_from_request()
     per_page = request.args.get('per_page', 10, type=int)
@@ -4099,7 +5302,7 @@ def quotes():
         per_page=per_page,
         sort=filters['sort'],
         order=filters['order'],
-        customers=Customer.query.order_by(Customer.name).all(),
+        customers=customers_for_select(),
         products=Product.query.order_by(Product.name).all(),
         quote_catalog=quote_product_catalog(
             Product.query.filter(Product.is_active.is_(True)).order_by(Product.name).all()
@@ -4107,6 +5310,10 @@ def quotes():
         quote_filter_statuses=QUOTE_FILTER_STATUSES,
         quote_edit_statuses=QUOTE_FILTER_STATUSES,
         default_valid=(date.today() + timedelta(days=30)).isoformat(),
+        quote_customer_id=request.args.get('quote_customer_id', type=int),
+        companies=list_company_profiles(),
+        active_company_id=get_company_row().id if get_company_row() else None,
+        doc_tab=filters['tab'],
     )
 
 @app.route('/quotes/export')
@@ -4122,7 +5329,7 @@ def quotes_export():
     for q in query.order_by(Quote.created_at.desc()).all():
         writer.writerow([
             q.quote_code,
-            q.customer.name,
+            quote_customer_label(q),
             q.created_at.strftime('%d/%m/%Y') if q.created_at else '',
             quote_valid_until(q).strftime('%d/%m/%Y'),
             q.total,
@@ -4148,6 +5355,7 @@ def update_quote_status(qid):
     if new_status in QUOTE_STATUSES and new_status in allowed.get(current, set()):
         if new_status == 'Đã chốt':
             order, created = chot_quote(quote)
+            set_quote_session_customer(quote)
             db.session.commit()
             if created:
                 flash(f'Đã chốt báo giá và tạo đơn hàng {order.order_code}', 'success')
@@ -4165,13 +5373,26 @@ def update_quote_status(qid):
 def update_quote(qid):
     ensure_quote_columns()
     quote = Quote.query.get_or_404(qid)
-    quote.customer_id = int(request.form['customer_id'])
+    if quote_display_status(quote) == 'Đã hủy':
+        flash('Không thể chỉnh sửa báo giá đã hủy', 'warning')
+        return quotes_redirect(tab=request.form.get('_tab', 'list'))
+    quote.customer_id = resolve_quote_customer_id(request.form.get('customer_id'))
     quote.vat_rate = parse_int(request.form.get('vat_rate'), 10)
     quote.discount = parse_int(request.form.get('discount'), 0)
     quote.note = request.form.get('note', '').strip()
     valid_raw = request.form.get('valid_until', '').strip()
     if valid_raw:
         quote.valid_until = datetime.strptime(valid_raw, '%Y-%m-%d').date()
+    line_items, stopped_names = parse_quote_line_items_from_form(quote)
+    if stopped_names:
+        names = ', '.join(stopped_names[:5])
+        extra = f' và {len(stopped_names) - 5} sản phẩm khác' if len(stopped_names) > 5 else ''
+        flash(f'Sản phẩm đã ngừng bán không thể thêm vào báo giá: {names}{extra}', 'warning')
+        return quotes_redirect(tab=request.form.get('_tab', 'list'))
+    if not line_items:
+        flash('Vui lòng thêm ít nhất một sản phẩm vào báo giá', 'warning')
+        return quotes_redirect(tab=request.form.get('_tab', 'list'))
+    apply_quote_line_items(quote, line_items)
     new_status = request.form.get('status', '').strip()
     old_status = quote_display_status(quote)
     if new_status in QUOTE_STATUSES:
@@ -4180,6 +5401,10 @@ def update_quote(qid):
         elif new_status != 'Đã chốt':
             quote.status = new_status
     recalculate_quote_totals(quote)
+    order = get_quote_order(quote)
+    if order:
+        order.total = quote.total
+        order.customer_id = quote.customer_id
     generate_quote_documents(quote, commit=False)
     db.session.commit()
     flash('Đã cập nhật báo giá', 'success')
@@ -4191,7 +5416,7 @@ def _quote_doc_preview_page(quote, file_path, doc_title, download_endpoint, view
         return redirect(url_for('quote_preview', qid=quote.id))
     return docx_preview_page(
         doc_title,
-        quote.customer.name,
+        quote_customer_label(quote),
         url_for(view_endpoint, qid=quote.id),
         url_for(download_endpoint, qid=quote.id),
         url_for('quote_preview', qid=quote.id),
@@ -4255,6 +5480,111 @@ def download_quote_handover(qid):
         return redirect(url_for('quote_preview', qid=qid))
     return send_file(quote.handover_doc_path, as_attachment=True, download_name=Path(quote.handover_doc_path).name)
 
+QUOTE_SALE_DRAFT_KEY = 'quote_sale_draft_path'
+QUOTE_HANDOVER_DRAFT_KEY = 'quote_handover_draft_path'
+
+def _quote_doc_draft_preview(quote, doc, title, view_endpoint, download_endpoint, back_url, session_key):
+    clear_path = session.get(session_key)
+    if clear_path and Path(clear_path).is_file():
+        Path(clear_path).unlink(missing_ok=True)
+    temp_path = save_temp_docx(doc, 'quote_doc_draft')
+    session[session_key] = str(temp_path)
+    return docx_preview_page(title, quote_customer_label(quote), view_endpoint, download_endpoint, back_url, is_draft=True)
+
+@app.route('/quotes/<int:qid>/sale-contract/update', methods=['POST'])
+def update_quote_sale_contract(qid):
+    ensure_quote_columns()
+    quote = Quote.query.get_or_404(qid)
+    apply_quote_sale_contract_form(quote)
+    regenerate_quote_sale_contract(quote, commit=True)
+    flash('Đã cập nhật hợp đồng mua bán', 'success')
+    return quote_doc_redirect(qid)
+
+@app.route('/quotes/<int:qid>/handover/update', methods=['POST'])
+def update_quote_handover(qid):
+    ensure_quote_columns()
+    quote = Quote.query.get_or_404(qid)
+    apply_quote_handover_form(quote)
+    regenerate_quote_handover(quote, commit=True)
+    flash('Đã cập nhật biên bản giao nhận hàng', 'success')
+    return quote_doc_redirect(qid)
+
+@app.route('/quotes/<int:qid>/sale-contract/preview-draft', methods=['POST'])
+def preview_quote_sale_contract_draft(qid):
+    ensure_quote_columns()
+    quote = Quote.query.get_or_404(qid)
+    saved = {
+        'doc_company_id': quote.doc_company_id,
+        'sale_contract_signed_date': quote.sale_contract_signed_date,
+        'sale_contract_payment_note': quote.sale_contract_payment_note,
+        'sale_contract_delivery_note': quote.sale_contract_delivery_note,
+    }
+    apply_quote_sale_contract_form(quote)
+    doc = build_quote_sale_contract_doc(quote)
+    for k, v in saved.items():
+        setattr(quote, k, v)
+    back = url_for('quote_preview', qid=qid) if request.form.get('_back') == 'preview' else url_for('quotes')
+    return _quote_doc_draft_preview(
+        quote, doc, f'HĐMB/{quote.quote_code}',
+        url_for('view_quote_sale_contract_draft'),
+        url_for('download_quote_sale_contract_draft'),
+        back, QUOTE_SALE_DRAFT_KEY,
+    )
+
+@app.route('/quotes/<int:qid>/handover/preview-draft', methods=['POST'])
+def preview_quote_handover_draft(qid):
+    ensure_quote_columns()
+    quote = Quote.query.get_or_404(qid)
+    saved = {
+        'doc_company_id': quote.doc_company_id,
+        'handover_date': quote.handover_date,
+        'handover_place': quote.handover_place,
+        'handover_condition_note': quote.handover_condition_note,
+    }
+    apply_quote_handover_form(quote)
+    doc = build_quote_handover_doc(quote)
+    for k, v in saved.items():
+        setattr(quote, k, v)
+    back = url_for('quote_preview', qid=qid) if request.form.get('_back') == 'preview' else url_for('quotes')
+    return _quote_doc_draft_preview(
+        quote, doc, f'BBGH/{quote.quote_code}',
+        url_for('view_quote_handover_draft'),
+        url_for('download_quote_handover_draft'),
+        back, QUOTE_HANDOVER_DRAFT_KEY,
+    )
+
+@app.route('/quotes/sale-contract/draft/view')
+def view_quote_sale_contract_draft():
+    path = session.get(QUOTE_SALE_DRAFT_KEY)
+    if not path or not Path(path).is_file():
+        from flask import abort
+        abort(404)
+    return send_docx_inline(path, 'hop-dong-mua-ban-nhap.docx')
+
+@app.route('/quotes/sale-contract/draft/download')
+def download_quote_sale_contract_draft():
+    path = session.get(QUOTE_SALE_DRAFT_KEY)
+    if not path or not Path(path).is_file():
+        flash('Không tìm thấy bản nháp', 'danger')
+        return redirect(url_for('quotes'))
+    return send_file(path, as_attachment=True, download_name=Path(path).name)
+
+@app.route('/quotes/handover/draft/view')
+def view_quote_handover_draft():
+    path = session.get(QUOTE_HANDOVER_DRAFT_KEY)
+    if not path or not Path(path).is_file():
+        from flask import abort
+        abort(404)
+    return send_docx_inline(path, 'bien-ban-nhan-hang-nhap.docx')
+
+@app.route('/quotes/handover/draft/download')
+def download_quote_handover_draft():
+    path = session.get(QUOTE_HANDOVER_DRAFT_KEY)
+    if not path or not Path(path).is_file():
+        flash('Không tìm thấy bản nháp', 'danger')
+        return redirect(url_for('quotes'))
+    return send_file(path, as_attachment=True, download_name=Path(path).name)
+
 @app.route('/quotes/<int:qid>/preview')
 def quote_preview(qid):
     ensure_quote_columns()
@@ -4266,6 +5596,9 @@ def quote_preview(qid):
         status=quote_display_status(quote),
         expired=quote_is_expired(quote),
         linked_order=get_quote_order(quote),
+        companies=list_company_profiles(),
+        active_company_id=get_company_row().id if get_company_row() else None,
+        doc_tab='list',
     )
 
 @app.route('/quotes/<int:qid>/print')
@@ -4297,12 +5630,50 @@ def create_order_from_quote(qid):
 
 @app.route('/contracts', methods=['GET', 'POST'])
 def contracts():
-    return redirect(url_for('customers'))
+    ensure_contract_columns()
+    if request.method == 'POST':
+        try:
+            customer, code, signed, expired, quote_id, company_id = parse_contract_form()
+        except ValueError as e:
+            flash(str(e), 'warning')
+            return redirect(url_for('contracts'))
+        out_path = apply_contract_doc(None, customer, code, signed, expired, company_id)
+        contract = Contract(
+            contract_code=code,
+            customer_id=customer.id,
+            company_id=company_id,
+            quote_id=int(quote_id) if quote_id else None,
+            signed_date=signed,
+            expired_date=expired,
+            file_path=out_path,
+        )
+        db.session.add(contract)
+        db.session.commit()
+        flash(f'Đã tạo hợp đồng {code}', 'success')
+        return redirect(url_for('contracts'))
+    today = date.today().isoformat()
+    year_end = date(date.today().year, 12, 31).isoformat()
+    return render_template(
+        'contracts.html',
+        contracts=Contract.query.order_by(Contract.created_at.desc()).limit(100).all(),
+        customers=customers_for_select(),
+        quotes=Quote.query.order_by(Quote.created_at.desc()).limit(50).all(),
+        companies=list_company_profiles(),
+        active_company_id=get_company_row().id if get_company_row() else None,
+        today=today,
+        year_end=year_end,
+    )
 
 @app.route('/contracts/preview', methods=['POST'])
 def preview_contract_draft():
-    customer, code, signed, expired, _ = parse_contract_form()
-    doc = build_contract_doc(customer, code, signed, expired)
+    try:
+        cid = request.form.get('contract_id', type=int)
+        contract = Contract.query.get(cid) if cid else None
+        customer, code, signed, expired, _, company_id = parse_contract_form(contract)
+    except ValueError as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('contracts'))
+    doc = build_contract_doc(customer, code, signed, expired, company_id=company_id)
     clear_contract_draft_temp()
     temp_path = save_temp_docx(doc, 'contract_draft')
     session[CONTRACT_DRAFT_SESSION_KEY] = str(temp_path)
@@ -4311,9 +5682,36 @@ def preview_contract_draft():
         customer.name,
         url_for('view_contract_draft'),
         url_for('download_contract_draft'),
-        url_for('customers'),
+        url_for('contracts'),
         is_draft=True,
     )
+
+@app.route('/contracts/<int:cid>/update', methods=['POST'])
+def update_contract(cid):
+    ensure_contract_columns()
+    contract = Contract.query.get_or_404(cid)
+    try:
+        customer, code, signed, expired, quote_id, company_id = parse_contract_form(contract)
+    except ValueError as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('contracts'))
+    if (
+        contract.contract_type == CONTRACT_TYPE_FRAMEWORK
+        and customer.id != contract.customer_id
+        and get_framework_contract(customer.id)
+    ):
+        flash('Khách hàng này đã có hợp đồng nguyên tắc', 'warning')
+        return redirect(url_for('contracts'))
+    contract.file_path = apply_contract_doc(contract, customer, code, signed, expired, company_id)
+    contract.contract_code = code
+    contract.customer_id = customer.id
+    contract.company_id = company_id
+    contract.quote_id = int(quote_id) if quote_id else None
+    contract.signed_date = signed
+    contract.expired_date = expired
+    db.session.commit()
+    flash(f'Đã cập nhật hợp đồng {code}', 'success')
+    return redirect(url_for('contracts'))
 
 @app.route('/contracts/preview/view')
 def view_contract_draft():
@@ -4328,7 +5726,7 @@ def download_contract_draft():
     path = session.get(CONTRACT_DRAFT_SESSION_KEY)
     if not path or not Path(path).is_file():
         flash('Không tìm thấy bản nháp hợp đồng', 'danger')
-        return redirect(url_for('customers'))
+        return redirect(url_for('contracts'))
     return send_file(path, as_attachment=True, download_name=Path(path).name)
 
 @app.route('/contracts/<int:cid>/preview')
@@ -4336,13 +5734,13 @@ def preview_contract(cid):
     c = Contract.query.get_or_404(cid)
     if not c.file_path or not Path(c.file_path).exists():
         flash('Không tìm thấy file hợp đồng', 'danger')
-        return redirect(url_for('customers'))
+        return redirect(url_for('contracts'))
     return docx_preview_page(
         c.contract_code,
         c.customer.name,
         url_for('view_contract', cid=c.id),
         url_for('download_contract', cid=c.id),
-        url_for('customers'),
+        url_for('contracts'),
     )
 
 @app.route('/contracts/<int:cid>/view')
@@ -4378,6 +5776,17 @@ def orders():
         return orders_redirect()
 
     filters = order_filters_from_request()
+    if filters['customer_id']:
+        session['orders_customer_id'] = filters['customer_id']
+    elif session.get('orders_customer_id'):
+        try:
+            remembered = int(session.get('orders_customer_id'))
+        except (TypeError, ValueError):
+            remembered = None
+        if remembered and Customer.query.get(remembered):
+            filters['customer_id'] = str(remembered)
+        else:
+            session.pop('orders_customer_id', None)
     per_page = request.args.get('per_page', 10, type=int)
     per_page = per_page if per_page in (10, 25, 50) else 10
     page = request.args.get('page', 1, type=int)
@@ -4398,7 +5807,7 @@ def orders():
         list_args=list_args,
         export_args=export_args,
         per_page=per_page,
-        customers=Customer.query.order_by(Customer.name).all(),
+        customers=customers_for_select(),
         order_filter_statuses=ORDER_FILTER_STATUSES,
     )
 
@@ -4582,8 +5991,10 @@ def stock():
             p.stock += qty
         else:
             p.stock -= qty
+        supplier_id = parse_supplier_id(request.form.get('supplier_id')) if mtype == 'IN' else None
         db.session.add(StockMovement(
             product_id=p.id,
+            supplier_id=supplier_id,
             movement_type=mtype,
             qty=qty,
             ref_code=request.form.get('ref_code', '').strip(),
@@ -4627,6 +6038,8 @@ def stock():
         mov_query = mov_query.filter(StockMovement.method == filters['method'])
     if filters['warehouse']:
         mov_query = mov_query.filter(StockMovement.warehouse == filters['warehouse'])
+    if filters['supplier_id']:
+        mov_query = mov_query.filter(StockMovement.supplier_id == int(filters['supplier_id']))
     if date_from:
         mov_query = mov_query.filter(StockMovement.created_at >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
@@ -4649,6 +6062,7 @@ def stock():
     out_stock_args = {**base_args, 'tab': 'inventory', 'status': 'out'}
     export_args = {k: v for k, v in list_args.items() if k != 'tab'}
     all_products = Product.query.order_by(Product.name).all()
+    all_suppliers = active_suppliers()
     return render_template(
         'stock.html',
         stats=stock_stats(),
@@ -4657,6 +6071,7 @@ def stock():
         history_pagination=history_pagination,
         movements=history_pagination.items,
         all_products=all_products,
+        all_suppliers=all_suppliers,
         filters=filters,
         list_args=list_args,
         inventory_args=inventory_args,
@@ -4694,6 +6109,10 @@ def stock_export():
         headers={'Content-Disposition': 'attachment; filename=ton-kho.csv'},
     )
 
+@app.route('/supplier-debt')
+def supplier_debt():
+    return render_template('supplier_debt.html')
+
 @app.route('/debt')
 def debt():
     ensure_payment_columns()
@@ -4704,6 +6123,16 @@ def debt():
     order_page = request.args.get('order_page', 1, type=int)
     per_page = min(max(per_page, 5), 50)
     customer_id = request.args.get('customer_id', type=int)
+    if customer_id:
+        session['debt_customer_id'] = customer_id
+    elif session.get('debt_customer_id'):
+        try:
+            customer_id = int(session.get('debt_customer_id'))
+        except (TypeError, ValueError):
+            customer_id = None
+        if customer_id and not Customer.query.get(customer_id):
+            session.pop('debt_customer_id', None)
+            customer_id = None
 
     all_rows = build_debt_customer_rows(search_q)
     pagination = SimplePagination(all_rows, page, per_page)
@@ -4818,6 +6247,19 @@ def debt_allocate_payment():
     )
     return debt_redirect(customer_id=customer_id, page=page)
 
+@app.route('/debt/payments/<int:pid>/delete', methods=['POST'])
+def delete_debt_payment(pid):
+    ensure_payment_columns()
+    page = request.form.get('_page', 1, type=int)
+    order_page = request.form.get('_order_page', 1, type=int)
+    customer_id, count, total = delete_payment_group(pid)
+    db.session.commit()
+    flash(
+        f'Đã xóa {count} dòng thanh toán ({money(total)}). Công nợ đơn hàng đã được cập nhật lại.',
+        'success',
+    )
+    return debt_redirect(customer_id=customer_id, page=page, order_page=order_page)
+
 @app.route('/debt/export')
 def debt_export():
     normalize_order_statuses()
@@ -4843,7 +6285,7 @@ def debt_export():
 
 @app.cli.command('init-db')
 def init_db_command():
-    init_db(seed=True)
+    init_db()
     print('Initialized database')
 
 def create_quote_doc_templates():
@@ -4898,38 +6340,7 @@ def create_template_docx():
     table.rows[0].cells[1].text = 'ĐẠI DIỆN BÊN B'
     doc.save(TEMPLATE_DOCX)
 
-def seed_product_taxonomy():
-    tree = {
-        'Điện thoại': ['Smartphone', 'Tablet', 'Phụ kiện điện thoại'],
-        'Camera': ['Action camera', 'Máy ảnh', 'Phụ kiện camera'],
-        'Laptop': ['Laptop gaming', 'Laptop văn phòng', 'Phụ kiện laptop'],
-        'Phụ kiện': ['Tai nghe', 'Sạc & cáp', 'Ốp lưng'],
-        'Âm thanh': ['Loa', 'Micro', 'Amply'],
-        'Thiết bị thông minh': ['Smartwatch', 'Nhà thông minh'],
-    }
-    brand_map = {
-        'Samsung': 'Điện thoại',
-        'Apple': 'Điện thoại',
-        'DJI': 'Camera',
-        'Sony': 'Camera',
-        'Asus': 'Laptop',
-        'JBL': 'Âm thanh',
-    }
-    parent_by_name = {}
-    for parent_name, children in tree.items():
-        parent = Category(name=parent_name)
-        db.session.add(parent)
-        db.session.flush()
-        parent_by_name[parent_name] = parent
-        for child_name in children:
-            db.session.add(Category(name=child_name, parent_id=parent.id))
-    db.session.flush()
-    for brand_name, parent_name in brand_map.items():
-        parent = parent_by_name.get(parent_name)
-        db.session.add(Brand(name=brand_name, category_id=parent.id if parent else None))
-    db.session.commit()
-
-def init_db(seed=False):
+def init_db():
     DB_PATH.parent.mkdir(exist_ok=True)
     PRODUCT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     COMPANY_LOGO_DIR.mkdir(parents=True, exist_ok=True)
@@ -4945,43 +6356,21 @@ def init_db(seed=False):
     CONTRACT_SIGNED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ORDER_HANDOVER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    ensure_company_profile()
+    ensure_company_profiles()
     ensure_category_brand_schema()
-    if seed and Customer.query.count() == 0:
-        c = Customer(name='CÔNG TY CP XĂNG DẦU DẦU KHÍ NINH BÌNH', tax_code='2700275814', address='Khu công nghiệp Ninh Phúc, Phường Đông Hoa Lư, Tỉnh Ninh Bình', phone='0229.3854065', representative='Ông Quách Trọng Phụng', position='Phó Giám đốc', bank_account='4830006372', bank_name='BIDV chi nhánh Ninh Bình')
-        db.session.add(c)
-    if seed and not parent_categories():
-        seed_product_taxonomy()
-    if seed and Product.query.count() == 0:
-        phone_cat = find_category_id_by_path('Điện thoại > Smartphone') or find_category_id_by_path('Điện thoại')
-        cam_cat = find_category_id_by_path('Camera > Action camera') or find_category_id_by_path('Camera')
-        samsung = Brand.query.filter_by(name='Samsung').first()
-        dji = Brand.query.filter_by(name='DJI').first()
-        demos = [
-            Product(sku='A53-128-BLK', name='Samsung A53 6/128 Đen', category_id=phone_cat, brand_id=samsung.id if samsung else None, model='A53', variant='6/128 Đen', retail_price=5000000, project_price=4800000, stock=10, warranty='12 tháng'),
-            Product(sku='DJI-A4-COMBO', name='DJI Action 4 Adventure Combo', category_id=cam_cat, brand_id=dji.id if dji else None, model='Action 4', variant='Adventure Combo', retail_price=8900000, project_price=8500000, stock=3, warranty='12 tháng'),
-        ]
-        for p in demos:
-            sync_product_taxonomy_strings(p)
-        db.session.add_all(demos)
-    if seed and Order.query.count() == 0:
-        customer = Customer.query.first()
-        if customer:
-            demo_orders = [
-                ('DH-2026-0001', 'Hoàn thành', 17800000, 17800000),
-                ('DH-2026-0002', 'Đang xử lý', 5500000, 0),
-                ('DH-2026-0003', 'Đang xử lý', 12300000, 5000000),
-                ('DH-2026-0004', 'Hoàn thành', 8900000, 8900000),
-                ('DH-2026-0005', 'Đã hủy', 3200000, 0),
-            ]
-            for code, status, total, paid in demo_orders:
-                db.session.add(Order(
-                    order_code=code, customer_id=customer.id, status=status,
-                    total=total, paid_amount=paid,
-                ))
+    ensure_product_supplier_schema()
+    ensure_walkin_customer()
+    if User.query.count() == 0:
+        admin = User(
+            username='admin',
+            full_name='Quản trị viên',
+            role='admin',
+        )
+        set_user_password(admin, 'admin123')
+        db.session.add(admin)
     db.session.commit()
 
 if __name__ == '__main__':
     with app.app_context():
-        init_db(seed=True)
+        init_db()
     app.run(host='0.0.0.0', port=5050, debug=True)

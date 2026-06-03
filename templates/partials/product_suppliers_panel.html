@@ -1,0 +1,93 @@
+{% macro product_suppliers_panel(links=none, suppliers=none) %}
+{% set links = links or [] %}
+{% set suppliers = suppliers if suppliers is not none else active_suppliers() %}
+{% set primary_id = (links|selectattr('is_primary')|map(attribute='supplier_id')|list|first) if links else none %}
+<div class="product-suppliers-panel" data-product-suppliers-panel>
+  <div class="product-suppliers-panel-head">
+    <div>
+      <h6 class="product-suppliers-panel-title"><i class="bi bi-truck me-2"></i>Nhà cung cấp &amp; giá nhập</h6>
+      <p class="product-suppliers-panel-sub mb-0">Thêm nhiều NCC để so sánh giá mua hàng</p>
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm product-suppliers-add-btn">
+      <i class="bi bi-plus-lg me-1"></i>Thêm NCC
+    </button>
+  </div>
+  <div class="table-responsive product-suppliers-table-wrap">
+    <table class="table table-sm product-suppliers-table mb-0">
+      <thead>
+        <tr>
+          <th class="col-primary" title="NCC ưu tiên">Ưu tiên</th>
+          <th>Nhà cung cấp</th>
+          <th class="col-cost">Giá nhập</th>
+          <th class="col-sku">Mã SP (NCC)</th>
+          <th>Ghi chú</th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+      <tbody class="product-suppliers-body">
+        {% for link in links %}
+        <tr class="product-supplier-row">
+          <td class="text-center">
+            <input type="radio" name="ps_primary_supplier_id" value="{{ link.supplier_id }}" class="form-check-input" {% if link.is_primary or (not primary_id and loop.first) %}checked{% endif %}>
+          </td>
+          <td>
+            <select name="ps_supplier_id" class="form-select form-select-sm" required>
+              <option value="">— Chọn NCC —</option>
+              {% for s in suppliers %}
+              <option value="{{ s.id }}" {% if s.id == link.supplier_id %}selected{% endif %}>{{ s.code }} — {{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <div class="money-input-wrap">
+              <input type="text" name="ps_cost_price" class="form-control form-control-sm money-input" inputmode="numeric" autocomplete="off" value="{% if link.cost_price %}{{ link.cost_price|money_plain }}{% endif %}" placeholder="0">
+              <span class="money-input-suffix">đ</span>
+            </div>
+          </td>
+          <td>
+            <input type="text" name="ps_supplier_sku" class="form-control form-control-sm" value="{{ link.supplier_sku or '' }}" placeholder="Mã bên NCC">
+          </td>
+          <td>
+            <input type="text" name="ps_note" class="form-control form-control-sm" value="{{ link.note or '' }}" placeholder="Tùy chọn">
+          </td>
+          <td class="text-end">
+            <button type="button" class="btn btn-sm btn-outline-danger product-supplier-remove-btn" title="Xóa dòng"><i class="bi bi-trash"></i></button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="product-suppliers-empty small-muted mb-0{% if links %} d-none{% endif %}">Chưa có nhà cung cấp — bấm 「Thêm NCC」 để so sánh giá.{% if not suppliers %} <span class="text-warning d-block mt-1">Chưa có NCC trong hệ thống — thêm tại menu Nhà cung cấp trước.</span>{% endif %}</p>
+  <template class="product-supplier-row-template">
+    <tr class="product-supplier-row">
+      <td class="text-center">
+        <input type="radio" name="ps_primary_supplier_id" value="" class="form-check-input">
+      </td>
+      <td>
+        <select name="ps_supplier_id" class="form-select form-select-sm" required>
+          <option value="">— Chọn NCC —</option>
+          {% for s in suppliers %}
+          <option value="{{ s.id }}">{{ s.code }} — {{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td>
+        <div class="money-input-wrap">
+          <input type="text" name="ps_cost_price" class="form-control form-control-sm money-input" inputmode="numeric" autocomplete="off" value="" placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+      </td>
+      <td>
+        <input type="text" name="ps_supplier_sku" class="form-control form-control-sm" value="" placeholder="Mã bên NCC">
+      </td>
+      <td>
+        <input type="text" name="ps_note" class="form-control form-control-sm" value="" placeholder="Tùy chọn">
+      </td>
+      <td class="text-end">
+        <button type="button" class="btn btn-sm btn-outline-danger product-supplier-remove-btn" title="Xóa dòng"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>
+  </template>
+</div>
+{% endmacro %}

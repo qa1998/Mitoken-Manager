@@ -1,0 +1,120 @@
+{% macro quote_edit_modal(q, tab='list') %}
+{% set disc_pct = ((q.discount * 100 / q.subtotal)|round(2)) if q.subtotal else 0 %}
+<div class="modal fade quote-page-modal quote-edit-modal" id="editQuote{{ q.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content quote-create-modal">
+      <form method="post" action="{{ url_for('update_quote', qid=q.id) }}" class="quote-form quote-edit-form">
+        <input type="hidden" name="_tab" value="{{ tab }}">
+        <div class="modal-header quote-create-header">
+          <h5 class="modal-title">Chỉnh sửa {{ q.quote_code }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body quote-create-body">
+          <div class="quote-create-top">
+            <div class="quote-create-meta-grid">
+              <div class="quote-meta-field quote-meta-customer">
+                <label class="form-label-custom">Khách hàng</label>
+                <select name="customer_id" class="form-select">
+                  <option value="" {% if is_walkin_customer(q.customer) %}selected{% endif %}>Khách vãng lai (không cần thông tin)</option>
+                  {% for c in customers %}
+                  <option value="{{ c.id }}" {% if c.id == q.customer_id %}selected{% endif %}>{{ c.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="quote-meta-field">
+                <label class="form-label-custom">Trạng thái</label>
+                <select name="status" class="form-select">
+                  {% for s in quote_filter_statuses %}
+                  <option value="{{ s }}" {% if q.status == s %}selected{% endif %}>{{ s }}</option>
+                  {% endfor %}
+                  {% if q.status == 'Nháp' %}<option value="Nháp" selected>Nháp</option>{% endif %}
+                </select>
+              </div>
+              <div class="quote-meta-field">
+                <label class="form-label-custom">Bảng giá</label>
+                <select class="form-select quote-price-list">
+                  <option value="dealer" selected>Giá sỉ / đại lý</option>
+                  <option value="project">Giá công trình</option>
+                  <option value="retail">Giá lẻ</option>
+                </select>
+              </div>
+              <div class="quote-meta-field quote-meta-narrow">
+                <label class="form-label-custom">VAT (%)</label>
+                <input name="vat_rate" type="number" min="0" max="100" class="form-control quote-calc-input quote-vat-rate text-center" value="{{ q.vat_rate }}">
+              </div>
+              <div class="quote-meta-field quote-meta-narrow">
+                <label class="form-label-custom">CK (%)</label>
+                <input type="number" min="0" max="100" class="form-control quote-calc-input quote-discount-percent text-center" value="{{ disc_pct }}">
+                <input type="hidden" name="discount" class="quote-discount-amount" value="{{ q.discount }}">
+              </div>
+              <div class="quote-meta-field">
+                <label class="form-label-custom">Hiệu lực đến</label>
+                <input type="date" name="valid_until" class="form-control" value="{{ quote_valid_until(q).isoformat() }}">
+              </div>
+            </div>
+            <div class="mt-3">
+              <label class="form-label-custom">Ghi chú</label>
+              <textarea name="note" class="form-control" rows="2" maxlength="500">{{ q.note or '' }}</textarea>
+            </div>
+          </div>
+
+          <div class="quote-lines-section mt-4">
+            <p class="quote-lines-section-title">Chi tiết hàng hóa</p>
+            <div class="quote-lines-table-wrap">
+              <table class="table quote-lines-table mb-0">
+                <thead>
+                  <tr>
+                    <th class="col-num">#</th>
+                    <th>Sản phẩm</th>
+                    <th class="col-stock">Tồn kho</th>
+                    <th class="col-unit">Đơn vị</th>
+                    <th class="col-qty">SL</th>
+                    <th class="col-price">Đơn giá</th>
+                    <th class="col-line-disc">CK (%)</th>
+                    <th class="col-amount">Thành tiền</th>
+                    <th class="col-actions text-end">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody class="quote-items-body"></tbody>
+              </table>
+            </div>
+            <button type="button" class="btn btn-outline-primary btn-sm quote-add-row-btn mt-2">
+              <i class="bi bi-plus-lg me-1"></i> Thêm sản phẩm
+            </button>
+          </div>
+
+          <div class="quote-create-footer mt-4">
+            <div class="quote-create-summary">
+              <div class="quote-summary-line">
+                <span>Tổng tiền hàng</span>
+                <span class="quote-summary-subtotal">{{ q.subtotal|money }}</span>
+              </div>
+              <div class="quote-summary-line is-discount">
+                <span class="quote-summary-discount-label">Tổng chiết khấu ({{ disc_pct }}%)</span>
+                <span class="quote-summary-discount">-{{ q.discount|money }}</span>
+              </div>
+              <div class="quote-summary-line">
+                <span class="quote-summary-vat-label">VAT ({{ q.vat_rate }}%)</span>
+                <span class="quote-summary-vat">{{ q.vat_amount|money }}</span>
+              </div>
+              <div class="quote-summary-grand">
+                <span>Tổng thanh toán</span>
+                <span class="quote-summary-total">{{ q.total|money }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        </div>
+        <script type="application/json" class="quote-edit-items-data">[
+          {%- for item in q.items -%}
+          {"product_id":{{ item.product_id }},"qty":{{ item.qty }},"price":{{ item.price }}}{%- if not loop.last -%},{%- endif -%}
+          {%- endfor -%}
+        ]</script>
+      </form>
+    </div>
+  </div>
+</div>
+{% endmacro %}

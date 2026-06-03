@@ -184,7 +184,7 @@
         <tbody>
           {% for m in movements %}
           {% set row_num = (history_pagination.page - 1) * history_pagination.per_page + loop.index %}
-          <tr>
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('product_detail', pid=m.product.id) }}">
             <td class="text-muted">{{ row_num }}</td>
             <td>{{ m.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
             <td><code class="sku-code">{{ m.product.sku }}</code></td>
@@ -240,7 +240,7 @@
           {% for row in inventory_rows %}
           {% set p = row.product %}
           {% set row_num = (pagination.page - 1) * pagination.per_page + loop.index %}
-          <tr>
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('product_detail', pid=p.id) }}">
             <td class="text-muted">{{ row_num }}</td>
             <td><code class="sku-code">{{ p.sku }}</code></td>
             <td>
@@ -254,7 +254,7 @@
             <td class="text-end text-stock-in">{{ row.inbound }}</td>
             <td class="text-end text-stock-out">{{ row.outbound }}</td>
             <td class="text-end fw-semibold">{{ row.current }}</td>
-            <td>{{ p.unit }}</td>
+            <td>{{ product_base_unit(p) }}</td>
             <td><span class="stock-status-badge status-{{ row.status_key }}">{{ row.status_label }}</span></td>
             <td class="text-end table-actions-cell">
               <div class="dropdown">

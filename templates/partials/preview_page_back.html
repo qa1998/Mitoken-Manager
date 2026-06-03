@@ -1,0 +1,6 @@
+{% macro preview_page_back(back_url, label='Quay lại') %}
+<a href="{{ back_url }}" class="btn btn-light btn-preview-back" aria-label="{{ label }}">
+  <i class="bi bi-arrow-left" aria-hidden="true"></i>
+  <span>{{ label }}</span>
+</a>
+{% endmacro %}

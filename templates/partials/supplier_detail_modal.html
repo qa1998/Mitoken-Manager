@@ -1,0 +1,279 @@
+{% macro supplier_pay_badge(intake) %}
+{% set key = supplier_intake_payment_status_key(intake) %}
+{% set label = supplier_intake_payment_status(intake) %}
+{% if key == 'paid' %}
+<span class="supplier-pay-badge paid">{{ label }}</span>
+{% elif key == 'partial' %}
+<span class="supplier-pay-badge partial">{{ label }}</span>
+{% elif key == 'unpaid' %}
+<span class="supplier-pay-badge unpaid">{{ label }}</span>
+{% else %}
+<span class="text-muted">{{ label }}</span>
+{% endif %}
+{% endmacro %}
+
+{% macro supplier_detail_modal(s, intake_board, intake_line_map, list_ctx) %}
+{% set summary = intake_board.summaries.get(s.id, {}) %}
+{% set intakes = intake_board.intakes.get(s.id, []) %}
+{% set payments = intake_board.payments.get(s.id, []) %}
+<div class="modal fade supplier-detail-modal" id="detailModal{{ s.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-1">{{ s.name }}</h5>
+          <p class="small-muted mb-0"><code>{{ s.code }}</code>{% if s.phone %} · {{ s.phone }}{% endif %}</p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3 supplier-detail-summary-row mb-3">
+          <div class="col-6 col-md-3">
+            <div class="supplier-detail-stat">
+              <span class="supplier-detail-stat-label">Tổng nhập</span>
+              <span class="supplier-detail-stat-value">{{ summary.total|default(0)|money }}</span>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="supplier-detail-stat">
+              <span class="supplier-detail-stat-label">Đã thanh toán</span>
+              <span class="supplier-detail-stat-value text-success">{{ summary.paid|default(0)|money }}</span>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="supplier-detail-stat">
+              <span class="supplier-detail-stat-label">Còn nợ</span>
+              <span class="supplier-detail-stat-value {% if summary.remaining|default(0) > 0 %}text-danger fw-semibold{% endif %}">{{ summary.remaining|default(0)|money }}</span>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="supplier-detail-stat">
+              <span class="supplier-detail-stat-label">Phiếu chưa trả</span>
+              <span class="supplier-detail-stat-value">{{ summary.unpaid_count|default(0) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <ul class="nav nav-tabs supplier-detail-tabs" role="tablist">
+          <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#supplierIntakes{{ s.id }}" type="button">
+              Lịch sử nhập hàng
+              {% if intakes %}<span class="badge rounded-pill bg-light text-dark border ms-1">{{ intakes|length }}</span>{% endif %}
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#supplierPayments{{ s.id }}" type="button">
+              Lịch sử thanh toán
+              {% if payments %}<span class="badge rounded-pill bg-light text-dark border ms-1">{{ payments|length }}</span>{% endif %}
+            </button>
+          </li>
+        </ul>
+
+        <div class="tab-content supplier-detail-tab-content">
+          <div class="tab-pane fade show active" id="supplierIntakes{{ s.id }}">
+            <div class="table-responsive supplier-intake-table-wrap">
+              <table class="table table-sm supplier-intake-table mb-0">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Mã phiếu</th>
+                    <th>Ngày nhập</th>
+                    <th>Chứng từ</th>
+                    <th class="text-end">Tổng tiền</th>
+                    <th class="text-end">Đã trả</th>
+                    <th class="text-end">Còn lại</th>
+                    <th>Trạng thái</th>
+                    <th class="text-end">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for intake in intakes %}
+                  {% set balance = supplier_intake_balance(intake) %}
+                  {% set lines = intake_line_map.get(intake.id, []) %}
+                  <tr class="supplier-intake-row">
+                    <td class="supplier-intake-expand-col">
+                      {% if lines %}
+                      <button type="button" class="btn btn-sm btn-light supplier-intake-toggle" data-bs-toggle="collapse" data-bs-target="#intakeLines{{ intake.id }}" aria-expanded="false">
+                        <i class="bi bi-chevron-down"></i>
+                      </button>
+                      {% endif %}
+                    </td>
+                    <td><code class="sku-code">{{ intake.intake_code or ('#' ~ intake.id) }}</code></td>
+                    <td class="text-nowrap">{{ intake.created_at.strftime('%d/%m/%Y %H:%M') if intake.created_at else '—' }}</td>
+                    <td>{{ intake.ref_code or '—' }}</td>
+                    <td class="text-end money">{{ intake.total_amount|money }}</td>
+                    <td class="text-end money text-success">{{ intake.paid_amount|money }}</td>
+                    <td class="text-end money {% if balance > 0 %}text-danger fw-semibold{% endif %}">{{ balance|money }}</td>
+                    <td>{{ supplier_pay_badge(intake) }}</td>
+                    <td class="text-end">
+                      {% if balance > 0 and (intake.total_amount or 0) > 0 %}
+                      <button type="button"
+                              class="btn btn-sm btn-primary supplier-intake-pay-btn"
+                              data-bs-toggle="modal"
+                              data-bs-target="#supplierPaymentModal{{ s.id }}"
+                              data-payment-url="{{ url_for('supplier_intake_payment', sid=s.id, iid=intake.id) }}"
+                              data-intake-code="{{ intake.intake_code or intake.id }}"
+                              data-balance="{{ balance }}"
+                              data-ref="{{ intake.ref_code or '' }}">
+                        <i class="bi bi-wallet2 me-1"></i>Thanh toán
+                      </button>
+                      {% else %}
+                      <span class="text-muted small">—</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% if lines %}
+                  <tr class="supplier-intake-lines-row">
+                    <td colspan="9" class="p-0 border-0">
+                      <div class="collapse" id="intakeLines{{ intake.id }}">
+                        <div class="supplier-intake-lines-panel">
+                          <table class="table table-sm mb-0">
+                            <thead>
+                              <tr>
+                                <th>Sản phẩm</th>
+                                <th class="text-end">SL</th>
+                                <th class="text-end">Giá nhập</th>
+                                <th class="text-end">Thành tiền</th>
+                                <th>Mã NCC</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {% for line in lines %}
+                              <tr>
+                                <td>{{ line.product.sku }} — {{ line.product.name }}</td>
+                                <td class="text-end">
+                                  {% if line.purchase_qty and product_has_unit_conversion(line.product) %}
+                                  {{ format_qty_display(line.purchase_qty) }} {{ product_purchase_unit(line.product) }}
+                                  <div class="small-muted">→ {{ format_qty_display(line.qty) }} {{ product_base_unit(line.product) }}</div>
+                                  {% else %}
+                                  {{ format_qty_display(line.qty) }} {{ product_base_unit(line.product) }}
+                                  {% endif %}
+                                </td>
+                                <td class="text-end">
+                                  <span class="money">{{ line.cost_price|money }}</span>
+                                  {% if line.product and product_has_unit_conversion(line.product) %}
+                                  <div class="small-muted">/ {{ product_purchase_unit(line.product) }}</div>
+                                  <div class="small-muted">≈ {{ base_unit_cost_from_purchase_cost(line.product, line.cost_price)|money }}/{{ product_base_unit(line.product) }}</div>
+                                  {% endif %}
+                                </td>
+                                <td class="text-end money">{{ line.line_amount|money }}</td>
+                                <td>{{ line.supplier_sku or '—' }}</td>
+                              </tr>
+                              {% endfor %}
+                            </tbody>
+                          </table>
+                          {% if intake.note %}
+                          <p class="small-muted mb-0 mt-2 px-2 pb-2">Ghi chú: {{ intake.note }}</p>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  {% endif %}
+                  {% else %}
+                  <tr><td colspan="9" class="text-center text-muted py-4">Chưa có phiếu nhập hàng</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="tab-pane fade" id="supplierPayments{{ s.id }}">
+            <div class="table-responsive">
+              <table class="table table-sm supplier-payments-table mb-0">
+                <thead>
+                  <tr>
+                    <th>Ngày</th>
+                    <th>Phiếu nhập</th>
+                    <th class="text-end">Số tiền</th>
+                    <th>Phương thức</th>
+                    <th>Ghi chú</th>
+                    <th class="text-center">Bill</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in payments %}
+                  <tr>
+                    <td class="text-nowrap">{{ p.payment_date.strftime('%d/%m/%Y') if p.payment_date else '—' }}</td>
+                    <td><code class="sku-code">{{ p.intake.intake_code if p.intake else ('#' ~ p.intake_id) }}</code></td>
+                    <td class="text-end money fw-semibold text-success">{{ p.amount|money }}</td>
+                    <td>{{ p.method or '—' }}</td>
+                    <td class="small-muted">{{ p.note or '—' }}</td>
+                    <td class="text-center">
+                      {% if p.receipt_path %}
+                      <a href="{{ url_for('view_supplier_payment_receipt', pid=p.id) }}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener">
+                        <i class="bi bi-receipt"></i>
+                      </a>
+                      {% else %}—{% endif %}
+                    </td>
+                  </tr>
+                  {% else %}
+                  <tr><td colspan="6" class="text-center text-muted py-4">Chưa có thanh toán</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade supplier-payment-modal" id="supplierPaymentModal{{ s.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="#" enctype="multipart/form-data" class="supplier-payment-form" data-supplier-id="{{ s.id }}">
+        <input type="hidden" name="_q" value="{{ list_ctx.q }}">
+        <input type="hidden" name="_page" value="{{ list_ctx.page }}">
+        <input type="hidden" name="_per_page" value="{{ list_ctx.per_page }}">
+        <input type="hidden" name="_sort" value="{{ list_ctx.sort }}">
+        <input type="hidden" name="_order" value="{{ list_ctx.order }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Ghi nhận thanh toán NCC</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-3">
+            Phiếu: <strong class="supplier-payment-intake-label">—</strong>
+            · Còn nợ: <strong class="text-danger supplier-payment-balance-label">—</strong>
+          </p>
+          <div class="mb-3">
+            <label class="form-label-custom">Số tiền thanh toán <span class="text-danger">*</span></label>
+            <input type="number" name="amount" class="form-control supplier-payment-amount" min="1" required placeholder="0">
+            <div class="form-text">Có thể thanh toán từng phần — không vượt quá số còn nợ.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Ngày thanh toán</label>
+            <input type="date" name="payment_date" class="form-control" value="{{ today_iso }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Phương thức</label>
+            <select name="method" class="form-select">
+              <option>Chuyển khoản</option>
+              <option>Tiền mặt</option>
+              <option>Thẻ</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Ghi chú</label>
+            <input type="text" name="note" class="form-control" placeholder="Tùy chọn">
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Ảnh bill / chứng từ thanh toán <span class="text-danger">*</span></label>
+            <input type="file" name="payment_receipt" class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required capture="environment">
+            <div class="form-text">Bắt buộc chụp hoặc upload bill — JPG, PNG, WEBP, tối đa 10MB.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Xác nhận thanh toán</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endmacro %}

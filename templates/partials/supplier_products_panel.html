@@ -1,0 +1,134 @@
+{% macro supplier_product_picker(selected_id='', selected_label='', placeholder='— Chọn sản phẩm —') %}
+<div class="supplier-product-picker">
+  <input type="hidden" name="sp_product_id" value="{{ selected_id }}" required>
+  <button type="button" class="supplier-product-picker-btn{% if not selected_id %} is-placeholder{% endif %}">
+    <span class="supplier-product-picker-label">{{ selected_label or placeholder }}</span>
+    <i class="bi bi-chevron-down supplier-product-picker-caret"></i>
+  </button>
+  <div class="supplier-product-picker-menu">
+    <div class="supplier-product-search-wrap">
+      <i class="bi bi-search"></i>
+      <input type="text" class="supplier-product-search" placeholder="Tìm tên, SKU..." autocomplete="off">
+    </div>
+    <div class="supplier-product-list"></div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro supplier_intake_qty_cell(product=none) %}
+<td class="supplier-qty-cell">
+  <div class="supplier-qty-fields">
+    <div class="supplier-qty-unit-mode-wrap d-none" data-supplier-qty-unit-mode-wrap>
+      <label class="supplier-qty-micro-label">Nhập theo</label>
+      <select name="sp_qty_unit_mode" class="form-select form-select-sm supplier-qty-unit-mode-select" data-supplier-qty-unit-mode>
+        <option value="purchase">Theo đơn vị nhập</option>
+        <option value="lot" data-supplier-qty-mode-lot>Theo lô</option>
+        <option value="base">Theo đơn vị tồn</option>
+      </select>
+    </div>
+    <input type="hidden" name="sp_qty_unit_mode" value="base" data-supplier-qty-unit-mode-hidden>
+    <div class="supplier-qty-amount-wrap">
+      <label class="supplier-qty-micro-label" data-supplier-qty-unit-label>Số lượng</label>
+      <input type="number" name="sp_qty" class="form-control form-control-sm supplier-intake-qty" min="0" step="any" value="0" placeholder="0">
+    </div>
+    <div class="supplier-qty-convert-hint small-muted" data-supplier-qty-convert-hint></div>
+    <div class="supplier-qty-conv-badge small-muted d-none" data-supplier-conv-badge></div>
+    <div class="supplier-qty-setup-hint small-muted d-none" data-supplier-qty-setup-hint>
+      SP chưa cấu hình quy đổi (hộp/cuộn). Vào <strong>Sản phẩm</strong> → <strong>Quản lý đơn vị</strong> hoặc import Excel cột <em>Đơn vị nhập</em> + <em>Hệ số quy đổi</em>.
+    </div>
+  </div>
+</td>
+{% endmacro %}
+
+{% macro supplier_products_panel(links=none) %}
+{% set links = links or [] %}
+<div class="supplier-products-panel" data-supplier-products-panel>
+  <div class="supplier-products-panel-head">
+    <div>
+      <h6 class="supplier-products-panel-title"><i class="bi bi-box-seam me-2"></i>Sản phẩm nhập từ NCC</h6>
+      <p class="supplier-products-panel-sub mb-0">
+        Chọn <strong>Nhập theo</strong> (hộp, cuộn, lô, mét, chiếc…) rồi nhập số lượng — hệ thống tự quy đổi tồn kho.
+      </p>
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm supplier-products-add-btn">
+      <i class="bi bi-plus-lg me-1"></i>Thêm dòng
+    </button>
+  </div>
+  <div class="row g-3 mb-3 supplier-intake-meta-row">
+    <div class="col-md-6">
+      <label class="form-label-custom">Số chứng từ / HĐ</label>
+      <input type="text" name="ref_code" class="form-control form-control-sm" placeholder="VD: HD-2024-001">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">Ghi chú phiếu nhập</label>
+      <input type="text" name="intake_note" class="form-control form-control-sm" placeholder="Tùy chọn">
+    </div>
+  </div>
+  <div class="supplier-products-table-wrap">
+    <table class="table table-sm supplier-products-table mb-0">
+      <thead>
+        <tr>
+          <th class="col-product">Sản phẩm</th>
+          <th class="col-qty">Số lượng nhập</th>
+          <th class="col-cost">Giá nhập</th>
+          <th class="col-note">Ghi chú</th>
+          <th class="col-actions text-end">Xóa</th>
+        </tr>
+      </thead>
+      <tbody class="supplier-products-body">
+        {% for link in links %}
+        <tr class="supplier-product-row">
+          <td class="supplier-product-picker-cell">
+            {{ supplier_product_picker(
+              selected_id=link.product_id,
+              selected_label=link.product.sku ~ ' — ' ~ link.product.name
+            ) }}
+          </td>
+          {{ supplier_intake_qty_cell(link.product) }}
+          <td class="supplier-cost-cell">
+            <div class="money-input-wrap">
+              <input type="text" name="sp_cost_price" class="form-control form-control-sm money-input" inputmode="numeric" autocomplete="off"
+                     value="{% if link.cost_price %}{{ link.cost_price|money_plain }}{% endif %}" placeholder="0">
+              <span class="money-input-suffix">đ</span>
+            </div>
+            <div class="form-text mb-0" data-supplier-cost-unit-hint>
+              / {% if link.product and product_has_unit_conversion(link.product) %}{{ product_purchase_unit(link.product) }} (giá vốn chia đều → {{ product_base_unit(link.product) }}){% else %}đơn vị nhập{% endif %}
+            </div>
+            <div class="supplier-cost-per-base-hint small-muted d-none" data-supplier-cost-per-base-hint></div>
+          </td>
+          <td>
+            <input type="text" name="sp_note" class="form-control form-control-sm" value="{{ link.note or '' }}" placeholder="Tùy chọn">
+          </td>
+          <td class="text-end col-actions">
+            <button type="button" class="btn btn-sm btn-outline-danger supplier-product-remove-btn" title="Xóa dòng" aria-label="Xóa dòng"><i class="bi bi-trash"></i></button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="supplier-products-empty small-muted mb-0{% if links %} d-none{% endif %}">Chưa có sản phẩm — bấm 「Thêm dòng」 để nhập hàng.</p>
+  <template class="supplier-product-row-template">
+    <tr class="supplier-product-row">
+      <td class="supplier-product-picker-cell">
+        {{ supplier_product_picker() }}
+      </td>
+      {{ supplier_intake_qty_cell() }}
+      <td class="supplier-cost-cell">
+        <div class="money-input-wrap">
+          <input type="text" name="sp_cost_price" class="form-control form-control-sm money-input" inputmode="numeric" autocomplete="off" value="" placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+        <div class="form-text mb-0" data-supplier-cost-unit-hint>/ đơn vị nhập</div>
+        <div class="supplier-cost-per-base-hint small-muted d-none" data-supplier-cost-per-base-hint></div>
+      </td>
+      <td>
+        <input type="text" name="sp_note" class="form-control form-control-sm" value="" placeholder="Tùy chọn">
+      </td>
+      <td class="text-end col-actions">
+        <button type="button" class="btn btn-sm btn-outline-danger supplier-product-remove-btn" title="Xóa dòng" aria-label="Xóa dòng"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>
+  </template>
+</div>
+{% endmacro %}

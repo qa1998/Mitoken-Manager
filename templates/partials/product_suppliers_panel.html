@@ -21,7 +21,7 @@
           <th class="col-cost">Giá nhập</th>
           <th class="col-sku">Mã SP (NCC)</th>
           <th>Ghi chú</th>
-          <th class="col-actions"></th>
+          <th class="col-actions text-end">Xóa</th>
         </tr>
       </thead>
       <tbody class="product-suppliers-body">
@@ -50,8 +50,8 @@
           <td>
             <input type="text" name="ps_note" class="form-control form-control-sm" value="{{ link.note or '' }}" placeholder="Tùy chọn">
           </td>
-          <td class="text-end">
-            <button type="button" class="btn btn-sm btn-outline-danger product-supplier-remove-btn" title="Xóa dòng"><i class="bi bi-trash"></i></button>
+          <td class="text-end col-actions">
+            <button type="button" class="btn btn-sm btn-outline-danger product-supplier-remove-btn" title="Xóa dòng" aria-label="Xóa dòng"><i class="bi bi-trash"></i></button>
           </td>
         </tr>
         {% endfor %}
@@ -84,8 +84,8 @@
       <td>
         <input type="text" name="ps_note" class="form-control form-control-sm" value="" placeholder="Tùy chọn">
       </td>
-      <td class="text-end">
-        <button type="button" class="btn btn-sm btn-outline-danger product-supplier-remove-btn" title="Xóa dòng"><i class="bi bi-trash"></i></button>
+      <td class="text-end col-actions">
+        <button type="button" class="btn btn-sm btn-outline-danger product-supplier-remove-btn" title="Xóa dòng" aria-label="Xóa dòng"><i class="bi bi-trash"></i></button>
       </td>
     </tr>
   </template>

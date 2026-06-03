@@ -76,8 +76,15 @@
                 </div>
               </div>
               {% else %}
-              <p class="text-muted mb-3">Hợp đồng nguyên tắc sẽ được tạo tự động khi xem hoặc tải.</p>
+              <div class="alert alert-light border mb-4">
+                <p class="mb-2">Chưa có hợp đồng cho khách hàng này.</p>
+                <p class="small-muted mb-3">Tạo hợp đồng tại màn <strong>Hợp đồng</strong> (menu trái), chọn đúng khách hàng.</p>
+                <a href="{{ url_for('contracts', open_add='contract', customer_id=c.id) }}" class="btn btn-primary btn-sm">
+                  <i class="bi bi-plus-lg me-1"></i> Tạo hợp đồng
+                </a>
+              </div>
               {% endif %}
+              {% if fc %}
               <div class="d-flex flex-wrap gap-2 mb-4">
                 <a href="{{ url_for('preview_customer_framework_contract', cid=c.id) }}" target="_blank" class="btn btn-primary">
                   <i class="bi bi-eye me-1"></i> Xem trước
@@ -86,7 +93,9 @@
                   <i class="bi bi-download me-1"></i> Tải Word
                 </a>
               </div>
+              {% endif %}
 
+              {% if fc %}
               <div class="customer-signed-scan-block">
                 <h6 class="customer-signed-scan-title"><i class="bi bi-file-earmark-check me-1"></i> Hợp đồng đã ký (bản scan)</h6>
                 {% if fc and fc.signed_scan_path %}
@@ -142,8 +151,8 @@
                   </div>
                 </form>
               </div>
-
-              <p class="small-muted mt-3 mb-0">Mẫu Word tạo tự động khi thêm/cập nhật khách hàng. Sau khi ký, tải bản scan lên để lưu trữ.</p>
+              <p class="small-muted mt-3 mb-0">Hợp đồng được tạo tại màn <strong>Hợp đồng</strong>. Sau khi ký, tải bản scan lên để lưu trữ.</p>
+              {% endif %}
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% macro contract_form_fields(companies, customers, quotes, active_company_id, today, year_end, contract=none) %}
+{% macro contract_form_fields(companies, customers, quotes, active_company_id, today, year_end, contract=none, preselect_customer_id=none) %}
 <div class="row g-3 align-items-end">
   {% if contract %}
   <input type="hidden" name="contract_id" value="{{ contract.id }}">
@@ -20,7 +20,7 @@
     <select name="customer_id" class="form-select" required>
       <option value="">Chọn khách hàng</option>
       {% for c in customers %}
-      <option value="{{ c.id }}" {% if contract and contract.customer_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+      <option value="{{ c.id }}" {% if (contract and contract.customer_id == c.id) or (not contract and preselect_customer_id == c.id) %}selected{% endif %}>{{ c.name }}</option>
       {% endfor %}
     </select>
   </div>
@@ -49,90 +49,109 @@
 {% endmacro %}
 {% block content %}
 
-<div class="panel-card mb-3">
-  <div class="section-header mb-0">
-    <div class="page-header-icon"><i class="bi bi-file-earmark-ruled"></i></div>
-    <div>
-      <h2 class="section-title">Hợp đồng</h2>
-      <p class="small-muted mb-0">Tạo và chỉnh sửa hợp đồng — chọn công ty (Bên B) trước khi lưu</p>
+<div class="contracts-page">
+  <div class="panel-card contracts-header-card mb-3">
+    <div class="section-header mb-0">
+      <div class="page-header-icon"><i class="bi bi-file-earmark-ruled"></i></div>
+      <div>
+        <h2 class="section-title">Hợp đồng</h2>
+        <p class="small-muted mb-0">Tạo và chỉnh sửa hợp đồng — chọn công ty (Bên B) trước khi lưu</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card contracts-list-card">
+    <div class="table-toolbar">
+      <h5 class="panel-card-title mb-0">Hợp đồng đã tạo</h5>
+      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addContractModal">
+        <i class="bi bi-plus-lg me-1"></i> Tạo mới
+      </button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Số HĐ</th>
+            <th>Khách hàng</th>
+            <th>Công ty (Bên B)</th>
+            <th>Loại</th>
+            <th>Ngày ký</th>
+            <th>Hết hạn</th>
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in contracts %}
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('preview_contract', cid=c.id) }}">
+            <td class="fw-semibold">{{ c.contract_code }}</td>
+            <td>{{ c.customer.name }}</td>
+            <td class="small-muted">{{ c.company.short_name or c.company.name if c.company else company.short_name or company.name }}</td>
+            <td>
+              {% if c.contract_type == 'framework' %}
+              <span class="badge bg-light text-dark border">Nguyên tắc</span>
+              {% else %}
+              <span class="badge bg-primary-subtle text-primary border">Hợp đồng</span>
+              {% endif %}
+            </td>
+            <td class="text-nowrap">{{ c.signed_date.strftime('%d/%m/%Y') if c.signed_date else '—' }}</td>
+            <td class="text-nowrap">{{ c.expired_date.strftime('%d/%m/%Y') if c.expired_date else '—' }}</td>
+            <td class="text-end text-nowrap">
+              <div class="dropdown">
+                <button class="btn btn-sm btn-light btn-action-dots" type="button" data-bs-toggle="dropdown">
+                  <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                  <li>
+                    <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editContract{{ c.id }}">
+                      <i class="bi bi-pencil me-2"></i>Chỉnh sửa
+                    </button>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <a class="dropdown-item" href="{{ url_for('preview_contract', cid=c.id) }}" target="_blank">
+                      <i class="bi bi-eye me-2"></i>Xem
+                    </a>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="{{ url_for('download_contract', cid=c.id) }}">
+                      <i class="bi bi-download me-2"></i>Tải Word
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted py-4">Chưa có hợp đồng</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
 
-<div class="panel-card mb-3">
-  <h5 class="panel-card-title mb-3">Tạo hợp đồng mới</h5>
-  <form method="post">
-    {{ contract_form_fields(companies, customers, quotes, active_company_id, today, year_end) }}
-    <div class="row g-3 mt-1">
-      <div class="col-md-3 ms-auto d-flex gap-2">
-        <button type="submit" formaction="{{ url_for('preview_contract_draft') }}" formtarget="_blank" class="btn btn-outline-secondary flex-grow-1">Xem trước</button>
-        <button type="submit" class="btn btn-primary flex-grow-1">Tạo HĐ</button>
-      </div>
+<div class="modal fade" id="addContractModal" tabindex="-1" aria-hidden="true"
+     data-app-open-on-load="{{ '1' if open_add_modal else '0' }}">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post">
+        <div class="modal-header">
+          <h5 class="modal-title">Tạo hợp đồng mới</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {% if preselect_customer_id %}
+          <p class="small-muted mb-3">Đang tạo hợp đồng cho khách hàng đã chọn từ Chi tiết khách hàng.</p>
+          {% endif %}
+          {{ contract_form_fields(companies, customers, quotes, active_company_id, today, year_end, preselect_customer_id=preselect_customer_id) }}
+        </div>
+        <div class="modal-footer flex-wrap gap-2">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" formaction="{{ url_for('preview_contract_draft') }}" formtarget="_blank" class="btn btn-outline-secondary">Xem trước</button>
+          <button type="submit" class="btn btn-primary">Tạo HĐ</button>
+        </div>
+      </form>
     </div>
-  </form>
-</div>
-
-<div class="panel-card">
-  <h5 class="panel-card-title mb-3">Hợp đồng đã tạo</h5>
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead>
-        <tr>
-          <th>Số HĐ</th>
-          <th>Khách hàng</th>
-          <th>Công ty (Bên B)</th>
-          <th>Loại</th>
-          <th>Ngày ký</th>
-          <th>Hết hạn</th>
-          <th class="text-end">Thao tác</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in contracts %}
-        <tr>
-          <td class="fw-semibold">{{ c.contract_code }}</td>
-          <td>{{ c.customer.name }}</td>
-          <td class="small-muted">{{ c.company.short_name or c.company.name if c.company else company.short_name or company.name }}</td>
-          <td>
-            {% if c.contract_type == 'framework' %}
-            <span class="badge bg-light text-dark border">Nguyên tắc</span>
-            {% else %}
-            <span class="badge bg-primary-subtle text-primary border">Hợp đồng</span>
-            {% endif %}
-          </td>
-          <td class="text-nowrap">{{ c.signed_date.strftime('%d/%m/%Y') if c.signed_date else '—' }}</td>
-          <td class="text-nowrap">{{ c.expired_date.strftime('%d/%m/%Y') if c.expired_date else '—' }}</td>
-          <td class="text-end text-nowrap">
-            <div class="dropdown">
-              <button class="btn btn-sm btn-light btn-action-dots" type="button" data-bs-toggle="dropdown">
-                <i class="bi bi-three-dots-vertical"></i>
-              </button>
-              <ul class="dropdown-menu dropdown-menu-end shadow-sm">
-                <li>
-                  <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editContract{{ c.id }}">
-                    <i class="bi bi-pencil me-2"></i>Chỉnh sửa
-                  </button>
-                </li>
-                <li><hr class="dropdown-divider"></li>
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('preview_contract', cid=c.id) }}" target="_blank">
-                    <i class="bi bi-eye me-2"></i>Xem
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="{{ url_for('download_contract', cid=c.id) }}">
-                    <i class="bi bi-download me-2"></i>Tải Word
-                  </a>
-                </li>
-              </ul>
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có hợp đồng</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
   </div>
 </div>
 

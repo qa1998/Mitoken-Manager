@@ -3,7 +3,7 @@
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_image_upload_panel.html' import product_image_upload_panel %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
-{% from 'partials/product_suppliers_panel.html' import product_suppliers_panel %}
+{% from 'partials/product_unit_setup.html' import product_unit_setup %}
 {% block title %}Sản phẩm — Business Web{% endblock %}
 {% block content %}
 
@@ -112,8 +112,9 @@
             <th>Tên sản phẩm</th>
             <th>Danh mục</th>
             <th>Thương hiệu</th>
+            <th>Đơn vị</th>
             <th>Giá bán</th>
-            <th>NCC / giá nhập</th>
+            <th>Giá nhập</th>
             <th>Bảo hành</th>
             <th>Trạng thái</th>
             <th class="text-end">Thao tác</th>
@@ -122,7 +123,7 @@
         <tbody>
           {% for p in products %}
           {% set sale_key, sale_label = product_list_status(p) %}
-          <tr class="product-table-row-click" data-product-detail="{{ url_for('product_detail', pid=p.id) }}">
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('product_detail', pid=p.id) }}">
             <td><span class="product-sku-cell">{{ p.sku }}</span></td>
             <td>{{ product_thumb(p) }}</td>
             <td>
@@ -138,21 +139,17 @@
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
             <td>{{ product_brand_name(p) or '—' }}</td>
-            <td class="money product-price-td">{{ p.retail_price|money }}</td>
-            <td class="product-supplier-list-cell">
-              {% set ps_links = product_suppliers.get(p.id, []) %}
-              {% set ps_summary = product_supplier_summary(ps_links) %}
-              {% if ps_summary.count %}
-              <button type="button" class="btn btn-link btn-sm p-0 text-start product-supplier-list-btn js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-                <span class="d-block fw-semibold">{{ ps_summary.count }} NCC</span>
-                <span class="d-block small-muted">Rẻ nhất: {{ ps_summary.min_cost|money }}</span>
-              </button>
+            <td class="product-unit-list-cell">
+              <div class="product-unit-list-base">{{ product_base_unit(p) }}</div>
+              {% if product_has_unit_conversion(p) %}
+              <div class="product-unit-list-sub">{{ product_purchase_unit(p) }}</div>
+              <div class="product-unit-list-conv">{{ product_unit_conversion_label(p) }}</div>
               {% else %}
-              <button type="button" class="btn btn-link btn-sm p-0 text-muted js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-                + Thêm NCC
-              </button>
+              <div class="product-unit-list-sub text-muted">—</div>
               {% endif %}
             </td>
+            <td class="money product-price-td">{{ p.retail_price|money }}</td>
+            <td class="money">{{ p.cost_price|money }}</td>
             <td>{{ p.warranty or '—' }}</td>
             <td>
               <span class="product-status-pill status-{{ sale_key }}">{{ sale_label }}</span>
@@ -167,11 +164,6 @@
                     <a class="dropdown-item" href="{{ url_for('product_detail', pid=p.id) }}">
                       <i class="bi bi-eye me-2"></i>Chi tiết
                     </a>
-                  </li>
-                  <li>
-                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-                      <i class="bi bi-truck me-2"></i>Nhà cung cấp &amp; so sánh giá
-                    </button>
                   </li>
                   <li>
                     <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
@@ -225,7 +217,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="10" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
+          <tr><td colspan="11" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -321,16 +313,12 @@
               <input type="text" name="variant" class="form-control" placeholder="VD: Adventure Combo">
             </div>
             <div class="col-md-4">
-              <label class="form-label-custom">Đơn vị</label>
-              <input type="text" name="unit" class="form-control" value="cái" placeholder="cái">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Tồn kho</label>
-              <input type="number" name="stock" class="form-control" value="0" min="0">
+              <label class="form-label-custom">Tồn kho <span class="text-muted fw-normal">(đơn vị tồn kho)</span></label>
+              <input type="number" name="stock" class="form-control" value="0" min="0" step="any">
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Tồn tối thiểu</label>
-              <input type="number" name="low_stock" class="form-control" value="0" min="0">
+              <input type="number" name="low_stock" class="form-control" value="0" min="0" step="any">
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Bảo hành</label>
@@ -343,7 +331,7 @@
               {{ product_price_setup() }}
             </div>
             <div class="col-12">
-              {{ product_suppliers_panel(suppliers=all_suppliers) }}
+              {{ product_unit_setup() }}
             </div>
           </div>
         </div>
@@ -383,8 +371,12 @@
           </div>
           <div class="import-format-hint small-muted mb-3">
             <strong>Bắt buộc:</strong> SKU, Tên sản phẩm.<br>
-            <strong>Danh mục:</strong> cột <em>Danh mục cha</em> + <em>Danh mục con</em>, hoặc cột <em>Danh mục</em> dạng <code>Cha &gt; Con</code>.<br>
-            Export và import dùng cùng định dạng cột.
+            <strong>Danh mục:</strong> cột <em>Danh mục cha</em> + <em>Danh mục con</em>, hoặc <em>Danh mục</em> dạng <code>Cha &gt; Con</code>.<br>
+            <strong>Quy đổi hộp/thùng → chiếc:</strong>
+            <em>Đơn vị tồn kho</em> = <code>Chiếc</code>,
+            <em>Đơn vị nhập</em> = <code>Hộp</code> (hoặc Thùng),
+            <em>Hệ số quy đổi</em> = <code>20</code> (1 hộp = 20 chiếc). Cùng cột dùng cho mét/cuộn (VD: Cuộn, 50).<br>
+            Export và import dùng cùng định dạng cột — tải lại file mẫu nếu file cũ thiếu cột.
           </div>
           <div class="mb-3">
             <label class="form-label-custom">Chọn file <span class="text-danger">*</span></label>

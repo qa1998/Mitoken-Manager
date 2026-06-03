@@ -825,19 +825,6 @@ function initProductMultiImages() {
   });
 }
 
-/** Bấm vào dòng (trừ menu, nút, link) mở trang chi tiết sản phẩm. */
-function initProductTableRowClick() {
-  var tbody = document.querySelector('table.product-table-v2 tbody');
-  if (!tbody) return;
-  tbody.addEventListener('click', function (e) {
-    var tr = e.target.closest('tr[data-product-detail]');
-    if (!tr) return;
-    if (e.target.closest('a, button, input, label, .dropdown, form')) return;
-    var url = tr.getAttribute('data-product-detail');
-    if (url) window.location.href = url;
-  });
-}
-
 function initProductDetailGallery() {
   var gallery = document.querySelector('.product-detail-gallery');
   if (!gallery) return;
@@ -861,68 +848,144 @@ function initProductDetailGallery() {
   });
 }
 
-function fillProductSupplierSelect(select, suppliers, keepValue) {
-  if (!select) return;
-  var current = keepValue != null ? String(keepValue) : select.value || '';
-  select.innerHTML = '<option value="">— Chọn NCC —</option>';
-  (suppliers || []).forEach(function (s) {
-    var opt = document.createElement('option');
-    opt.value = String(s.id);
-    opt.textContent = (s.code || '') + ' — ' + (s.name || '');
-    select.appendChild(opt);
-  });
-  if (current && Array.from(select.options).some(function (o) { return o.value === current; })) {
-    select.value = current;
-  }
-}
+function initProductUnitSetup(root) {
+  (root || document).querySelectorAll('[data-product-unit-setup]').forEach(function (panel) {
+    if (panel.dataset.unitSetupInit === '1') return;
+    panel.dataset.unitSetupInit = '1';
+    var toggle = panel.querySelector('[data-unit-conversion-toggle]');
+    var fieldsWrap = panel.querySelector('[data-unit-fields]');
+    var lotBlock = panel.querySelector('[data-unit-lot-block]');
+    var lotToggle = panel.querySelector('[data-lot-unit-toggle]');
+    var lotFields = panel.querySelector('[data-unit-lot-fields]');
+    var baseInput = panel.querySelector('[data-base-unit-input]');
+    var purchaseInput = panel.querySelector('[data-purchase-unit-input]');
+    var factorInput = panel.querySelector('[data-conversion-factor-input]');
+    var lotUnitInput = panel.querySelector('[data-lot-unit-input]');
+    var lotFactorInput = panel.querySelector('[data-lot-factor-input]');
+    var baseLabel = panel.querySelector('[data-base-unit-label]');
+    var lotUnitLabel = panel.querySelector('[data-lot-unit-label]');
+    var lotPurchaseLabel = panel.querySelector('[data-lot-purchase-label]');
+    var purchaseInlineLabel = panel.querySelector('[data-purchase-unit-label-inline]');
+    var hint = panel.querySelector('[data-unit-hint]');
+    var presetWireBtn = panel.querySelector('[data-unit-preset-wire]');
+    var presetBoxBtn = panel.querySelector('[data-unit-preset-box]');
 
-function refreshProductSupplierSelectOptions(panel) {
-  if (!panel) return Promise.resolve();
-  return fetch('/suppliers/options.json', {
-    headers: { 'X-Requested-With': 'XMLHttpRequest' },
-  })
-    .then(function (res) {
-      if (!res.ok) throw new Error('Failed to load suppliers');
-      return res.json();
-    })
-    .then(function (data) {
-      var rows = (data && data.suppliers) || [];
-      panel.querySelectorAll('select[name="ps_supplier_id"]').forEach(function (sel) {
-        fillProductSupplierSelect(sel, rows);
+    function syncUnitLabels() {
+      var base = (baseInput && baseInput.value.trim()) || 'cái';
+      var purchase = (purchaseInput && purchaseInput.value.trim()) || base;
+      var lotName = (lotUnitInput && lotUnitInput.value.trim()) || 'Lô';
+      if (baseLabel) baseLabel.textContent = base;
+      if (purchaseInlineLabel) purchaseInlineLabel.textContent = purchase;
+      if (lotUnitLabel) lotUnitLabel.textContent = lotName;
+      if (lotPurchaseLabel) lotPurchaseLabel.textContent = purchase;
+      if (hint) {
+        if (toggle && toggle.checked) {
+          var factor = parseFloat(factorInput && factorInput.value ? factorInput.value : '1') || 1;
+          var text = '1 ' + purchase + ' = ' + formatQtyPlain(factor) + ' ' + base;
+          if (lotToggle && lotToggle.checked) {
+            var lf = parseFloat(lotFactorInput && lotFactorInput.value ? lotFactorInput.value : '0') || 0;
+            if (lf > 1) {
+              text += ' · 1 ' + lotName + ' = ' + formatQtyPlain(lf) + ' ' + purchase + ' = ' + formatQtyPlain(lf * factor) + ' ' + base;
+            }
+          }
+          hint.textContent = text;
+        } else {
+          hint.textContent = 'Không quy đổi: đơn vị tồn kho và đơn vị nhập giống nhau.';
+        }
+      }
+    }
+
+    function setLotEnabled(enabled) {
+      if (lotFields) lotFields.classList.toggle('d-none', !enabled);
+      syncUnitLabels();
+    }
+
+    function setConversionEnabled(enabled) {
+      if (fieldsWrap) fieldsWrap.classList.toggle('is-single', !enabled);
+      if (lotBlock) lotBlock.classList.toggle('d-none', !enabled);
+      if (!enabled) {
+        if (lotToggle) lotToggle.checked = false;
+        setLotEnabled(false);
+        if (purchaseInput && baseInput) {
+          purchaseInput.value = baseInput.value.trim() || purchaseInput.value;
+        }
+      } else if (lotToggle) {
+        setLotEnabled(lotToggle.checked);
+      }
+      syncUnitLabels();
+    }
+
+    if (toggle) {
+      setConversionEnabled(toggle.checked);
+      toggle.addEventListener('change', function () {
+        setConversionEnabled(toggle.checked);
       });
-      var tpl = panel.querySelector('.product-supplier-row-template select[name="ps_supplier_id"]');
-      if (tpl) fillProductSupplierSelect(tpl, rows);
-      var empty = panel.querySelector('.product-suppliers-empty');
-      if (empty && !rows.length && !panel.querySelector('.product-suppliers-body .product-supplier-row')) {
-        empty.classList.remove('d-none');
-      }
-    })
-    .catch(function () { /* keep server-rendered options */ });
+    }
+    if (lotToggle) {
+      lotToggle.addEventListener('change', function () {
+        setLotEnabled(lotToggle.checked);
+      });
+    }
+    [baseInput, purchaseInput, factorInput, lotUnitInput, lotFactorInput].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener('input', syncUnitLabels);
+    });
+    if (baseInput && toggle && toggle.checked) {
+      baseInput.addEventListener('input', function () {
+        if (!purchaseInput.value.trim()) purchaseInput.value = baseInput.value;
+      });
+    }
+    function applyUnitPreset(cfg) {
+      if (toggle) toggle.checked = true;
+      if (baseInput) baseInput.value = cfg.base;
+      if (purchaseInput) purchaseInput.value = cfg.purchase;
+      if (factorInput) factorInput.value = String(cfg.factor);
+      if (lotToggle) lotToggle.checked = !!cfg.lot;
+      if (lotUnitInput && cfg.lot) lotUnitInput.value = cfg.lotName || 'Lô';
+      if (lotFactorInput) lotFactorInput.value = cfg.lot ? String(cfg.lotFactor || 10) : '0';
+      setConversionEnabled(true);
+      setLotEnabled(!!cfg.lot);
+    }
+
+    if (presetBoxBtn) {
+      presetBoxBtn.addEventListener('click', function () {
+        applyUnitPreset({
+          base: 'Chiếc',
+          purchase: 'Hộp',
+          factor: 20,
+          lot: false,
+        });
+      });
+    }
+    if (presetWireBtn) {
+      presetWireBtn.addEventListener('click', function () {
+        applyUnitPreset({
+          base: 'Mét',
+          purchase: 'Cuộn',
+          factor: 50,
+          lot: true,
+          lotName: 'Lô',
+          lotFactor: 10,
+        });
+      });
+    }
+  });
 }
 
-function bindProductSupplierRow(row) {
-  var select = row.querySelector('select[name="ps_supplier_id"]');
-  var radio = row.querySelector('input[name="ps_primary_supplier_id"]');
-  var removeBtn = row.querySelector('.product-supplier-remove-btn');
-  if (select && radio) {
-    radio.value = select.value || '';
-    select.addEventListener('change', function () {
-      radio.value = select.value || '';
-    });
-  }
-  if (removeBtn) {
-    removeBtn.addEventListener('click', function () {
-      var panel = row.closest('[data-product-suppliers-panel]');
-      var wasPrimary = radio && radio.checked;
-      row.remove();
-      if (panel) updateProductSuppliersEmpty(panel);
-      if (wasPrimary && panel) {
-        var firstRadio = panel.querySelector('.product-suppliers-body input[name="ps_primary_supplier_id"]');
-        if (firstRadio) firstRadio.checked = true;
-      }
-    });
-  }
+function formatQtyPlain(value) {
+  var v = parseFloat(value);
+  if (isNaN(v)) return '0';
+  if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
+  return String(v).replace('.', ',');
 }
+
+document.addEventListener('shown.bs.modal', function (e) {
+  e.target.querySelectorAll('[data-product-unit-setup]').forEach(function (panel) {
+    panel.dataset.unitSetupInit = '0';
+    initProductUnitSetup(e.target);
+  });
+  initProductSuppliersPanels(e.target);
+});
 
 function updateProductSuppliersEmpty(panel) {
   var tbody = panel.querySelector('.product-suppliers-body');
@@ -931,61 +994,119 @@ function updateProductSuppliersEmpty(panel) {
   empty.classList.toggle('d-none', tbody.children.length > 0);
 }
 
+function syncProductSupplierPrimaryRadios(panel) {
+  var rows = panel.querySelectorAll('.product-supplier-row');
+  if (!rows.length) return;
+  var checked = panel.querySelector('input[name="ps_primary_supplier_id"]:checked');
+  if (!checked) {
+    var firstRadio = rows[0].querySelector('input[name="ps_primary_supplier_id"]');
+    if (firstRadio) firstRadio.checked = true;
+  }
+  rows.forEach(function (row) {
+    var sel = row.querySelector('select[name="ps_supplier_id"]');
+    var radio = row.querySelector('input[name="ps_primary_supplier_id"]');
+    if (sel && radio) radio.value = sel.value || '';
+  });
+}
+
+function bindProductSupplierRow(row, panel) {
+  var sel = row.querySelector('select[name="ps_supplier_id"]');
+  var radio = row.querySelector('input[name="ps_primary_supplier_id"]');
+  if (sel && radio) {
+    sel.addEventListener('change', function () {
+      radio.value = sel.value || '';
+      if (sel.value && !panel.querySelector('input[name="ps_primary_supplier_id"]:checked')) {
+        radio.checked = true;
+      }
+    });
+  }
+  if (radio) {
+    radio.addEventListener('change', function () {
+      if (radio.checked) syncProductSupplierPrimaryRadios(panel);
+    });
+  }
+}
+
+function addProductSupplierRow(panel, options) {
+  if (!panel) return null;
+  options = options || {};
+  var tbody = panel.querySelector('.product-suppliers-body');
+  var tpl = panel.querySelector('.product-supplier-row-template');
+  if (!tbody || !tpl || !tpl.content) return null;
+  var row = tpl.content.firstElementChild.cloneNode(true);
+  tbody.appendChild(row);
+  row.dataset.productSupplierRowInit = '1';
+  bindProductSupplierRow(row, panel);
+  if (typeof window.initMoneyInputs === 'function') {
+    window.initMoneyInputs(row);
+  }
+  syncProductSupplierPrimaryRadios(panel);
+  updateProductSuppliersEmpty(panel);
+  if (options.focusSelect) {
+    var sel = row.querySelector('select[name="ps_supplier_id"]');
+    if (sel) sel.focus();
+  }
+  return row;
+}
+
+function ensureProductSuppliersStarterRow(panel) {
+  if (!panel) return;
+  var tbody = panel.querySelector('.product-suppliers-body');
+  if (tbody && !tbody.children.length) {
+    addProductSupplierRow(panel);
+  }
+}
+
 function initProductSuppliersPanel(panel) {
   if (!panel) return;
+  if (panel.dataset.productSuppliersPanelBound !== '1') {
+    panel.dataset.productSuppliersPanelBound = '1';
+    panel.addEventListener('click', function (e) {
+      var removeBtn = e.target.closest('.product-supplier-remove-btn');
+      if (!removeBtn) return;
+      var row = removeBtn.closest('.product-supplier-row');
+      if (!row || !panel.contains(row)) return;
+      var wasPrimary = row.querySelector('input[name="ps_primary_supplier_id"]:checked');
+      row.remove();
+      if (wasPrimary) syncProductSupplierPrimaryRadios(panel);
+      updateProductSuppliersEmpty(panel);
+    });
+  }
   panel.querySelectorAll('.product-supplier-row').forEach(function (row) {
-    if (row.dataset.supplierRowInit === '1') return;
-    row.dataset.supplierRowInit = '1';
-    bindProductSupplierRow(row);
+    if (row.dataset.productSupplierRowInit === '1') return;
+    row.dataset.productSupplierRowInit = '1';
+    bindProductSupplierRow(row, panel);
   });
+  syncProductSupplierPrimaryRadios(panel);
   updateProductSuppliersEmpty(panel);
   var addBtn = panel.querySelector('.product-suppliers-add-btn');
   if (addBtn && addBtn.dataset.bound !== '1') {
     addBtn.dataset.bound = '1';
     addBtn.addEventListener('click', function () {
-      var tbody = panel.querySelector('.product-suppliers-body');
-      var tpl = panel.querySelector('.product-supplier-row-template');
-      if (!tbody || !tpl || !tpl.content) return;
-      var row = tpl.content.firstElementChild.cloneNode(true);
-      tbody.appendChild(row);
-      row.dataset.supplierRowInit = '1';
-      bindProductSupplierRow(row);
-      if (typeof window.initMoneyInputs === 'function') {
-        window.initMoneyInputs(row);
-      }
-      var select = row.querySelector('select[name="ps_supplier_id"]');
-      if (select) select.focus();
-      var radios = panel.querySelectorAll('input[name="ps_primary_supplier_id"]');
-      if (radios.length === 1) radios[0].checked = true;
-      updateProductSuppliersEmpty(panel);
+      addProductSupplierRow(panel, { focusSelect: true });
     });
   }
 }
 
 function initProductSuppliersPanels(root) {
-  (root || document).querySelectorAll('[data-product-suppliers-panel]').forEach(initProductSuppliersPanel);
-}
-
-document.addEventListener('shown.bs.modal', function (e) {
-  e.target.querySelectorAll('[data-product-suppliers-panel]').forEach(function (panel) {
-    refreshProductSupplierSelectOptions(panel).finally(function () {
-      initProductSuppliersPanel(panel);
-    });
+  (root || document).querySelectorAll('[data-product-suppliers-panel]').forEach(function (panel) {
+    initProductSuppliersPanel(panel);
+    ensureProductSuppliersStarterRow(panel);
   });
-});
+}
 
 document.addEventListener('DOMContentLoaded', function () {
   initProductModalActions();
-  initProductTableRowClick();
   initProductMultiImages();
   initProductDetailGallery();
-  initProductSuppliersPanels();
+  initProductUnitSetup();
   initProductStockMethodSelects();
   initCategoryPickers();
   initTaxonomyPickers();
   initProductFilterTaxonomy();
   initProductImportPreview();
   initCategoryImportPreview();
+  initProductSuppliersPanels();
   openCategoryModalFromQuery();
   document.querySelectorAll('.category-delete-form').forEach(function (form) {
     form.addEventListener('submit', function (e) {

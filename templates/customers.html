@@ -14,176 +14,200 @@
 {% endmacro %}
 {% block content %}
 
-{% if from_quotes %}
-<div class="alert alert-info d-flex align-items-center gap-2 mb-3">
-  <i class="bi bi-info-circle"></i>
-  <span>Sau khi thêm khách hàng, hệ thống sẽ quay lại màn hình tạo báo giá và chọn đúng khách vừa tạo.</span>
-</div>
-{% endif %}
-
-<div class="panel-card">
-  <div class="section-header">
-    <div class="page-header-icon"><i class="bi bi-people-fill"></i></div>
-    <div>
-      <h2 class="section-title">Khách hàng</h2>
-      <p class="small-muted mb-0">Thêm mới và quản lý khách hàng doanh nghiệp & cá nhân</p>
-    </div>
+<div class="customer-entity-page">
+  {% if from_quotes %}
+  <div class="alert alert-info d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-info-circle"></i>
+    <span>Sau khi thêm khách hàng, hệ thống sẽ quay lại màn hình tạo báo giá và chọn đúng khách vừa tạo.</span>
   </div>
+  {% endif %}
 
-  <form method="post" id="add-customer-form" class="mt-4 customer-form">
-    {% if from_quotes %}<input type="hidden" name="_from" value="quotes">{% endif %}
-    {{ customer_form_fields(banks=banks, bank_value_set=bank_value_set) }}
-    <div class="form-footer-actions">
-      <button type="submit" class="btn btn-primary btn-add-customer">
-        <i class="bi bi-plus-lg me-1"></i> Thêm khách hàng
-      </button>
-      <button type="reset" class="btn btn-refresh-form">
-        <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
-      </button>
-    </div>
-  </form>
-</div>
-
-<div class="panel-card">
-  <div class="table-toolbar">
-    <div class="section-header section-header-sm mb-0">
-      <div class="page-header-icon page-header-icon-sm"><i class="bi bi-list-ul"></i></div>
-      <h5 class="section-title mb-0">Danh sách khách hàng</h5>
-    </div>
-    <form method="get" class="list-search-form">
-      <input type="hidden" name="per_page" value="{{ per_page }}">
-      <input type="hidden" name="sort" value="{{ sort }}">
-      <input type="hidden" name="order" value="{{ order }}">
-      <div class="input-icon-wrap list-search-wrap">
-        <i class="bi bi-search"></i>
-        <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Tìm theo tên, MST, SĐT, CCCD...">
+  <div class="panel-card customer-header-card mb-3">
+    <div class="section-header mb-0">
+      <div class="page-header-icon"><i class="bi bi-people-fill"></i></div>
+      <div>
+        <h2 class="section-title">Khách hàng</h2>
+        <p class="small-muted mb-0">Thêm mới và quản lý khách hàng doanh nghiệp & cá nhân</p>
       </div>
-    </form>
+    </div>
   </div>
 
-  <div class="customer-table-wrap">
-    <table class="table customer-table">
-      <thead>
-        <tr>
-          <th>Loại</th>
-          {{ sort_th('Tên', 'name') }}
-          <th>MST / CCCD</th>
-          {{ sort_th('SĐT', 'phone') }}
-          {{ sort_th('Địa chỉ', 'address') }}
-          <th class="text-end">Thao tác</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in customers %}
-        {% set fc = framework_contracts.get(c.id) %}
-        <tr>
-          <td>
-            <span class="customer-type-badge {% if customer_is_company(c) %}type-company{% else %}type-individual{% endif %}">
-              {{ customer_type_label(c) }}
-            </span>
-          </td>
-          <td class="col-name">{{ c.name }}</td>
-          <td>
-            {% if customer_is_company(c) %}
-            {{ c.tax_code or '—' }}
-            {% else %}
-            {{ c.id_card or '—' }}
-            {% endif %}
-          </td>
-          <td class="col-phone">
-            {% if c.phone %}
-            <a href="tel:{{ c.phone }}">{{ c.phone }}</a>
-            {% else %}—{% endif %}
-          </td>
-          <td>
-            {% if c.address %}
-            <div class="customer-address">
-              <i class="bi bi-geo-alt"></i>
-              <span>{{ c.address }}</span>
-            </div>
-            {% else %}—{% endif %}
-          </td>
-          <td class="text-end table-actions-cell">
-            <div class="dropdown">
-              <button class="btn btn-outline-secondary btn-action-dots" type="button" data-bs-toggle="dropdown">
-                <i class="bi bi-three-dots-vertical"></i>
-              </button>
-              <ul class="dropdown-menu dropdown-menu-end shadow-sm">
-                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}"><i class="bi bi-eye me-2"></i>Chi tiết & hợp đồng</button></li>
-                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}" data-hub-tab="contract"><i class="bi bi-file-earmark-ruled me-2"></i>Hợp đồng nguyên tắc</button></li>
-                {% if fc and fc.signed_scan_path %}
-                <li><a class="dropdown-item" href="{{ url_for('preview_customer_signed_contract', cid=c.id) }}" target="_blank"><i class="bi bi-file-earmark-check me-2"></i>Xem bản scan đã ký</a></li>
-                {% endif %}
-                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}" data-hub-tab="history"><i class="bi bi-clock-history me-2"></i>Lịch sử giao dịch</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editModal{{ c.id }}"><i class="bi bi-pencil me-2"></i>Cập nhật</button></li>
-                <li><hr class="dropdown-divider"></li>
-                <li>
-                  <form method="post" action="{{ url_for('delete_customer', cid=c.id) }}" class="m-0 customer-delete-form" data-name="{{ c.name }}">
-                    <input type="hidden" name="_q" value="{{ q }}">
-                    <input type="hidden" name="_page" value="{{ pagination.page }}">
-                    <input type="hidden" name="_per_page" value="{{ per_page }}">
-                    <input type="hidden" name="_sort" value="{{ sort }}">
-                    <input type="hidden" name="_order" value="{{ order }}">
-                    <button type="submit" class="dropdown-item text-danger">
-                      <i class="bi bi-trash me-2"></i>Xóa khách hàng
-                    </button>
-                  </form>
-                </li>
-              </ul>
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="7" class="text-center text-muted py-5">Không có khách hàng</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div class="panel-card customer-list-card">
+    <div class="table-toolbar">
+      <div class="section-header section-header-sm mb-0">
+        <div class="page-header-icon page-header-icon-sm"><i class="bi bi-list-ul"></i></div>
+        <h5 class="section-title mb-0">Danh sách khách hàng</h5>
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addCustomerModal">
+          <i class="bi bi-plus-lg me-1"></i> Thêm mới
+        </button>
+        <form method="get" class="list-search-form mb-0">
+          <input type="hidden" name="per_page" value="{{ per_page }}">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          <input type="hidden" name="order" value="{{ order }}">
+          <div class="input-icon-wrap list-search-wrap">
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Tìm theo tên, MST, SĐT, CCCD...">
+          </div>
+        </form>
+      </div>
+    </div>
 
-  <div class="table-footer">
-    {% if pagination.total > 0 %}
-    {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
-    {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
-    <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} kết quả</span>
-    {% else %}
-    <span>Chưa có dữ liệu</span>
-    {% endif %}
-    <div class="table-footer-right">
-      {% if pagination.pages > 1 %}
-      <nav>
-        <ul class="pagination pagination-custom mb-0">
-          <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('customers', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
-          </li>
-          {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-          {% if p %}
-          <li class="page-item {% if p == pagination.page %}active{% endif %}">
-            <a class="page-link" href="{{ url_for('customers', page=p, **list_args) }}">{{ p }}</a>
-          </li>
+    <div class="customer-table-wrap">
+      <table class="table customer-table">
+        <thead>
+          <tr>
+            <th>Loại</th>
+            {{ sort_th('Tên', 'name') }}
+            <th>MST / CCCD</th>
+            {{ sort_th('SĐT', 'phone') }}
+            {{ sort_th('Địa chỉ', 'address') }}
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in customers %}
+          {% set fc = framework_contracts.get(c.id) %}
+          <tr class="list-row-clickable" data-list-detail-modal="#customerHub{{ c.id }}">
+            <td>
+              <span class="customer-type-badge {% if customer_is_company(c) %}type-company{% else %}type-individual{% endif %}">
+                {{ customer_type_label(c) }}
+              </span>
+            </td>
+            <td class="col-name">{{ c.name }}</td>
+            <td>
+              {% if customer_is_company(c) %}
+              {{ c.tax_code or '—' }}
+              {% else %}
+              {{ c.id_card or '—' }}
+              {% endif %}
+            </td>
+            <td class="col-phone">
+              {% if c.phone %}
+              <a href="tel:{{ c.phone }}">{{ c.phone }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if c.address %}
+              <div class="customer-address">
+                <i class="bi bi-geo-alt"></i>
+                <span>{{ c.address }}</span>
+              </div>
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-end table-actions-cell">
+              <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-action-dots" type="button" data-bs-toggle="dropdown">
+                  <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                  <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}"><i class="bi bi-eye me-2"></i>Chi tiết & hợp đồng</button></li>
+                  <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}" data-hub-tab="contract"><i class="bi bi-file-earmark-ruled me-2"></i>Hợp đồng nguyên tắc</button></li>
+                  {% if fc and fc.signed_scan_path %}
+                  <li><a class="dropdown-item" href="{{ url_for('preview_customer_signed_contract', cid=c.id) }}" target="_blank"><i class="bi bi-file-earmark-check me-2"></i>Xem bản scan đã ký</a></li>
+                  {% endif %}
+                  <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#customerHub{{ c.id }}" data-hub-tab="history"><i class="bi bi-clock-history me-2"></i>Lịch sử giao dịch</button></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editModal{{ c.id }}"><i class="bi bi-pencil me-2"></i>Cập nhật</button></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form method="post" action="{{ url_for('delete_customer', cid=c.id) }}" class="m-0 customer-delete-form" data-name="{{ c.name }}">
+                      <input type="hidden" name="_q" value="{{ q }}">
+                      <input type="hidden" name="_page" value="{{ pagination.page }}">
+                      <input type="hidden" name="_per_page" value="{{ per_page }}">
+                      <input type="hidden" name="_sort" value="{{ sort }}">
+                      <input type="hidden" name="_order" value="{{ order }}">
+                      <button type="submit" class="dropdown-item text-danger">
+                        <i class="bi bi-trash me-2"></i>Xóa khách hàng
+                      </button>
+                    </form>
+                  </li>
+                </ul>
+              </div>
+            </td>
+          </tr>
           {% else %}
-          <li class="page-item disabled"><span class="page-link">…</span></li>
-          {% endif %}
+          <tr>
+            <td colspan="7" class="text-center text-muted py-5">Không có khách hàng</td>
+          </tr>
           {% endfor %}
-          <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('customers', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
-          </li>
-        </ul>
-      </nav>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-footer">
+      {% if pagination.total > 0 %}
+      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
+      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} kết quả</span>
+      {% else %}
+      <span>Chưa có dữ liệu</span>
       {% endif %}
-      <form method="get" class="per-page-select per-page-footer">
-        <input type="hidden" name="q" value="{{ q }}">
-        <input type="hidden" name="sort" value="{{ sort }}">
-        <input type="hidden" name="order" value="{{ order }}">
-        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-          <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
-          <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-          <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
-        </select>
-        <span>/ trang</span>
+      <div class="table-footer-right">
+        {% if pagination.pages > 1 %}
+        <nav>
+          <ul class="pagination pagination-custom mb-0">
+            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('customers', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
+            </li>
+            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+            {% if p %}
+            <li class="page-item {% if p == pagination.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('customers', page=p, **list_args) }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            {% endfor %}
+            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+              <a class="page-link" href="{{ url_for('customers', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
+            </li>
+          </ul>
+        </nav>
+        {% endif %}
+        <form method="get" class="per-page-select per-page-footer">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          <input type="hidden" name="order" value="{{ order }}">
+          <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+            <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+            <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+          </select>
+          <span>/ trang</span>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="addCustomerModal" tabindex="-1" aria-hidden="true"
+     data-app-open-on-load="{{ '1' if open_add_modal else '0' }}">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" id="add-customer-form" class="customer-form">
+        {% if from_quotes %}<input type="hidden" name="_from" value="quotes">{% endif %}
+        <div class="modal-header">
+          <h5 class="modal-title">Thêm khách hàng mới</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {% if from_quotes %}
+          <p class="small-muted mb-3">Sau khi lưu sẽ quay lại màn hình tạo báo giá.</p>
+          {% endif %}
+          {{ customer_form_fields(banks=banks, bank_value_set=bank_value_set) }}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="reset" class="btn btn-refresh-form">
+            <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
+          </button>
+          <button type="submit" class="btn btn-primary btn-add-customer">
+            <i class="bi bi-plus-lg me-1"></i> Thêm khách hàng
+          </button>
+        </div>
       </form>
     </div>
   </div>

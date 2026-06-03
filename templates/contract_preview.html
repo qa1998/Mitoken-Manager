@@ -1,31 +1,27 @@
 {% extends 'base.html' %}
+{% from 'partials/preview_page_back.html' import preview_page_back %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-  <div>
+<div class="preview-page-head no-print mb-3">
+  {{ preview_page_back(back_url or url_for('contracts'), 'Quay lại') }}
+  <div class="preview-page-head-body">
     <h3 class="mb-0">Xem trước hợp đồng</h3>
     <p class="small-muted mb-0">{{ contract_code }} — {{ customer_name }}{% if is_draft %} <span class="badge badge-soft">Bản nháp</span>{% endif %}</p>
+    <p class="small-muted mb-0 mt-1">Hiển thị PDF từ file Word gốc — giữ nguyên font, lề, bảng biểu và phân trang.</p>
   </div>
-  <div class="d-flex flex-wrap gap-2">
-    {% if download_url %}
-    <a class="btn btn-outline-primary" href="{{ download_url }}"><i class="bi bi-download me-1"></i> Tải Word</a>
+  <div class="preview-page-head-actions d-flex flex-wrap gap-2">
+    {% if docx_download_url %}
+    <a class="btn btn-outline-primary" href="{{ docx_download_url }}"><i class="bi bi-file-earmark-word me-1"></i> Tải Word</a>
     {% endif %}
-    <button type="button" class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer me-1"></i> In</button>
-    <a class="btn btn-secondary" href="{{ back_url or url_for('customers') }}">Quay lại</a>
+    {% if pdf_download_url %}
+    <a class="btn btn-outline-primary" href="{{ pdf_download_url }}"><i class="bi bi-file-earmark-pdf me-1"></i> Tải PDF</a>
+    {% endif %}
+    <button type="button" class="btn btn-outline-secondary" id="btn-print-contract-pdf"><i class="bi bi-printer me-1"></i> In</button>
   </div>
 </div>
 
-{% include 'partials/docx_preview_viewer.html' %}
+{% include 'partials/pdf_preview_viewer.html' %}
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='vendor/jszip.min.js') }}"></script>
-<script src="{{ url_for('static', filename='vendor/docx-preview.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/docx_preview.js') }}"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  var wrap = document.querySelector('[data-docx-preview]');
-  if (!wrap) return;
-  renderDocxPreview({ wrap: wrap, docUrl: wrap.getAttribute('data-doc-url') });
-});
-</script>
+<script src="{{ url_for('static', filename='js/pdf_preview.js') }}"></script>
 {% endblock %}

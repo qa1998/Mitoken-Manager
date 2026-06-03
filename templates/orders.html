@@ -142,7 +142,7 @@
           {% for o in orders %}
           {% set st = effective_order_status(o) %}
           {% set pay = order_payment_status(o) %}
-          <tr>
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('order_preview', oid=o.id) }}">
             <td><a href="{{ url_for('order_preview', oid=o.id) }}" class="order-code-link">{{ o.order_code }}</a></td>
             <td class="order-customer-name">{{ o.customer.name }}</td>
             <td class="text-nowrap">{{ o.created_at.strftime('%d/%m/%Y') if o.created_at else '—' }}</td>

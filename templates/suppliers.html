@@ -1,4 +1,6 @@
 {% extends 'base.html' %}
+{% from 'partials/supplier_products_panel.html' import supplier_products_panel %}
+{% from 'partials/supplier_detail_modal.html' import supplier_detail_modal %}
 {% macro sort_th(label, field) %}
 <th>
   <a href="{{ sort_url(field) }}" class="th-sort {% if sort == field %}active {{ order }}{% endif %}">
@@ -65,73 +67,67 @@
 {% endmacro %}
 {% block content %}
 
-<div class="row g-3 mb-3">
-  <div class="col-md-4">
-    <div class="stock-stat-card">
-      <div class="stock-stat-icon stat-blue"><i class="bi bi-truck"></i></div>
+<div class="supplier-page">
+  <div class="panel-card supplier-header-card mb-3">
+    <div class="section-header mb-0">
+      <div class="page-header-icon"><i class="bi bi-truck"></i></div>
       <div>
-        <div class="stock-stat-label">Tổng NCC</div>
-        <div class="stock-stat-value">{{ stats.total|int }}</div>
+        <h2 class="section-title">Nhà cung cấp</h2>
+        <p class="small-muted mb-0">Quản lý thông tin nhà cung cấp và liên kết phiếu nhập kho</p>
       </div>
     </div>
   </div>
-  <div class="col-md-4">
-    <div class="stock-stat-card">
-      <div class="stock-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
-      <div>
-        <div class="stock-stat-label">Đang hoạt động</div>
-        <div class="stock-stat-value text-success">{{ stats.active|int }}</div>
+
+  <div class="row g-3 mb-3 supplier-stat-row">
+    <div class="col-md-4">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-blue"><i class="bi bi-truck"></i></div>
+        <div>
+          <div class="stock-stat-label">Tổng NCC</div>
+          <div class="stock-stat-value">{{ stats.total|int }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
+        <div>
+          <div class="stock-stat-label">Đang hoạt động</div>
+          <div class="stock-stat-value text-success">{{ stats.active|int }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-orange"><i class="bi bi-box-arrow-in-down"></i></div>
+        <div>
+          <div class="stock-stat-label">Có phiếu nhập</div>
+          <div class="stock-stat-value">{{ stats.with_movements|int }}</div>
+        </div>
       </div>
     </div>
   </div>
-  <div class="col-md-4">
-    <div class="stock-stat-card">
-      <div class="stock-stat-icon stat-orange"><i class="bi bi-box-arrow-in-down"></i></div>
-      <div>
-        <div class="stock-stat-label">Có phiếu nhập</div>
-        <div class="stock-stat-value">{{ stats.with_movements|int }}</div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="panel-card">
-  <div class="section-header">
-    <div class="page-header-icon"><i class="bi bi-truck"></i></div>
-    <div>
-      <h2 class="section-title">Nhà cung cấp</h2>
-      <p class="small-muted mb-0">Quản lý thông tin nhà cung cấp và liên kết phiếu nhập kho</p>
-    </div>
-  </div>
-
-  <form method="post" class="mt-4 supplier-form">
-    {{ supplier_form_fields() }}
-    <div class="form-footer-actions">
-      <button type="submit" class="btn btn-primary">
-        <i class="bi bi-plus-lg me-1"></i> Thêm nhà cung cấp
-      </button>
-      <button type="reset" class="btn btn-refresh-form">
-        <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
-      </button>
-    </div>
-  </form>
-</div>
-
-<div class="panel-card">
+  <div class="panel-card supplier-list-card">
   <div class="table-toolbar">
     <div class="section-header section-header-sm mb-0">
       <div class="page-header-icon page-header-icon-sm"><i class="bi bi-list-ul"></i></div>
       <h5 class="section-title mb-0">Danh sách nhà cung cấp</h5>
     </div>
-    <form method="get" class="list-search-form">
-      <input type="hidden" name="per_page" value="{{ per_page }}">
-      <input type="hidden" name="sort" value="{{ sort }}">
-      <input type="hidden" name="order" value="{{ order }}">
-      <div class="input-icon-wrap list-search-wrap">
-        <i class="bi bi-search"></i>
-        <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Tìm theo tên, mã, MST, SĐT...">
-      </div>
-    </form>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addSupplierModal">
+        <i class="bi bi-plus-lg me-1"></i> Thêm mới
+      </button>
+      <form method="get" class="list-search-form mb-0">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="order" value="{{ order }}">
+        <div class="input-icon-wrap list-search-wrap">
+          <i class="bi bi-search"></i>
+          <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Tìm theo tên, mã, MST, SĐT...">
+        </div>
+      </form>
+    </div>
   </div>
 
   <div class="customer-table-wrap">
@@ -143,6 +139,7 @@
           <th>MST</th>
           <th>Người liên hệ</th>
           {{ sort_th('SĐT', 'phone') }}
+          <th>Sản phẩm</th>
           <th>Phiếu nhập</th>
           <th>Trạng thái</th>
           <th class="text-end">Thao tác</th>
@@ -151,7 +148,7 @@
       <tbody>
         {% for s in suppliers %}
         {% set inbound = inbound_stats.get(s.id, {}) %}
-        <tr>
+        <tr class="list-row-clickable" data-list-detail-modal="#detailModal{{ s.id }}">
           <td><code class="sku-code">{{ s.code }}</code></td>
           <td class="col-name">{{ s.name }}</td>
           <td>{{ s.tax_code or '—' }}</td>
@@ -160,6 +157,14 @@
             {% if s.phone %}
             <a href="tel:{{ s.phone }}">{{ s.phone }}</a>
             {% else %}—{% endif %}
+          </td>
+          <td>
+            {% set pc = product_counts.get(s.id, 0) %}
+            {% if pc %}
+            <span class="badge bg-light text-dark border">{{ pc }} SP</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
           </td>
           <td>
             {% if inbound.count %}
@@ -182,6 +187,7 @@
               </button>
               <ul class="dropdown-menu dropdown-menu-end shadow-sm">
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#detailModal{{ s.id }}"><i class="bi bi-eye me-2"></i>Chi tiết</button></li>
+                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#productsModal{{ s.id }}"><i class="bi bi-box-seam me-2"></i>Nhập sản phẩm</button></li>
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editModal{{ s.id }}"><i class="bi bi-pencil me-2"></i>Cập nhật</button></li>
                 <li><hr class="dropdown-divider"></li>
                 <li>
@@ -202,7 +208,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="8" class="text-center text-muted py-5">Chưa có nhà cung cấp</td>
+          <td colspan="9" class="text-center text-muted py-5">Chưa có nhà cung cấp</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -254,6 +260,33 @@
     </div>
   </div>
 </div>
+</div>
+
+<div class="modal fade" id="addSupplierModal" tabindex="-1" aria-hidden="true"
+     data-app-open-on-load="{{ '1' if open_add_modal else '0' }}">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" class="supplier-form">
+        <div class="modal-header">
+          <h5 class="modal-title">Thêm nhà cung cấp mới</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {{ supplier_form_fields() }}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="reset" class="btn btn-refresh-form">
+            <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
+          </button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i> Thêm nhà cung cấp
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 {% for s in suppliers %}
 <div class="modal fade" id="editModal{{ s.id }}" tabindex="-1" aria-hidden="true">
@@ -281,46 +314,44 @@
   </div>
 </div>
 
-<div class="modal fade" id="detailModal{{ s.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+<div class="modal fade supplier-intake-modal" id="productsModal{{ s.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">{{ s.name }}</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <dl class="row mb-0 supplier-detail-dl">
-          <dt class="col-sm-4">Mã NCC</dt><dd class="col-sm-8"><code>{{ s.code }}</code></dd>
-          <dt class="col-sm-4">MST</dt><dd class="col-sm-8">{{ s.tax_code or '—' }}</dd>
-          <dt class="col-sm-4">Người liên hệ</dt><dd class="col-sm-8">{{ s.contact_person or '—' }}</dd>
-          <dt class="col-sm-4">SĐT</dt><dd class="col-sm-8">{{ s.phone or '—' }}</dd>
-          <dt class="col-sm-4">Email</dt><dd class="col-sm-8">{{ s.email or '—' }}</dd>
-          <dt class="col-sm-4">Địa chỉ</dt><dd class="col-sm-8">{{ s.address or '—' }}</dd>
-          <dt class="col-sm-4">Ngân hàng</dt><dd class="col-sm-8">{{ s.bank_name or '—' }}{% if s.bank_account %} · {{ s.bank_account }}{% endif %}</dd>
-          <dt class="col-sm-4">Ghi chú</dt><dd class="col-sm-8">{{ s.note or '—' }}</dd>
-          <dt class="col-sm-4">Trạng thái</dt>
-          <dd class="col-sm-8">{% if s.is_active %}<span class="text-success">Đang hoạt động</span>{% else %}<span class="text-muted">Ngừng hoạt động</span>{% endif %}</dd>
-        </dl>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
-      </div>
+      <form method="post" action="{{ url_for('supplier_products_intake', sid=s.id) }}" class="supplier-intake-form">
+        <input type="hidden" name="_q" value="{{ q }}">
+        <input type="hidden" name="_page" value="{{ pagination.page }}">
+        <input type="hidden" name="_per_page" value="{{ per_page }}">
+        <input type="hidden" name="_sort" value="{{ sort }}">
+        <input type="hidden" name="_order" value="{{ order }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Nhập sản phẩm — {{ s.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {{ supplier_products_panel(links=supplier_products.get(s.id, [])) }}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-box-arrow-in-down me-1"></i>Nhập kho
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
+
+{{ supplier_detail_modal(s, intake_board, intake_line_map, {
+  'q': q,
+  'page': pagination.page,
+  'per_page': per_page,
+  'sort': sort,
+  'order': order,
+}) }}
 {% endfor %}
 
 {% endblock %}
 
-{% block scripts %}
-<script>
-document.querySelectorAll('.supplier-delete-form').forEach(function(form) {
-  form.addEventListener('submit', function(e) {
-    var name = form.getAttribute('data-name') || 'nhà cung cấp này';
-    if (!confirm('Xóa nhà cung cấp "' + name + '"? Hành động không thể hoàn tác.')) {
-      e.preventDefault();
-    }
-  });
-});
-</script>
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/suppliers.js') }}"></script>
 {% endblock %}

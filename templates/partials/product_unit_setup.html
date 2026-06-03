@@ -1,0 +1,87 @@
+{% macro product_unit_setup(p=None) %}
+{% set enabled = p.unit_conversion_enabled if p else false %}
+{% set base_u = product_base_unit(p) if p else 'cái' %}
+{% set purchase_u = product_purchase_unit(p) if p else base_u %}
+{% set factor = p.conversion_factor if p and p.conversion_factor else 1 %}
+{% set lot_enabled = product_has_lot_unit(p) if p else false %}
+{% set lot_u = product_lot_unit(p) if p else 'Lô' %}
+{% set lot_f = p.lot_factor if p and p.lot_factor else 10 %}
+<div class="product-unit-setup" data-product-unit-setup>
+  <div class="product-unit-setup-head">
+    <div>
+      <h6 class="product-unit-setup-title"><i class="bi bi-rulers me-2"></i>Quản lý đơn vị</h6>
+      <p class="product-unit-setup-sub mb-0">
+        <strong>Tồn kho</strong> luôn theo đơn vị nhỏ nhất (chiếc, mét…).
+        <strong>Nhập NCC</strong> có thể theo hộp/thùng/cuộn — tự quy đổi (VD: Cờ lê 17 — 1 hộp = 20 chiếc).
+      </p>
+    </div>
+    <div class="product-unit-preset-group">
+      <button type="button" class="btn btn-outline-secondary btn-sm product-unit-preset-btn" data-unit-preset-box title="Chiếc + Hộp, VD 1 hộp = 20 chiếc">
+        <i class="bi bi-box-seam me-1"></i>Mẫu hộp/chiếc
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm product-unit-preset-btn" data-unit-preset-wire title="Mét + Cuộn + Lô">
+        <i class="bi bi-lightning me-1"></i>Mẫu dây/ống
+      </button>
+    </div>
+  </div>
+  <div class="form-check product-unit-toggle mb-3">
+    <input class="form-check-input" type="checkbox" name="unit_conversion_enabled" value="1" id="unitConversionEnabled{% if p %}{{ p.id }}{% else %}New{% endif %}"
+           {% if enabled %}checked{% endif %} data-unit-conversion-toggle>
+    <label class="form-check-label" for="unitConversionEnabled{% if p %}{{ p.id }}{% else %}New{% endif %}">
+      Có quy đổi đơn vị
+    </label>
+  </div>
+  <div class="product-unit-fields{% if not enabled %} is-single{% endif %}" data-unit-fields>
+    <div class="row g-3">
+      <div class="col-md-4" data-unit-base-field>
+        <label class="form-label-custom">Đơn vị tồn kho</label>
+        <input type="text" name="base_unit" class="form-control" value="{{ base_u }}" placeholder="VD: Chiếc, Mét" data-base-unit-input>
+      </div>
+      <div class="col-md-4" data-unit-purchase-field>
+        <label class="form-label-custom">Đơn vị nhập / đóng gói</label>
+        <input type="text" name="purchase_unit" class="form-control" value="{{ purchase_u }}" placeholder="VD: Hộp, Cuộn" data-purchase-unit-input>
+      </div>
+      <div class="col-md-4" data-unit-factor-field>
+        <label class="form-label-custom">1 <span data-purchase-unit-label-inline">{{ purchase_u }}</span> =</label>
+        <div class="product-unit-factor-row">
+          <input type="number" name="conversion_factor" class="form-control" min="0.0001" step="any"
+                 value="{{ factor }}" data-conversion-factor-input>
+          <span class="product-unit-factor-suffix" data-base-unit-label>{{ base_u }}</span>
+        </div>
+      </div>
+    </div>
+    <div class="product-unit-lot-block mt-3{% if not enabled %} d-none{% endif %}" data-unit-lot-block>
+      <div class="form-check product-unit-lot-toggle mb-2">
+        <input class="form-check-input" type="checkbox" name="lot_unit_enabled" value="1"
+               id="lotUnitEnabled{% if p %}{{ p.id }}{% else %}New{% endif %}"
+               {% if lot_enabled %}checked{% endif %} data-lot-unit-toggle>
+        <label class="form-check-label" for="lotUnitEnabled{% if p %}{{ p.id }}{% else %}New{% endif %}">
+          Nhập thêm theo <strong>lô</strong> (nhanh khi mua cả kiện)
+        </label>
+      </div>
+      <div class="row g-3 product-unit-lot-fields{% if not lot_enabled %} d-none{% endif %}" data-unit-lot-fields>
+        <div class="col-md-4">
+          <label class="form-label-custom">Tên đơn vị lô</label>
+          <input type="text" name="lot_unit" class="form-control" value="{{ lot_u }}" placeholder="VD: Lô" data-lot-unit-input>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label-custom">1 lô gồm</label>
+          <div class="product-unit-lot-factor-row">
+            <span class="product-unit-lot-prefix">1 <span data-lot-unit-label>{{ lot_u }}</span> =</span>
+            <input type="number" name="lot_factor" class="form-control" min="2" step="any"
+                   value="{{ lot_f }}" data-lot-factor-input>
+            <span class="product-unit-lot-suffix" data-lot-purchase-label>{{ purchase_u }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="product-unit-hint small-muted mb-0 mt-2" data-unit-hint>
+      {% if enabled %}
+      {{ product_unit_conversion_label(p) if p else '1 đơn vị nhập = hệ số × đơn vị tồn kho' }}
+      {% else %}
+      Không quy đổi: đơn vị tồn kho và đơn vị nhập giống nhau.
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endmacro %}

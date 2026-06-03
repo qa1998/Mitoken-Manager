@@ -61,8 +61,8 @@
             <tbody>
               {% for row in debt_rows %}
               {% set c = row.customer %}
-              <tr class="debt-customer-row {% if selected and selected.id == c.id %}active{% endif %}"
-                  onclick="window.location='{{ url_for('debt', customer_id=c.id, q=search_q, per_page=per_page) }}'">
+              <tr class="debt-customer-row list-row-clickable {% if selected and selected.id == c.id %}active{% endif %}"
+                  data-list-detail-href="{{ url_for('debt', customer_id=c.id, q=search_q, per_page=per_page) }}">
                 <td>
                   <div class="debt-customer-cell">
                     <div class="debt-avatar">{{ customer_initials(c.name) }}</div>

@@ -69,7 +69,183 @@ document.addEventListener('hide.bs.dropdown', function (e) {
   if (cell) cell.classList.remove('is-dropdown-open');
 });
 
+function relocateAppModalsToBody(root) {
+  (root || document).querySelectorAll('.modal.fade').forEach(function (modal) {
+    if (modal.dataset.appModalRelocated === '1') return;
+    if (modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+    modal.dataset.appModalRelocated = '1';
+  });
+}
+
+function initAppFullscreenModals(root) {
+  relocateAppModalsToBody(root);
+  (root || document).querySelectorAll('.modal.fade').forEach(function (modal) {
+    if (modal.dataset.appFsModal === '0') return;
+    if (modal.classList.contains('modal-compact')) return;
+    modal.classList.add('app-fs-modal');
+    if (modal.dataset.bsBackdrop === undefined) {
+      modal.setAttribute('data-bs-backdrop', 'false');
+    }
+  });
+}
+
+function ensureAppPushBackButton(modal) {
+  if (!modal || !modal.classList.contains('app-fs-modal')) return;
+  modal.querySelectorAll('.modal-header, .quote-create-header').forEach(function (header) {
+    if (header.querySelector('.app-push-back-btn')) return;
+    header.classList.add('app-push-modal-header');
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'btn app-push-back-btn';
+    backBtn.setAttribute('aria-label', 'Quay lại');
+    backBtn.innerHTML = '<i class="bi bi-arrow-left" aria-hidden="true"></i><span>Quay lại</span>';
+    backBtn.addEventListener('click', function () {
+      var inst = window.bootstrap && bootstrap.Modal.getInstance(modal);
+      if (inst) inst.hide();
+    });
+    header.insertBefore(backBtn, header.firstChild);
+  });
+}
+
+function syncAppFullscreenBackdrop() {
+  var open = document.querySelector('.modal.app-fs-modal.show');
+  document.body.classList.toggle('app-fs-modal-open', !!open);
+  document.querySelectorAll('.modal-backdrop.show').forEach(function (backdrop) {
+    backdrop.classList.toggle('app-fs-backdrop', !!open);
+  });
+}
+
+function isAppModalNode(el) {
+  return el && el.classList && el.classList.contains('modal');
+}
+
+function getAppPageStack(content) {
+  var stack = content.querySelector(':scope > .app-page-stack');
+  if (stack) return stack;
+  var pageRoot = content.querySelector(
+    ':scope > .quote-page, :scope > .order-page, :scope > .stock-page, :scope > .debt-page, :scope > .product-page-v2, :scope > .product-page, :scope > .supplier-page, :scope > .customer-entity-page, :scope > .contracts-page'
+  );
+  if (pageRoot) return pageRoot;
+  if (content.querySelector(':scope > .company-page, :scope > [data-app-no-fill-list]')) return null;
+  var nodes = Array.from(content.children).filter(function (el) {
+    return !isAppModalNode(el);
+  });
+  if (nodes.length < 2) return null;
+  stack = document.createElement('div');
+  stack.className = 'app-page-stack';
+  nodes.forEach(function (el) {
+    stack.appendChild(el);
+  });
+  content.appendChild(stack);
+  return stack;
+}
+
+function findAppListFillCard(stack) {
+  var named = stack.querySelector(
+    '.debt-list-card, .quote-table-card, .order-table-card, .stock-table-card, .product-list-card-v2, .supplier-list-card, .customer-list-card, .contracts-list-card'
+  );
+  if (named) return named;
+  var found = null;
+  stack.querySelectorAll('.panel-card').forEach(function (card) {
+    if (card.closest('.modal')) return;
+    if (card.querySelector('table, .customer-table-wrap')) found = card;
+  });
+  return found;
+}
+
+function markAppListScrollTargets(card) {
+  card.querySelectorAll('.customer-table-wrap, .table-responsive, .order-list-table-wrap, .quote-list-table-wrap').forEach(function (el) {
+    el.classList.add('app-list-scroll');
+  });
+}
+
+function initAppPageFillLists() {
+  var content = document.querySelector('main.content-fill');
+  if (!content || content.dataset.appFillInit === '1') return;
+  content.dataset.appFillInit = '1';
+  var stack = getAppPageStack(content);
+  if (!stack) return;
+  var listCard = findAppListFillCard(stack);
+  if (!listCard) return;
+  listCard.classList.add('app-list-fill');
+  markAppListScrollTargets(listCard);
+}
+
+function isListRowInteractiveTarget(el) {
+  return el && el.closest('a, button, input, select, textarea, label, .dropdown, form');
+}
+
+function activateListDetailModalTab(modalEl, tabKey) {
+  if (!modalEl || !tabKey || !window.bootstrap || !bootstrap.Tab) return;
+  var id = modalEl.id || '';
+  var target = tabKey === 'contract' ? '#hubContract' + id.replace('customerHub', '')
+    : tabKey === 'history' ? '#hubHistory' + id.replace('customerHub', '')
+    : '#hubInfo' + id.replace('customerHub', '');
+  var btn = modalEl.querySelector('[data-bs-target="' + target + '"]');
+  if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+}
+
+function openListRowDetail(tr) {
+  if (!tr) return;
+  var modalSel = tr.getAttribute('data-list-detail-modal');
+  var href = tr.getAttribute('data-list-detail-href');
+  var hubTab = tr.getAttribute('data-list-detail-hub-tab');
+
+  if (modalSel) {
+    var modalEl = document.querySelector(modalSel);
+    if (!modalEl || !window.bootstrap || !bootstrap.Modal) return;
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    if (hubTab) {
+      modalEl.addEventListener('shown.bs.modal', function onShown() {
+        activateListDetailModalTab(modalEl, hubTab);
+      }, { once: true });
+    }
+    modal.show();
+    return;
+  }
+  if (href) window.location.href = href;
+}
+
+function initListRowDetailClick(root) {
+  (root || document).querySelectorAll('table tbody').forEach(function (tbody) {
+    if (!tbody.querySelector('tr.list-row-clickable[data-list-detail-modal], tr.list-row-clickable[data-list-detail-href]')) {
+      return;
+    }
+    if (tbody.dataset.listRowClickInit === '1') return;
+    tbody.dataset.listRowClickInit = '1';
+    tbody.addEventListener('click', function (e) {
+      var tr = e.target.closest('tr.list-row-clickable');
+      if (!tr || !tbody.contains(tr)) return;
+      if (isListRowInteractiveTarget(e.target)) return;
+      openListRowDetail(tr);
+    });
+  });
+}
+
+function openAppModalsOnLoad() {
+  if (!window.bootstrap || !bootstrap.Modal) return;
+  var opened = false;
+  document.querySelectorAll('.modal[data-app-open-on-load="1"]').forEach(function (modal) {
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+    opened = true;
+  });
+  if (opened) {
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('open_add')) {
+      params.delete('open_add');
+      var qs = params.toString();
+      history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
+  initAppPageFillLists();
+  initAppFullscreenModals();
+  openAppModalsOnLoad();
+  initListRowDetailClick();
   initMoneyInputs();
   initTableDropdowns();
   document.querySelectorAll('.list-search-wrap input').forEach(function (el) {
@@ -83,7 +259,24 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
+document.addEventListener('show.bs.modal', function (e) {
+  var modal = e.target;
+  if (!modal.classList.contains('app-fs-modal')) return;
+  ensureAppPushBackButton(modal);
+});
+
 document.addEventListener('shown.bs.modal', function (e) {
-  initMoneyInputs(e.target);
-  initTableDropdowns(e.target);
+  var modal = e.target;
+  initAppFullscreenModals(modal);
+  if (modal.classList.contains('app-fs-modal')) {
+    ensureAppPushBackButton(modal);
+  }
+  syncAppFullscreenBackdrop();
+  initMoneyInputs(modal);
+  initTableDropdowns(modal);
+  initListRowDetailClick(modal);
+});
+
+document.addEventListener('hidden.bs.modal', function () {
+  syncAppFullscreenBackdrop();
 });

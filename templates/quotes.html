@@ -159,7 +159,7 @@
         <tbody>
           {% for q in quotes %}
           {% set st = quote_display_status(q) %}
-          <tr>
+          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('quote_preview', qid=q.id) }}">
             <td><a href="{{ url_for('quote_preview', qid=q.id) }}" class="quote-code-link">{{ q.quote_code }}</a></td>
             <td class="quote-customer-name">{{ quote_customer_label(q) }}</td>
             <td class="text-nowrap">{{ q.created_at.strftime('%d/%m/%Y') }}</td>

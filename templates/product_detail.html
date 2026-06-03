@@ -20,19 +20,11 @@
       <button type="button" class="btn btn-light btn-product-detail-edit js-open-product-modal" data-modal-target="#productEdit{{ p.id }}">
         <i class="bi bi-pencil me-2"></i>Chỉnh sửa
       </button>
-      <button type="button" class="btn btn-light js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-        <i class="bi bi-truck me-2"></i>NCC
-      </button>
       <div class="dropdown">
         <button class="btn btn-light btn-product-detail-more" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed","placement":"bottom-end"}' aria-expanded="false">
           <i class="bi bi-three-dots"></i>
         </button>
         <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
-          <li>
-            <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-              <i class="bi bi-truck me-2"></i>Nhà cung cấp &amp; so sánh giá
-            </button>
-          </li>
           <li>
             <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
               <i class="bi bi-tag me-2"></i>Sửa giá
@@ -149,10 +141,6 @@
             <span class="product-detail-info-label">Biến thể</span>
             <span class="product-detail-info-value">{{ p.variant or '—' }}</span>
           </div>
-          <div class="product-detail-info-item">
-            <span class="product-detail-info-label">Đơn vị</span>
-            <span class="product-detail-info-value">{{ p.unit or 'cái' }}</span>
-          </div>
           <div class="product-detail-info-item product-detail-info-item-wide">
             <span class="product-detail-info-label">Bảo hành</span>
             <span class="product-detail-info-value">
@@ -187,78 +175,39 @@
           </div>
         </section>
 
-        {% set ps_links = product_suppliers.get(p.id, []) %}
-        {% set ps_summary = product_supplier_summary(ps_links) %}
-        <section class="product-detail-block" id="product-suppliers-compare">
-          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-            <h3 class="product-detail-block-title mb-0">So sánh giá nhà cung cấp</h3>
-            <button type="button" class="btn btn-outline-primary btn-sm js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-              <i class="bi bi-truck me-1"></i>{% if ps_links %}Sửa NCC{% else %}Thêm NCC{% endif %}
-            </button>
-          </div>
-          {% if ps_links %}
-          {% set min_cost = ps_links|map(attribute='cost_price')|min %}
-          <div class="table-responsive product-suppliers-compare-wrap">
-            <table class="table table-sm product-suppliers-compare-table mb-0">
-              <thead>
-                <tr>
-                  <th>Nhà cung cấp</th>
-                  <th>Mã SP (NCC)</th>
-                  <th class="text-end">Giá nhập</th>
-                  <th>Ghi chú</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for link in ps_links %}
-                <tr class="{% if link.cost_price and link.cost_price == min_cost and min_cost > 0 %}is-cheapest{% endif %}{% if link.is_primary %} is-primary{% endif %}">
-                  <td>
-                    <span class="fw-semibold">{{ link.supplier.name }}</span>
-                    <span class="small-muted d-block">{{ link.supplier.code }}{% if link.supplier.phone %} · {{ link.supplier.phone }}{% endif %}</span>
-                    {% if link.is_primary %}<span class="badge bg-primary-subtle text-primary product-supplier-primary-badge">Ưu tiên</span>{% endif %}
-                    {% if link.cost_price and link.cost_price == min_cost and min_cost > 0 %}<span class="badge bg-success-subtle text-success product-supplier-cheapest-badge">Rẻ nhất</span>{% endif %}
-                  </td>
-                  <td>{{ link.supplier_sku or '—' }}</td>
-                  <td class="text-end money fw-semibold">{{ link.cost_price|money }}</td>
-                  <td class="small-muted">{{ link.note or '—' }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% else %}
-          <div class="product-suppliers-compare-empty">
-            <p class="mb-2">Chưa gắn nhà cung cấp cho sản phẩm này.</p>
-            <p class="small-muted mb-3">Thêm 2 NCC trở lên để so sánh giá nhập ngay tại đây.</p>
-            <button type="button" class="btn btn-primary btn-sm js-open-product-modal" data-modal-target="#productSuppliers{{ p.id }}">
-              <i class="bi bi-plus-lg me-1"></i>Thêm nhà cung cấp
-            </button>
-          </div>
-          {% endif %}
-        </section>
-
-        <section class="product-detail-block">
+        <section class="product-detail-block product-detail-stock-block">
           <h3 class="product-detail-block-title">Tồn kho</h3>
-          <div class="row g-3 product-detail-metric-row">
-            <div class="col-md-4">
-              <div class="product-detail-metric">
-                <span class="product-detail-metric-label">Tồn kho hiện tại</span>
-                <span class="product-detail-metric-value stock-current{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">{{ p.stock }}</span>
-                <span class="product-detail-metric-unit">{{ p.unit or 'cái' }}</span>
-              </div>
+          <div class="product-detail-stock-hero">
+            <div class="product-detail-stock-main">
+              <span class="product-detail-stock-label">Tồn kho hiện tại</span>
+              <span class="product-detail-stock-value stock-current{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">
+                {{ format_qty_display(p.stock) }} <span class="product-detail-stock-unit">{{ product_base_unit(p) }}</span>
+              </span>
             </div>
-            <div class="col-md-4">
-              <div class="product-detail-metric">
-                <span class="product-detail-metric-label">Tồn tối thiểu</span>
-                <span class="product-detail-metric-value">{{ p.low_stock }}</span>
-                <span class="product-detail-metric-unit">{{ p.unit or 'cái' }}</span>
-              </div>
+            {% set equiv = product_stock_equivalent_text(p) %}
+            {% if equiv %}
+            <div class="product-detail-stock-equiv">
+              <span class="product-detail-stock-label">Tương đương</span>
+              <span class="product-detail-stock-equiv-value">{{ equiv }}</span>
             </div>
-            <div class="col-md-4">
-              <div class="product-detail-metric">
-                <span class="product-detail-metric-label">Tồn khả dụng</span>
-                <span class="product-detail-metric-value">{{ p.stock }}</span>
-                <span class="product-detail-metric-unit">{{ p.unit or 'cái' }}</span>
-              </div>
+            {% endif %}
+          </div>
+          <div class="product-detail-unit-grid">
+            <div class="product-detail-unit-card">
+              <span class="product-detail-unit-card-label">Đơn vị tồn kho</span>
+              <span class="product-detail-unit-card-value">{{ product_base_unit(p) }}</span>
+            </div>
+            <div class="product-detail-unit-card">
+              <span class="product-detail-unit-card-label">Đơn vị nhập</span>
+              <span class="product-detail-unit-card-value">{{ product_purchase_unit(p) }}</span>
+            </div>
+            <div class="product-detail-unit-card product-detail-unit-card-wide">
+              <span class="product-detail-unit-card-label">Quy đổi</span>
+              <span class="product-detail-unit-card-value">{{ product_unit_conversion_label(p) }}</span>
+            </div>
+            <div class="product-detail-unit-card">
+              <span class="product-detail-unit-card-label">Tồn tối thiểu</span>
+              <span class="product-detail-unit-card-value">{{ format_qty_display(p.low_stock) }} {{ product_base_unit(p) }}</span>
             </div>
           </div>
         </section>

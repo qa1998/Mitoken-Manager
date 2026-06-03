@@ -4,6 +4,8 @@ import time
 import uuid
 import csv
 import io
+import subprocess
+import shutil
 from datetime import datetime, date, timedelta
 from types import SimpleNamespace
 from decimal import Decimal
@@ -35,8 +37,11 @@ CONTRACT_DRAFT_SESSION_KEY = 'contract_draft_doc_path'
 ACTIVE_COMPANY_SESSION_KEY = 'active_company_id'
 TEMP_DOC_DIR = BASE_DIR / 'instance' / 'temp_docs'
 DOCX_MIMETYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+PDF_MIMETYPE = 'application/pdf'
+DOCX_TO_PDF_TIMEOUT = 180
 ORDER_HANDOVER_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'orders' / 'handover'
 PAYMENT_RECEIPT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'payments' / 'receipts'
+SUPPLIER_PAYMENT_RECEIPT_UPLOAD_DIR = BASE_DIR / 'static' / 'uploads' / 'suppliers' / 'receipts'
 ALLOWED_ORDER_HANDOVER_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 ALLOWED_CONTRACT_SCAN_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.pdf'}
@@ -95,17 +100,31 @@ class Product(db.Model):
     model = db.Column(db.String(120), default='')
     variant = db.Column(db.String(120), default='')
     unit = db.Column(db.String(40), default='cái')
+    base_unit = db.Column(db.String(40), default='')
+    purchase_unit = db.Column(db.String(40), default='')
+    unit_conversion_enabled = db.Column(db.Boolean, default=False)
+    conversion_factor = db.Column(db.Float, default=1.0)
+    lot_unit = db.Column(db.String(40), default='')
+    lot_factor = db.Column(db.Float, default=0)
+    stock_qty = db.Column('stock', db.Float, default=0)
     warranty = db.Column(db.String(120), default='')
     cost_price = db.Column(db.Integer, default=0)
     retail_price = db.Column(db.Integer, default=0)
     dealer_price = db.Column(db.Integer, default=0)
     project_price = db.Column(db.Integer, default=0)
-    stock = db.Column(db.Integer, default=0)
-    low_stock = db.Column(db.Integer, default=5)
+    low_stock = db.Column(db.Float, default=5)
     image_path = db.Column(db.String(255), default='')
     image_paths = db.Column(db.Text, default='')
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def stock(self):
+        return float(self.stock_qty or 0)
+
+    @stock.setter
+    def stock(self, value):
+        self.stock_qty = float(value or 0)
 
 class PriceHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -252,7 +271,8 @@ class StockMovement(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
     supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=True)
     movement_type = db.Column(db.String(20), nullable=False)  # IN/OUT
-    qty = db.Column(db.Integer, default=0)
+    qty = db.Column(db.Float, default=0)
+    purchase_qty = db.Column(db.Float, default=0)
     ref_code = db.Column(db.String(80), default='')
     method = db.Column(db.String(80), default='Nhập tay')
     warehouse = db.Column(db.String(80), default='Kho chính')
@@ -260,6 +280,58 @@ class StockMovement(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     product = db.relationship('Product')
     supplier = db.relationship('Supplier')
+
+class SupplierIntake(db.Model):
+    __tablename__ = 'supplier_intake'
+    id = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=False)
+    intake_code = db.Column(db.String(80), default='')
+    ref_code = db.Column(db.String(80), default='')
+    note = db.Column(db.String(255), default='')
+    total_amount = db.Column(db.Integer, default=0)
+    paid_amount = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    supplier = db.relationship('Supplier', backref=db.backref('intakes', lazy='dynamic'))
+    lines = db.relationship(
+        'SupplierIntakeLine',
+        backref='intake',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+    )
+    payments = db.relationship('SupplierPayment', backref='intake', lazy='dynamic')
+
+class SupplierIntakeLine(db.Model):
+    __tablename__ = 'supplier_intake_line'
+    id = db.Column(db.Integer, primary_key=True)
+    intake_id = db.Column(db.Integer, db.ForeignKey('supplier_intake.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    qty = db.Column(db.Float, default=0)
+    purchase_qty = db.Column(db.Float, default=0)
+    cost_price = db.Column(db.Integer, default=0)
+    line_amount = db.Column(db.Integer, default=0)
+    supplier_sku = db.Column(db.String(120), default='')
+    note = db.Column(db.String(255), default='')
+    stock_movement_id = db.Column(db.Integer, db.ForeignKey('stock_movement.id'), nullable=True)
+    product = db.relationship('Product')
+    stock_movement = db.relationship('StockMovement')
+
+    @property
+    def qty_base(self):
+        return float(self.qty or 0)
+
+class SupplierPayment(db.Model):
+    __tablename__ = 'supplier_payment'
+    id = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=False)
+    intake_id = db.Column(db.Integer, db.ForeignKey('supplier_intake.id'), nullable=False)
+    amount = db.Column(db.Integer, default=0)
+    method = db.Column(db.String(80), default='Chuyển khoản')
+    note = db.Column(db.String(255), default='')
+    payment_date = db.Column(db.Date, default=date.today)
+    receipt_path = db.Column(db.String(512), default='')
+    receipt_uploaded_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    supplier = db.relationship('Supplier', backref=db.backref('supplier_payments', lazy='dynamic'))
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -298,8 +370,10 @@ SALES_ENDPOINTS = frozenset({
     'preview_customer_framework_contract',
     'preview_customer_signed_contract',
     'download_customer_framework_contract',
+    'download_customer_framework_contract_pdf',
     'download_customer_signed_contract',
     'view_customer_framework_contract',
+    'view_customer_framework_contract_pdf',
     'view_customer_signed_contract',
     'quotes',
     'quote_create_preview',
@@ -313,17 +387,25 @@ SALES_ENDPOINTS = frozenset({
     'preview_quote_sale_contract',
     'preview_quote_handover',
     'view_quote_sale_contract',
+    'view_quote_sale_contract_pdf',
     'view_quote_handover',
+    'view_quote_handover_pdf',
     'download_quote_sale_contract',
+    'download_quote_sale_contract_pdf',
     'download_quote_handover',
+    'download_quote_handover_pdf',
     'update_quote_sale_contract',
     'update_quote_handover',
     'preview_quote_sale_contract_draft',
     'preview_quote_handover_draft',
     'view_quote_sale_contract_draft',
+    'view_quote_sale_contract_draft_pdf',
     'download_quote_sale_contract_draft',
+    'download_quote_sale_contract_draft_pdf',
     'view_quote_handover_draft',
+    'view_quote_handover_draft_pdf',
     'download_quote_handover_draft',
+    'download_quote_handover_draft_pdf',
     'orders',
     'orders_export',
     'order_preview',
@@ -342,9 +424,13 @@ SALES_ENDPOINTS = frozenset({
     'preview_contract',
     'preview_contract_draft',
     'view_contract',
+    'view_contract_pdf',
     'view_contract_draft',
+    'view_contract_draft_pdf',
     'download_contract',
+    'download_contract_pdf',
     'download_contract_draft',
+    'download_contract_draft_pdf',
     'update_contract',
 })
 
@@ -354,7 +440,6 @@ WAREHOUSE_ENDPOINTS = frozenset({
     'product_detail',
     'update_product',
     'update_price',
-    'update_product_suppliers',
     'toggle_product_active',
     'delete_product',
     'adjust_product_stock',
@@ -378,6 +463,10 @@ WAREHOUSE_ENDPOINTS = frozenset({
     'update_supplier',
     'delete_supplier',
     'supplier_options_json',
+    'supplier_products_intake',
+    'supplier_intake_payment',
+    'view_supplier_payment_receipt',
+    'product_options_json',
     'supplier_debt',
 })
 
@@ -826,7 +915,227 @@ def ensure_product_columns():
             conn.execute(text('ALTER TABLE product ADD COLUMN image_paths TEXT DEFAULT ""'))
         if 'is_active' not in cols:
             conn.execute(text('ALTER TABLE product ADD COLUMN is_active BOOLEAN DEFAULT 1'))
+        if 'base_unit' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN base_unit VARCHAR(40) DEFAULT ''"))
+        if 'purchase_unit' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN purchase_unit VARCHAR(40) DEFAULT ''"))
+        if 'unit_conversion_enabled' not in cols:
+            conn.execute(text('ALTER TABLE product ADD COLUMN unit_conversion_enabled BOOLEAN DEFAULT 0'))
+        if 'conversion_factor' not in cols:
+            conn.execute(text('ALTER TABLE product ADD COLUMN conversion_factor REAL DEFAULT 1'))
+        if 'lot_unit' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN lot_unit VARCHAR(40) DEFAULT ''"))
+        if 'lot_factor' not in cols:
+            conn.execute(text('ALTER TABLE product ADD COLUMN lot_factor REAL DEFAULT 0'))
     _migrate_product_image_paths()
+    _migrate_product_unit_fields()
+
+def _migrate_product_unit_fields():
+    rows = Product.query.filter(
+        or_(Product.base_unit == '', Product.base_unit.is_(None)),
+    ).all()
+    if not rows:
+        return
+    for p in rows:
+        base = (p.unit or 'cái').strip() or 'cái'
+        p.base_unit = base
+        if not p.purchase_unit:
+            p.purchase_unit = base
+        if not p.conversion_factor or p.conversion_factor <= 0:
+            p.conversion_factor = 1.0
+    db.session.commit()
+
+def product_base_unit(product):
+    if not product:
+        return 'cái'
+    base = (getattr(product, 'base_unit', None) or '').strip()
+    if base:
+        return base
+    return (product.unit or 'cái').strip() or 'cái'
+
+def product_purchase_unit(product):
+    if not product:
+        return 'cái'
+    if not product_has_unit_conversion(product):
+        return product_base_unit(product)
+    purchase = (getattr(product, 'purchase_unit', None) or '').strip()
+    return purchase or product_base_unit(product)
+
+def product_conversion_factor(product):
+    if not product or not getattr(product, 'unit_conversion_enabled', False):
+        return 1.0
+    try:
+        factor = float(getattr(product, 'conversion_factor', None) or 1.0)
+    except (TypeError, ValueError):
+        factor = 1.0
+    return factor if factor > 0 else 1.0
+
+def product_has_unit_conversion(product):
+    if not product:
+        return False
+    if not getattr(product, 'unit_conversion_enabled', False):
+        return False
+    try:
+        factor = float(getattr(product, 'conversion_factor', None) or 1.0)
+    except (TypeError, ValueError):
+        factor = 1.0
+    if factor <= 0:
+        return False
+    return factor != 1.0 or product_purchase_unit(product) != product_base_unit(product)
+
+def purchase_qty_to_base(product, purchase_qty):
+    return float(purchase_qty or 0) * product_conversion_factor(product)
+
+def base_unit_cost_from_purchase_cost(product, purchase_unit_cost):
+    """Giá vốn theo đơn vị tồn = giá theo đơn vị nhập ÷ hệ số quy đổi."""
+    cost = int(purchase_unit_cost or 0)
+    if cost <= 0 or not product_has_unit_conversion(product):
+        return cost
+    factor = product_conversion_factor(product)
+    if factor <= 0:
+        return cost
+    return int(round(cost / factor))
+
+def purchase_unit_cost_from_base_cost(product, base_unit_cost):
+    """Giá theo đơn vị nhập (cuộn/hộp) từ giá vốn đơn vị tồn."""
+    cost = int(base_unit_cost or 0)
+    if cost <= 0 or not product_has_unit_conversion(product):
+        return cost
+    return int(round(cost * product_conversion_factor(product)))
+
+def product_lot_unit(product):
+    if not product:
+        return ''
+    return (getattr(product, 'lot_unit', None) or '').strip()
+
+def product_lot_factor(product):
+    if not product:
+        return 0.0
+    try:
+        factor = float(getattr(product, 'lot_factor', None) or 0)
+    except (TypeError, ValueError):
+        factor = 0.0
+    return factor if factor > 0 else 0.0
+
+def product_has_lot_unit(product):
+    return (
+        product_has_unit_conversion(product)
+        and bool(product_lot_unit(product))
+        and product_lot_factor(product) > 1
+    )
+
+def lot_qty_to_purchase(product, lot_qty):
+    return float(lot_qty or 0) * product_lot_factor(product)
+
+def lot_qty_to_base(product, lot_qty):
+    return purchase_qty_to_base(product, lot_qty_to_purchase(product, lot_qty))
+
+def resolve_supplier_intake_quantities(product, entered_qty, unit_mode=''):
+    """Trả về (purchase_qty, base_qty, mode) — nhập theo lô / đơn vị nhập / đơn vị tồn."""
+    entered = float(entered_qty or 0)
+    if not product_has_unit_conversion(product):
+        return entered, entered, 'base'
+    mode = (unit_mode or '').strip().lower()
+    if product_has_lot_unit(product) and mode != 'base' and mode != 'purchase':
+        mode = 'lot'
+    if mode not in ('base', 'purchase', 'lot'):
+        mode = 'purchase'
+    factor = product_conversion_factor(product)
+    if mode == 'base':
+        base_qty = entered
+        purchase_qty = (entered / factor) if factor > 0 else entered
+        return purchase_qty, base_qty, 'base'
+    if mode == 'lot' and product_has_lot_unit(product):
+        purchase_qty = lot_qty_to_purchase(product, entered)
+        base_qty = purchase_qty_to_base(product, purchase_qty)
+        return purchase_qty, base_qty, 'lot'
+    purchase_qty = entered
+    base_qty = purchase_qty_to_base(product, purchase_qty)
+    return purchase_qty, base_qty, 'purchase'
+
+def product_stock_equivalent_text(product):
+    if not product_has_unit_conversion(product):
+        return None
+    stock = float(product.stock or 0)
+    factor = product_conversion_factor(product)
+    if factor <= 0:
+        return None
+    full_units = int(stock // factor)
+    remainder = stock - (full_units * factor)
+    pu = product_purchase_unit(product)
+    bu = product_base_unit(product)
+    parts = []
+    if full_units > 0:
+        parts.append(f'{format_qty_display(full_units)} {pu}')
+    if remainder > 1e-6:
+        parts.append(f'{format_qty_display(remainder)} {bu}')
+    if not parts:
+        return f'0 {bu}'
+    return ' + '.join(parts)
+
+def product_unit_conversion_label(product):
+    if not product_has_unit_conversion(product):
+        return '—'
+    pu = product_purchase_unit(product)
+    bu = product_base_unit(product)
+    factor = product_conversion_factor(product)
+    label = f'1 {pu} = {format_qty_display(factor)} {bu}'
+    if product_has_lot_unit(product):
+        lu = product_lot_unit(product)
+        lf = product_lot_factor(product)
+        label += f' · 1 {lu} = {format_qty_display(lf)} {pu} = {format_qty_display(lf * factor)} {bu}'
+    return label
+
+def format_qty_display(value, max_decimals=3):
+    v = float(value or 0)
+    if abs(v - round(v)) < 1e-6:
+        return f'{int(round(v)):,}'.replace(',', '.')
+    text = f'{v:.{max_decimals}f}'.rstrip('0').rstrip('.')
+    if '.' in text:
+        whole, frac = text.split('.', 1)
+        whole_fmt = f'{int(whole):,}'.replace(',', '.') if whole else '0'
+        return f'{whole_fmt},{frac}'
+    return f'{int(v):,}'.replace(',', '.')
+
+app.jinja_env.globals['product_base_unit'] = product_base_unit
+app.jinja_env.globals['product_purchase_unit'] = product_purchase_unit
+app.jinja_env.globals['product_has_unit_conversion'] = product_has_unit_conversion
+app.jinja_env.globals['product_has_lot_unit'] = product_has_lot_unit
+app.jinja_env.globals['product_lot_unit'] = product_lot_unit
+app.jinja_env.globals['product_unit_conversion_label'] = product_unit_conversion_label
+app.jinja_env.globals['product_stock_equivalent_text'] = product_stock_equivalent_text
+app.jinja_env.globals['format_qty_display'] = format_qty_display
+app.jinja_env.globals['base_unit_cost_from_purchase_cost'] = base_unit_cost_from_purchase_cost
+app.jinja_env.globals['purchase_unit_cost_from_base_cost'] = purchase_unit_cost_from_base_cost
+
+def apply_product_unit_from_form(product):
+    ensure_product_columns()
+    enabled = request.form.get('unit_conversion_enabled') == '1'
+    base = request.form.get('base_unit', '').strip() or request.form.get('unit', '').strip() or 'cái'
+    purchase = request.form.get('purchase_unit', '').strip() or base
+    factor = parse_qty(request.form.get('conversion_factor'), 1.0)
+    if factor <= 0:
+        factor = 1.0
+    lot_enabled = request.form.get('lot_unit_enabled') == '1'
+    lot_name = request.form.get('lot_unit', '').strip()
+    lot_factor = parse_qty(request.form.get('lot_factor'), 0)
+    product.unit_conversion_enabled = enabled
+    product.base_unit = base
+    product.unit = base
+    if enabled:
+        product.purchase_unit = purchase or base
+        product.conversion_factor = factor
+        if lot_enabled and lot_name and lot_factor > 1:
+            product.lot_unit = lot_name
+            product.lot_factor = lot_factor
+        else:
+            product.lot_unit = ''
+            product.lot_factor = 0
+    else:
+        product.purchase_unit = base
+        product.conversion_factor = 1.0
+        product.lot_unit = ''
+        product.lot_factor = 0
 
 def _migrate_product_image_paths():
     rows = Product.query.filter(
@@ -890,7 +1199,8 @@ def quote_product_catalog(products):
             'sku': p.sku,
             'name': p.name,
             'spec': product_spec_short(p),
-            'unit': p.unit or 'cái',
+            'unit': product_base_unit(p),
+            'base_unit': product_base_unit(p),
             'stock': p.stock or 0,
             'low_stock': p.low_stock or 5,
             'stock_status': status_key,
@@ -2044,6 +2354,23 @@ def ensure_stock_movement_columns():
             conn.execute(text("ALTER TABLE stock_movement ADD COLUMN warehouse VARCHAR(80) DEFAULT 'Kho chính'"))
         if 'supplier_id' not in cols:
             conn.execute(text("ALTER TABLE stock_movement ADD COLUMN supplier_id INTEGER REFERENCES supplier(id)"))
+        if 'purchase_qty' not in cols:
+            conn.execute(text('ALTER TABLE stock_movement ADD COLUMN purchase_qty REAL DEFAULT 0'))
+
+def ensure_supplier_intake_line_columns():
+    from sqlalchemy import inspect, text
+    ensure_supplier_intake_schema()
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('supplier_intake_line')}
+    except Exception:
+        return
+    with db.engine.begin() as conn:
+        if 'purchase_qty' not in cols:
+            conn.execute(text('ALTER TABLE supplier_intake_line ADD COLUMN purchase_qty REAL DEFAULT 0'))
+            conn.execute(text(
+                'UPDATE supplier_intake_line SET purchase_qty = qty '
+                'WHERE purchase_qty IS NULL OR purchase_qty = 0'
+            ))
 
 def active_suppliers():
     return Supplier.query.filter_by(is_active=True).order_by(Supplier.name).all()
@@ -2117,6 +2444,196 @@ def apply_product_suppliers_from_form(product):
     if links and not any(link.is_primary for link in links):
         cheapest = min(links, key=lambda link: (link.cost_price or 0, link.supplier_id))
         cheapest.is_primary = True
+
+def supplier_products_map(supplier_ids):
+    ensure_product_supplier_schema()
+    if not supplier_ids:
+        return {}
+    rows = (
+        ProductSupplier.query.filter(ProductSupplier.supplier_id.in_(supplier_ids))
+        .join(Product)
+        .order_by(Product.name.asc())
+        .all()
+    )
+    out = {}
+    for row in rows:
+        out.setdefault(row.supplier_id, []).append(row)
+    return out
+
+def supplier_product_counts(supplier_ids):
+    if not supplier_ids:
+        return {}
+    rows = (
+        db.session.query(ProductSupplier.supplier_id, func.count(ProductSupplier.id))
+        .filter(ProductSupplier.supplier_id.in_(supplier_ids))
+        .group_by(ProductSupplier.supplier_id)
+        .all()
+    )
+    return {sid: cnt for sid, cnt in rows}
+
+def upsert_product_supplier_link(product, supplier, cost_price=0, supplier_sku='', note=''):
+    link = ProductSupplier.query.filter_by(product_id=product.id, supplier_id=supplier.id).first()
+    if link:
+        if cost_price:
+            link.cost_price = cost_price
+        if supplier_sku:
+            link.supplier_sku = supplier_sku
+        if note:
+            link.note = note
+        return link
+    link = ProductSupplier(
+        product_id=product.id,
+        supplier_id=supplier.id,
+        cost_price=cost_price or 0,
+        supplier_sku=supplier_sku,
+        note=note,
+        is_primary=False,
+    )
+    db.session.add(link)
+    return link
+
+def apply_supplier_products_intake(supplier):
+    ensure_product_supplier_schema()
+    ensure_stock_movement_columns()
+    ensure_supplier_intake_schema()
+    product_ids = request.form.getlist('sp_product_id')
+    qtys = request.form.getlist('sp_qty')
+    qty_modes = request.form.getlist('sp_qty_unit_mode')
+    cost_prices = request.form.getlist('sp_cost_price')
+    supplier_skus = request.form.getlist('sp_supplier_sku')
+    notes = request.form.getlist('sp_note')
+    ref_code = request.form.get('ref_code', '').strip()
+    intake_note = request.form.get('intake_note', '').strip()
+    pending_lines = []
+    stock_qty = 0
+    for idx, pid_raw in enumerate(product_ids):
+        if not pid_raw:
+            continue
+        try:
+            pid = int(pid_raw)
+        except (TypeError, ValueError):
+            continue
+        product = Product.query.get(pid)
+        if not product:
+            continue
+        entered_qty = max(parse_qty(qtys[idx] if idx < len(qtys) else 0, 0), 0)
+        unit_mode = qty_modes[idx] if idx < len(qty_modes) else ''
+        purchase_qty, base_qty, unit_mode = resolve_supplier_intake_quantities(
+            product, entered_qty, unit_mode,
+        )
+        cost = parse_int(cost_prices[idx] if idx < len(cost_prices) else 0, 0)
+        sku = (supplier_skus[idx] if idx < len(supplier_skus) else '').strip()
+        note = (notes[idx] if idx < len(notes) else '').strip()
+        if base_qty <= 0 and purchase_qty <= 0 and cost <= 0 and not sku:
+            continue
+        pending_lines.append({
+            'product': product,
+            'purchase_qty': purchase_qty,
+            'base_qty': base_qty,
+            'unit_mode': unit_mode,
+            'cost': cost,
+            'sku': sku,
+            'note': note,
+        })
+    if not pending_lines:
+        return 0, 0
+
+    intake = SupplierIntake(
+        supplier_id=supplier.id,
+        intake_code=next_supplier_intake_code(supplier),
+        ref_code=ref_code,
+        note=intake_note,
+    )
+    db.session.add(intake)
+    db.session.flush()
+
+    total_amount = 0
+    ensure_supplier_intake_line_columns()
+    for line in pending_lines:
+        product = line['product']
+        purchase_qty = line['purchase_qty']
+        base_qty = line['base_qty']
+        unit_mode = line.get('unit_mode', 'purchase')
+        cost = line['cost']
+        sku = line['sku']
+        note = line['note']
+        purchase_cost = cost
+        base_cost = base_unit_cost_from_purchase_cost(product, purchase_cost)
+        upsert_product_supplier_link(product, supplier, purchase_cost, sku, note)
+        movement = None
+        if base_qty > 0:
+            product.stock += base_qty
+            stock_qty += base_qty
+            line_note = intake_note
+            if note:
+                line_note = f'{line_note} — {note}' if line_note else note
+            pu = product_purchase_unit(product)
+            bu = product_base_unit(product)
+            if product_has_unit_conversion(product):
+                if unit_mode == 'base':
+                    conv = f' ({format_qty_display(base_qty)} {bu}'
+                    if abs(purchase_qty - base_qty) > 1e-6:
+                        conv += f' = {format_qty_display(purchase_qty)} {pu}'
+                    conv += ')'
+                elif unit_mode == 'lot' and product_has_lot_unit(product):
+                    lu = product_lot_unit(product)
+                    lf = product_lot_factor(product)
+                    lot_qty = (purchase_qty / lf) if lf > 0 else purchase_qty
+                    conv = (
+                        f' ({format_qty_display(lot_qty)} {lu} → '
+                        f'{format_qty_display(purchase_qty)} {pu} → '
+                        f'{format_qty_display(base_qty)} {bu})'
+                    )
+                else:
+                    conv = f' ({format_qty_display(purchase_qty)} {pu} → {format_qty_display(base_qty)} {bu})'
+                line_note = (line_note or '') + conv
+            movement = StockMovement(
+                product_id=product.id,
+                supplier_id=supplier.id,
+                movement_type='IN',
+                qty=base_qty,
+                purchase_qty=purchase_qty,
+                ref_code=ref_code,
+                method='Nhập mua hàng',
+                warehouse=DEFAULT_WAREHOUSE,
+                note=line_note or f'Nhập từ NCC {supplier.code}',
+            )
+            db.session.add(movement)
+            db.session.flush()
+        if purchase_cost > 0:
+            old_cost = product.cost_price or 0
+            if old_cost != base_cost:
+                pu = product_purchase_unit(product)
+                bu = product_base_unit(product)
+                hist_note = f'Nhập từ NCC {supplier.code}'
+                if product_has_unit_conversion(product) and base_cost != purchase_cost:
+                    hist_note += (
+                        f' ({money(purchase_cost)}/{pu} → {money(base_cost)}/{bu})'
+                    )
+                db.session.add(PriceHistory(
+                    product_id=product.id,
+                    price_type='cost_price',
+                    old_price=old_cost,
+                    new_price=base_cost,
+                    note=hist_note,
+                ))
+            product.cost_price = base_cost
+        bill_qty = purchase_qty if product_has_unit_conversion(product) else base_qty
+        line_amount = int(bill_qty * purchase_cost)
+        total_amount += line_amount
+        db.session.add(SupplierIntakeLine(
+            intake_id=intake.id,
+            product_id=product.id,
+            qty=base_qty,
+            purchase_qty=purchase_qty,
+            cost_price=purchase_cost,
+            line_amount=line_amount,
+            supplier_sku=sku,
+            note=note,
+            stock_movement_id=movement.id if movement else None,
+        ))
+    intake.total_amount = total_amount
+    return len(pending_lines), stock_qty
 
 def parse_supplier_id(value):
     if value is None or value == '':
@@ -2216,6 +2733,186 @@ def supplier_inbound_counts(supplier_ids):
     ).group_by(StockMovement.supplier_id).all()
     return {sid: {'count': cnt, 'qty': int(qty or 0)} for sid, cnt, qty in rows}
 
+def ensure_supplier_intake_schema():
+    db.create_all()
+
+def supplier_intake_balance(intake):
+    total = intake.total_amount or 0
+    paid = intake.paid_amount or 0
+    return max(0, total - paid)
+
+def supplier_intake_payment_status(intake):
+    total = intake.total_amount or 0
+    paid = intake.paid_amount or 0
+    if total <= 0:
+        return '—'
+    if paid <= 0:
+        return 'Chưa thanh toán'
+    if paid >= total:
+        return 'Đã thanh toán'
+    return 'Thanh toán một phần'
+
+def supplier_intake_payment_status_key(intake):
+    status = supplier_intake_payment_status(intake)
+    if status == 'Đã thanh toán':
+        return 'paid'
+    if status == 'Thanh toán một phần':
+        return 'partial'
+    if status == 'Chưa thanh toán':
+        return 'unpaid'
+    return 'none'
+
+app.jinja_env.globals['supplier_intake_balance'] = supplier_intake_balance
+app.jinja_env.globals['supplier_intake_payment_status'] = supplier_intake_payment_status
+app.jinja_env.globals['supplier_intake_payment_status_key'] = supplier_intake_payment_status_key
+
+def next_supplier_intake_code(supplier):
+    prefix = f'PN{supplier.id}'
+    return next_code(prefix, SupplierIntake, 'intake_code')
+
+def recalc_supplier_intake_paid(intake):
+    paid = db.session.query(func.coalesce(func.sum(SupplierPayment.amount), 0)).filter(
+        SupplierPayment.intake_id == intake.id,
+    ).scalar() or 0
+    intake.paid_amount = int(paid)
+    return intake.paid_amount
+
+def linked_supplier_stock_movement_ids():
+    rows = db.session.query(SupplierIntakeLine.stock_movement_id).filter(
+        SupplierIntakeLine.stock_movement_id.isnot(None),
+    ).all()
+    return {row[0] for row in rows}
+
+def backfill_supplier_intakes_for_supplier(supplier_id):
+    ensure_supplier_intake_schema()
+    linked = linked_supplier_stock_movement_ids()
+    movements = StockMovement.query.filter(
+        StockMovement.supplier_id == supplier_id,
+        StockMovement.movement_type == 'IN',
+    ).order_by(StockMovement.created_at.asc()).all()
+    unlinked = [m for m in movements if m.id not in linked]
+    if not unlinked:
+        return 0
+    groups = {}
+    for movement in unlinked:
+        ts = movement.created_at.replace(microsecond=0) if movement.created_at else datetime.utcnow()
+        key = (movement.supplier_id, movement.ref_code or '', ts)
+        groups.setdefault(key, []).append(movement)
+    created = 0
+    supplier = Supplier.query.get(supplier_id)
+    if not supplier:
+        return 0
+    for (_, ref_code, ts), items in groups.items():
+        intake = SupplierIntake(
+            supplier_id=supplier.id,
+            intake_code=next_supplier_intake_code(supplier),
+            ref_code=ref_code,
+            note=(items[0].note or '') if items else '',
+            created_at=ts,
+        )
+        db.session.add(intake)
+        db.session.flush()
+        total = 0
+        for movement in items:
+            product = movement.product or Product.query.get(movement.product_id)
+            cost = purchase_unit_cost_from_base_cost(product, product.cost_price or 0) if product else 0
+            pq = float(movement.purchase_qty or movement.qty or 0)
+            bq = float(movement.qty or 0)
+            line_amount = int(pq * cost) if pq else int(bq * cost)
+            total += line_amount
+            db.session.add(SupplierIntakeLine(
+                intake_id=intake.id,
+                product_id=movement.product_id,
+                qty=bq,
+                purchase_qty=pq,
+                cost_price=cost,
+                line_amount=line_amount,
+                note=movement.note or '',
+                stock_movement_id=movement.id,
+            ))
+        intake.total_amount = total
+        created += 1
+    if created:
+        db.session.commit()
+    return created
+
+def build_supplier_intake_board(supplier_ids):
+    ensure_supplier_intake_schema()
+    ensure_supplier_intake_line_columns()
+    ensure_stock_movement_columns()
+    if not supplier_ids:
+        return {'intakes': {}, 'payments': {}, 'summaries': {}, 'line_counts': {}}
+    for sid in supplier_ids:
+        backfill_supplier_intakes_for_supplier(sid)
+    intakes = (
+        SupplierIntake.query.filter(SupplierIntake.supplier_id.in_(supplier_ids))
+        .order_by(SupplierIntake.created_at.desc())
+        .all()
+    )
+    intake_ids = [i.id for i in intakes]
+    line_counts = {}
+    if intake_ids:
+        rows = (
+            db.session.query(SupplierIntakeLine.intake_id, func.count(SupplierIntakeLine.id))
+            .filter(SupplierIntakeLine.intake_id.in_(intake_ids))
+            .group_by(SupplierIntakeLine.intake_id)
+            .all()
+        )
+        line_counts = {iid: cnt for iid, cnt in rows}
+    intakes_by_supplier = {sid: [] for sid in supplier_ids}
+    for intake in intakes:
+        intakes_by_supplier.setdefault(intake.supplier_id, []).append(intake)
+    payments = (
+        SupplierPayment.query.filter(SupplierPayment.supplier_id.in_(supplier_ids))
+        .order_by(SupplierPayment.payment_date.desc(), SupplierPayment.id.desc())
+        .all()
+    )
+    payments_by_supplier = {sid: [] for sid in supplier_ids}
+    for payment in payments:
+        payments_by_supplier.setdefault(payment.supplier_id, []).append(payment)
+    summaries = {}
+    for sid in supplier_ids:
+        items = intakes_by_supplier.get(sid, [])
+        total = sum(i.total_amount or 0 for i in items)
+        paid = sum(i.paid_amount or 0 for i in items)
+        summaries[sid] = {
+            'total': total,
+            'paid': paid,
+            'remaining': max(0, total - paid),
+            'intake_count': len(items),
+            'unpaid_count': sum(1 for i in items if supplier_intake_balance(i) > 0 and (i.total_amount or 0) > 0),
+        }
+    return {
+        'intakes': intakes_by_supplier,
+        'payments': payments_by_supplier,
+        'summaries': summaries,
+        'line_counts': line_counts,
+    }
+
+def supplier_intake_lines(intake_id):
+    return (
+        SupplierIntakeLine.query.filter_by(intake_id=intake_id)
+        .join(Product)
+        .order_by(Product.name.asc())
+        .all()
+    )
+
+def supplier_intake_lines_map(intake_ids):
+    if not intake_ids:
+        return {}
+    rows = (
+        SupplierIntakeLine.query.filter(SupplierIntakeLine.intake_id.in_(intake_ids))
+        .join(Product)
+        .order_by(Product.name.asc())
+        .all()
+    )
+    out = {}
+    for row in rows:
+        out.setdefault(row.intake_id, []).append(row)
+    return out
+
+app.jinja_env.globals['supplier_intake_lines_map'] = supplier_intake_lines_map
+
 def movement_qty_sum(product_id, movement_type, date_from=None, date_to=None, before_date=None):
     q = db.session.query(func.coalesce(func.sum(StockMovement.qty), 0)).filter(
         StockMovement.product_id == product_id,
@@ -2228,7 +2925,7 @@ def movement_qty_sum(product_id, movement_type, date_from=None, date_to=None, be
             q = q.filter(StockMovement.created_at >= datetime.combine(date_from, datetime.min.time()))
         if date_to:
             q = q.filter(StockMovement.created_at <= datetime.combine(date_to, datetime.max.time()))
-    return int(q.scalar() or 0)
+    return float(q.scalar() or 0)
 
 def product_stock_row(product, date_from=None, date_to=None):
     inbound = movement_qty_sum(product.id, 'IN', date_from, date_to)
@@ -2257,20 +2954,20 @@ def stock_stats():
         'total_products': len(products),
         'total_qty': sum(p.stock for p in products),
         'available_qty': sum(p.stock for p in products if p.stock > 0),
-        'low_stock': Product.query.filter(Product.stock > 0, Product.stock <= Product.low_stock).count(),
-        'out_stock': Product.query.filter(Product.stock <= 0).count(),
+        'low_stock': Product.query.filter(Product.stock_qty > 0, Product.stock_qty <= Product.low_stock).count(),
+        'out_stock': Product.query.filter(Product.stock_qty <= 0).count(),
     }
 
 def product_stats():
     q = Product.query
     return {
         'total': q.count(),
-        'selling': q.filter(Product.is_active.is_(True), Product.stock > 0).count(),
+        'selling': q.filter(Product.is_active.is_(True), Product.stock_qty > 0).count(),
         'low_stock': q.filter(
-            Product.stock > 0,
-            Product.stock <= func.coalesce(Product.low_stock, 5),
+            Product.stock_qty > 0,
+            Product.stock_qty <= func.coalesce(Product.low_stock, 5),
         ).count(),
-        'out_stock': q.filter(Product.stock <= 0).count(),
+        'out_stock': q.filter(Product.stock_qty <= 0).count(),
     }
 
 def stock_filters_from_request():
@@ -2311,6 +3008,15 @@ def next_code(prefix, model, field):
     year = datetime.now().year
     count = model.query.filter(getattr(model, field).like(f'{prefix}-{year}-%')).count() + 1
     return f'{prefix}-{year}-{count:04d}'
+
+def parse_qty(value, default=0):
+    if value is None or value == '':
+        return float(default)
+    try:
+        cleaned = str(value).strip().replace(',', '.')
+        return float(cleaned)
+    except (TypeError, ValueError):
+        return float(default)
 
 def parse_int(value, default=0):
     if value is None or value == '':
@@ -2589,6 +3295,30 @@ def save_payment_receipt(file_storage):
     file_storage.save(PAYMENT_RECEIPT_UPLOAD_DIR / filename)
     return rel_path
 
+def save_supplier_payment_receipt(file_storage):
+    if not file_storage or not file_storage.filename:
+        flash('Vui lòng chụp/upload ảnh bill thanh toán', 'warning')
+        return None
+    ext = Path(secure_filename(file_storage.filename)).suffix.lower()
+    if ext not in ALLOWED_ORDER_HANDOVER_EXTENSIONS:
+        flash('Ảnh bill phải là JPG, PNG hoặc WEBP', 'warning')
+        return None
+    data = file_storage.read()
+    file_storage.seek(0)
+    if len(data) > MAX_CONTRACT_SCAN_BYTES:
+        flash('File tối đa 10MB', 'warning')
+        return None
+    SUPPLIER_PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}{ext}'
+    rel_path = f'uploads/suppliers/receipts/{filename}'
+    file_storage.save(SUPPLIER_PAYMENT_RECEIPT_UPLOAD_DIR / filename)
+    return rel_path
+
+def supplier_payment_receipt_url(receipt_path):
+    return contract_signed_scan_url(receipt_path)
+
+app.jinja_env.globals['supplier_payment_receipt_url'] = supplier_payment_receipt_url
+
 def payment_receipt_url(receipt_path):
     return contract_signed_scan_url(receipt_path)
 
@@ -2682,12 +3412,13 @@ def _cleanup_temp_docs(max_age_seconds=3600):
     if not TEMP_DOC_DIR.exists():
         return
     cutoff = time.time() - max_age_seconds
-    for path in TEMP_DOC_DIR.glob('*.docx'):
-        try:
-            if path.stat().st_mtime < cutoff:
-                path.unlink()
-        except OSError:
-            pass
+    for pattern in ('*.docx', '*.pdf'):
+        for path in TEMP_DOC_DIR.glob(pattern):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                pass
 
 def save_temp_docx(doc, prefix='preview'):
     TEMP_DOC_DIR.mkdir(parents=True, exist_ok=True)
@@ -2699,7 +3430,6 @@ def save_temp_docx(doc, prefix='preview'):
 def send_docx_inline(file_path, download_name=None):
     path = Path(file_path)
     if not path.is_file():
-        from flask import abort
         abort(404)
     return send_file(
         path,
@@ -2708,26 +3438,161 @@ def send_docx_inline(file_path, download_name=None):
         download_name=download_name or path.name,
     )
 
-def docx_preview_page(doc_title, customer_name, doc_url, download_url=None, back_url=None, is_draft=False):
+
+def send_pdf_inline(file_path, download_name=None):
+    path = Path(file_path)
+    if not path.is_file():
+        abort(404)
+    return send_file(
+        path,
+        mimetype=PDF_MIMETYPE,
+        as_attachment=False,
+        download_name=download_name or path.name,
+    )
+
+
+def _unlink_preview_file(path):
+    if not path:
+        return
+    p = Path(path)
+    if p.is_file():
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    pdf = p.with_suffix('.pdf')
+    if pdf.is_file() and pdf != p:
+        try:
+            pdf.unlink()
+        except OSError:
+            pass
+
+
+def find_libreoffice_executable():
+    env = os.environ.get('LIBREOFFICE_PATH', '').strip()
+    if env and Path(env).is_file():
+        return env
+    for name in ('soffice', 'libreoffice'):
+        found = shutil.which(name)
+        if found:
+            return found
+    mac_app = Path('/Applications/LibreOffice.app/Contents/MacOS/soffice')
+    if mac_app.is_file():
+        return str(mac_app)
+    return None
+
+
+def convert_docx_to_pdf(docx_path):
+    """Chuyển DOCX → PDF (LibreOffice hoặc docx2pdf trên macOS). Giữ nguyên layout Word."""
+    docx_path = Path(docx_path).resolve()
+    if not docx_path.is_file():
+        raise FileNotFoundError(f'Không tìm thấy file Word: {docx_path}')
+    pdf_path = docx_path.with_suffix('.pdf')
+    out_dir = docx_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    lo = find_libreoffice_executable()
+    if lo:
+        try:
+            subprocess.run(
+                [
+                    lo,
+                    '--headless',
+                    '--nologo',
+                    '--nofirststartwizard',
+                    '--convert-to',
+                    'pdf',
+                    '--outdir',
+                    str(out_dir),
+                    str(docx_path),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=DOCX_TO_PDF_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError('Chuyển PDF quá thời gian chờ. Thử lại hoặc kiểm tra LibreOffice.') from exc
+        except subprocess.CalledProcessError as exc:
+            err = (exc.stderr or b'').decode('utf-8', errors='replace')[:500]
+            raise RuntimeError(f'LibreOffice không chuyển được sang PDF. {err}'.strip()) from exc
+        if pdf_path.is_file():
+            return pdf_path
+
+    if os.name == 'darwin':
+        try:
+            from docx2pdf import convert as docx2pdf_convert
+        except ImportError:
+            docx2pdf_convert = None
+        if docx2pdf_convert is not None:
+            docx2pdf_convert(str(docx_path), str(pdf_path))
+            if pdf_path.is_file():
+                return pdf_path
+
+    raise RuntimeError(
+        'Không chuyển được DOCX sang PDF. Cài LibreOffice '
+        '(https://www.libreoffice.org) hoặc trên macOS dùng Microsoft Word + pip install docx2pdf.'
+    )
+
+
+def ensure_pdf_for_docx(docx_path, force=False):
+    """Tạo/cập nhật PDF cạnh file DOCX nếu DOCX mới hơn hoặc chưa có PDF."""
+    docx_path = Path(docx_path).resolve()
+    pdf_path = docx_path.with_suffix('.pdf')
+    if (
+        not force
+        and pdf_path.is_file()
+        and pdf_path.stat().st_mtime >= docx_path.stat().st_mtime
+    ):
+        return pdf_path
+    return convert_docx_to_pdf(docx_path)
+
+
+def preview_pdf_urls(docx_path, view_endpoint, download_docx_endpoint, download_pdf_endpoint, **url_kwargs):
+    """Sinh PDF từ DOCX và trả về URL xem/tải."""
+    ensure_pdf_for_docx(docx_path)
+    return {
+        'pdf_url': url_for(view_endpoint, **url_kwargs),
+        'docx_download_url': url_for(download_docx_endpoint, **url_kwargs),
+        'pdf_download_url': url_for(download_pdf_endpoint, **url_kwargs),
+    }
+
+def app_back_url(default_endpoint, **default_values):
+    """URL quay lại: ưu tiên trang trước (cùng host), không thì list mặc định."""
+    ref = request.referrer or ''
+    if ref:
+        try:
+            ref_p = urlparse(ref)
+            req_p = urlparse(request.url)
+            if ref_p.netloc == req_p.netloc and ref_p.path != req_p.path:
+                return ref
+        except Exception:
+            pass
+    return url_for(default_endpoint, **default_values)
+
+
+def docx_preview_page(
+    doc_title,
+    customer_name,
+    pdf_url,
+    docx_download_url,
+    pdf_download_url,
+    back_url=None,
+    is_draft=False,
+):
     return render_template(
         'contract_preview.html',
         contract_code=doc_title,
         customer_name=customer_name,
-        doc_url=doc_url,
-        download_url=download_url,
-        back_url=back_url or url_for('customers'),
+        pdf_url=pdf_url,
+        docx_download_url=docx_download_url,
+        pdf_download_url=pdf_download_url,
+        back_url=back_url or app_back_url('contracts'),
         is_draft=is_draft,
     )
 
+
 def clear_contract_draft_temp():
-    old = session.pop(CONTRACT_DRAFT_SESSION_KEY, None)
-    if old:
-        p = Path(old)
-        if p.is_file():
-            try:
-                p.unlink()
-            except OSError:
-                pass
+    _unlink_preview_file(session.pop(CONTRACT_DRAFT_SESSION_KEY, None))
 
 def _doc_add_center_heading(doc, text, level=1):
     p = doc.add_heading(text, level=level)
@@ -3069,6 +3934,12 @@ def apply_contract_doc(contract, customer, code, signed, expired, company_id):
     new_path = str(out_path)
     if old_path and old_path != new_path and Path(old_path).is_file():
         Path(old_path).unlink(missing_ok=True)
+        old_pdf = Path(old_path).with_suffix('.pdf')
+        if old_pdf.is_file():
+            old_pdf.unlink(missing_ok=True)
+    new_pdf = Path(new_path).with_suffix('.pdf')
+    if new_pdf.is_file():
+        new_pdf.unlink(missing_ok=True)
     return new_path
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -3270,7 +4141,7 @@ def dashboard():
         'quotes': Quote.query.count(),
         'orders': Order.query.count(),
         'debt': total_outstanding_debt(),
-        'low_stock': Product.query.filter(Product.stock <= Product.low_stock).count(),
+        'low_stock': Product.query.filter(Product.stock_qty <= Product.low_stock).count(),
     }
     latest_quotes = Quote.query.order_by(Quote.created_at.desc()).limit(5).all()
     latest_orders = Order.query.order_by(Order.created_at.desc()).limit(5).all()
@@ -3462,14 +4333,12 @@ def customers():
         ok, msg = validate_customer_form()
         if not ok:
             flash(msg, 'warning')
-            return redirect(url_for('customers'))
+            return redirect(url_for('customers', open_add='customer'))
         c = Customer()
         apply_customer_form(c)
         db.session.add(c)
-        db.session.flush()
-        create_framework_contract_for_customer(c, commit=False)
         db.session.commit()
-        return customers_redirect_after_save('Đã thêm khách hàng và hợp đồng nguyên tắc', new_customer_id=c.id)
+        return customers_redirect_after_save('Đã thêm khách hàng', new_customer_id=c.id)
     q, per_page, page, sort, order = customer_list_params()
     query = Customer.query.filter(Customer.customer_type != WALKIN_CUSTOMER_TYPE)
     if q:
@@ -3487,6 +4356,8 @@ def customers():
     framework_contracts, customer_quotes, customer_orders = customer_list_extras(customer_ids)
     banks = fetch_vietqr_banks()
     list_args = {'q': q, 'per_page': per_page, 'sort': sort, 'order': order}
+    from_quotes = request.args.get('from') == 'quotes'
+    open_add_modal = from_quotes or request.args.get('open_add') == 'customer'
     return render_template(
         'customers.html',
         pagination=pagination,
@@ -3502,7 +4373,8 @@ def customers():
         banks=banks,
         bank_value_set=bank_value_set(banks),
         sort_url=lambda field: customer_sort_url(field, q, per_page, sort, order),
-        from_quotes=request.args.get('from') == 'quotes',
+        from_quotes=from_quotes,
+        open_add_modal=open_add_modal,
     )
 
 @app.route('/customers/options.json')
@@ -3518,11 +4390,14 @@ def customer_options_json():
 @app.route('/suppliers', methods=['GET', 'POST'])
 def suppliers():
     ensure_stock_movement_columns()
+    ensure_supplier_intake_schema()
+    ensure_supplier_intake_line_columns()
+    ensure_product_columns()
     if request.method == 'POST':
         ok, msg = validate_supplier_form()
         if not ok:
             flash(msg, 'warning')
-            return redirect(url_for('suppliers'))
+            return redirect(url_for('suppliers', open_add='supplier'))
         s = Supplier()
         apply_supplier_form(s, is_new=True)
         db.session.add(s)
@@ -3544,12 +4419,22 @@ def suppliers():
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     supplier_ids = [s.id for s in pagination.items]
     inbound_stats = supplier_inbound_counts(supplier_ids)
+    supplier_products = supplier_products_map(supplier_ids)
+    product_counts = supplier_product_counts(supplier_ids)
+    intake_board = build_supplier_intake_board(supplier_ids)
+    intake_line_map = supplier_intake_lines_map([
+        i.id for sid in supplier_ids for i in intake_board['intakes'].get(sid, [])
+    ])
     list_args = {'q': q, 'per_page': per_page, 'sort': sort, 'order': order}
     return render_template(
         'suppliers.html',
         pagination=pagination,
         suppliers=pagination.items,
         inbound_stats=inbound_stats,
+        supplier_products=supplier_products,
+        product_counts=product_counts,
+        intake_board=intake_board,
+        intake_line_map=intake_line_map,
         stats=supplier_stats(),
         q=q,
         per_page=per_page,
@@ -3557,6 +4442,8 @@ def suppliers():
         order=order,
         list_args=list_args,
         sort_url=lambda field: supplier_sort_url(field, q, per_page, sort, order),
+        today_iso=date.today().isoformat(),
+        open_add_modal=request.args.get('open_add') == 'supplier',
     )
 
 @app.route('/suppliers/options.json')
@@ -3568,6 +4455,104 @@ def supplier_options_json():
             for s in rows
         ],
     }
+
+@app.route('/products/options.json')
+def product_options_json():
+    rows = Product.query.filter(Product.is_active.is_(True)).order_by(Product.name).all()
+    return {
+        'products': [
+            {
+                'id': p.id,
+                'sku': p.sku,
+                'name': p.name,
+                'stock': p.stock or 0,
+                'cost_price': p.cost_price or 0,
+                'purchase_cost_price': purchase_unit_cost_from_base_cost(p, p.cost_price or 0),
+                'base_unit': product_base_unit(p),
+                'purchase_unit': product_purchase_unit(p),
+                'unit_conversion_enabled': product_has_unit_conversion(p),
+                'conversion_factor': product_conversion_factor(p),
+                'lot_unit': product_lot_unit(p),
+                'lot_factor': product_lot_factor(p),
+                'has_lot_unit': product_has_lot_unit(p),
+            }
+            for p in rows
+        ],
+    }
+
+@app.route('/suppliers/<int:sid>/products', methods=['POST'])
+def supplier_products_intake(sid):
+    ensure_stock_movement_columns()
+    supplier = Supplier.query.get_or_404(sid)
+    updated, stock_qty = apply_supplier_products_intake(supplier)
+    if updated == 0:
+        flash('Vui lòng thêm ít nhất một sản phẩm (số lượng hoặc giá nhập)', 'warning')
+        return suppliers_redirect_after_save('')
+    db.session.commit()
+    msg = f'Đã cập nhật {updated} sản phẩm'
+    if stock_qty:
+        msg += f' và nhập kho {format_qty_display(stock_qty)} (đơn vị tồn)'
+    return suppliers_redirect_after_save(msg)
+
+@app.route('/suppliers/<int:sid>/intakes/<int:iid>/payment', methods=['POST'])
+def supplier_intake_payment(sid, iid):
+    ensure_supplier_intake_schema()
+    supplier = Supplier.query.get_or_404(sid)
+    intake = SupplierIntake.query.filter_by(id=iid, supplier_id=supplier.id).first_or_404()
+    balance = supplier_intake_balance(intake)
+    if balance <= 0:
+        flash('Phiếu nhập đã thanh toán đủ', 'warning')
+        return suppliers_redirect_after_save('')
+    amount = parse_int(request.form.get('amount'))
+    if amount <= 0:
+        flash('Số tiền không hợp lệ', 'danger')
+        return suppliers_redirect_after_save('')
+    receipt_path = save_supplier_payment_receipt(request.files.get('payment_receipt'))
+    if not receipt_path:
+        return suppliers_redirect_after_save('')
+    pay_amount = min(amount, balance)
+    if amount > balance:
+        flash(
+            f'Số tiền vượt còn nợ ({money(balance)}). Chỉ ghi nhận {money(pay_amount)}.',
+            'warning',
+        )
+    method = request.form.get('method', 'Chuyển khoản').strip() or 'Chuyển khoản'
+    note = request.form.get('note', '').strip()
+    payment_date_raw = request.form.get('payment_date', '').strip()
+    payment_date = date.today()
+    if payment_date_raw:
+        try:
+            payment_date = datetime.strptime(payment_date_raw, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+    db.session.add(SupplierPayment(
+        supplier_id=supplier.id,
+        intake_id=intake.id,
+        amount=pay_amount,
+        method=method,
+        note=note,
+        payment_date=payment_date,
+        receipt_path=receipt_path,
+        receipt_uploaded_at=datetime.utcnow(),
+    ))
+    recalc_supplier_intake_paid(intake)
+    db.session.commit()
+    status = supplier_intake_payment_status(intake)
+    flash(f'Đã ghi nhận thanh toán {money(pay_amount)} — {status}', 'success')
+    return suppliers_redirect_after_save('')
+
+@app.route('/suppliers/payments/<int:pid>/receipt')
+def view_supplier_payment_receipt(pid):
+    ensure_supplier_intake_schema()
+    payment = SupplierPayment.query.get_or_404(pid)
+    if not payment.receipt_path:
+        flash('Chưa có ảnh bill', 'warning')
+        return redirect(url_for('suppliers'))
+    file_path = BASE_DIR / 'static' / payment.receipt_path
+    if not file_path.is_file():
+        flash('Không tìm thấy file bill', 'warning')
+        return redirect(url_for('suppliers'))
+    return send_file(file_path, mimetype=signed_scan_mimetype(file_path))
 
 @app.route('/suppliers/<int:sid>/update', methods=['POST'])
 def update_supplier(sid):
@@ -3611,38 +4596,86 @@ def update_customer(cid):
         flash(msg, 'warning')
         return customers_redirect_after_save('')
     apply_customer_form(c)
-    create_framework_contract_for_customer(c, commit=False)
     db.session.commit()
     return customers_redirect_after_save('Đã cập nhật khách hàng')
+
+def contracts_create_url(customer_id=None, open_add=True):
+    args = {}
+    if open_add:
+        args['open_add'] = 'contract'
+    if customer_id:
+        args['customer_id'] = customer_id
+    return url_for('contracts', **args)
+
 
 @app.route('/customers/<int:cid>/contract/preview')
 def preview_customer_framework_contract(cid):
     customer = Customer.query.get_or_404(cid)
-    create_framework_contract_for_customer(customer)
     contract = get_framework_contract(customer.id)
+    if not contract:
+        flash('Chưa có hợp đồng. Vui lòng tạo tại màn Hợp đồng.', 'info')
+        return redirect(contracts_create_url(customer.id))
+    try:
+        urls = preview_pdf_urls(
+            contract.file_path,
+            'view_customer_framework_contract_pdf',
+            'download_customer_framework_contract',
+            'download_customer_framework_contract_pdf',
+            cid=customer.id,
+        )
+    except (RuntimeError, FileNotFoundError) as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('customers'))
     return docx_preview_page(
         contract.contract_code,
         customer.name,
-        url_for('view_customer_framework_contract', cid=customer.id),
-        url_for('download_customer_framework_contract', cid=customer.id),
+        urls['pdf_url'],
+        urls['docx_download_url'],
+        urls['pdf_download_url'],
         url_for('customers'),
     )
 
 @app.route('/customers/<int:cid>/contract/view')
 def view_customer_framework_contract(cid):
     customer = Customer.query.get_or_404(cid)
-    create_framework_contract_for_customer(customer)
     contract = get_framework_contract(customer.id)
+    if not contract or not contract.file_path or not Path(contract.file_path).exists():
+        flash('Chưa có hợp đồng. Vui lòng tạo tại màn Hợp đồng.', 'info')
+        return redirect(contracts_create_url(customer.id))
     return send_docx_inline(contract.file_path, f'{contract.contract_code}.docx')
+
+@app.route('/customers/<int:cid>/contract/view.pdf')
+def view_customer_framework_contract_pdf(cid):
+    customer = Customer.query.get_or_404(cid)
+    contract = get_framework_contract(customer.id)
+    if not contract or not contract.file_path or not Path(contract.file_path).is_file():
+        abort(404)
+    pdf_path = ensure_pdf_for_docx(contract.file_path)
+    return send_pdf_inline(pdf_path, f'{contract.contract_code}.pdf')
 
 @app.route('/customers/<int:cid>/contract/download')
 def download_customer_framework_contract(cid):
     customer = Customer.query.get_or_404(cid)
-    contract = get_framework_contract(customer.id) or create_framework_contract_for_customer(customer)
-    if not contract.file_path or not Path(contract.file_path).exists():
-        flash('Không tìm thấy file hợp đồng', 'danger')
-        return redirect(url_for('customers'))
+    contract = get_framework_contract(customer.id)
+    if not contract or not contract.file_path or not Path(contract.file_path).exists():
+        flash('Chưa có hợp đồng. Vui lòng tạo tại màn Hợp đồng.', 'info')
+        return redirect(contracts_create_url(customer.id))
     return send_file(contract.file_path, as_attachment=True, download_name=Path(contract.file_path).name)
+
+@app.route('/customers/<int:cid>/contract/download.pdf')
+def download_customer_framework_contract_pdf(cid):
+    customer = Customer.query.get_or_404(cid)
+    contract = get_framework_contract(customer.id)
+    if not contract or not contract.file_path or not Path(contract.file_path).is_file():
+        flash('Chưa có hợp đồng. Vui lòng tạo tại màn Hợp đồng.', 'info')
+        return redirect(contracts_create_url(customer.id))
+    pdf_path = ensure_pdf_for_docx(contract.file_path)
+    return send_file(
+        pdf_path,
+        mimetype=PDF_MIMETYPE,
+        as_attachment=True,
+        download_name=Path(contract.file_path).stem + '.pdf',
+    )
 
 def customers_list_redirect(message=None, category='success', hub_id=None, hub_tab=None):
     if message:
@@ -3669,7 +4702,10 @@ def customers_list_redirect(message=None, category='success', hub_id=None, hub_t
 def upload_customer_signed_contract(cid):
     ensure_contract_columns()
     customer = Customer.query.get_or_404(cid)
-    contract = get_framework_contract(customer.id) or create_framework_contract_for_customer(customer)
+    contract = get_framework_contract(customer.id)
+    if not contract:
+        flash('Chưa có hợp đồng. Tạo hợp đồng trước khi tải bản scan đã ký.', 'warning')
+        return redirect(contracts_create_url(customer.id))
     if save_contract_signed_scan(contract, request.files.get('signed_scan')):
         db.session.commit()
         return customers_list_redirect('Đã tải lên hợp đồng đã ký', hub_id=cid, hub_tab='contract')
@@ -3768,11 +4804,11 @@ def apply_product_filters(query, filters):
         query = query.filter(Product.is_active.is_(True))
     elif st == 'low':
         query = query.filter(
-            Product.stock > 0,
-            Product.stock <= func.coalesce(Product.low_stock, 5),
+            Product.stock_qty > 0,
+            Product.stock_qty <= func.coalesce(Product.low_stock, 5),
         )
     elif st == 'out':
-        query = query.filter(Product.stock <= 0)
+        query = query.filter(Product.stock_qty <= 0)
     elif st == 'stopped':
         query = query.filter(or_(Product.is_active.is_(False), Product.is_active == 0))
     return query
@@ -3833,14 +4869,14 @@ def apply_product_form(product):
     assign_product_taxonomy_from_form(product)
     product.model = request.form.get('model', '')
     product.variant = request.form.get('variant', '')
-    product.unit = request.form.get('unit', 'cái') or 'cái'
+    apply_product_unit_from_form(product)
     product.warranty = request.form.get('warranty', '')
     product.cost_price = parse_int(request.form.get('cost_price'))
     product.retail_price = parse_int(request.form.get('retail_price'))
     product.dealer_price = parse_int(request.form.get('dealer_price'))
     product.project_price = parse_int(request.form.get('project_price'))
-    product.stock = parse_int(request.form.get('stock'))
-    product.low_stock = parse_int(request.form.get('low_stock'), product.low_stock or 5)
+    product.stock = parse_qty(request.form.get('stock'))
+    product.low_stock = parse_qty(request.form.get('low_stock'), product.low_stock or 5)
 
 def category_product_counts():
     counts = {}
@@ -3867,7 +4903,9 @@ PRODUCT_IMPORT_FIELDS = [
     ('brand', 'Thương hiệu'),
     ('model', 'Model'),
     ('variant', 'Biến thể'),
-    ('unit', 'Đơn vị'),
+    ('unit', 'Đơn vị tồn kho'),
+    ('purchase_unit', 'Đơn vị nhập'),
+    ('conversion_factor', 'Hệ số quy đổi'),
     ('warranty', 'Bảo hành'),
     ('cost_price', 'Giá nhập'),
     ('retail_price', 'Giá bán lẻ'),
@@ -3879,9 +4917,9 @@ PRODUCT_IMPORT_FIELDS = [
 ]
 
 PRODUCT_IMPORT_SAMPLE_ROW = [
-    'SP-001', 'Sản phẩm mẫu', 'Điện thoại', 'Smartphone', 'Samsung',
-    'A53', '6/128 Đen', 'cái', '12 tháng',
-    5000000, 8900000, 8500000, 8700000, 10, 5, 'Đang bán',
+    'SP-CLE-17', 'Cờ lê 17', 'Dụng cụ', 'Cờ lê', 'Stanley',
+    '', '17mm', 'Chiếc', 'Hộp', 20,
+    '12 tháng', 85000, 120000, 110000, 115000, 0, 10, 'Đang bán',
 ]
 
 PRODUCT_IMPORT_HEADER_ALIASES = {
@@ -3893,7 +4931,22 @@ PRODUCT_IMPORT_HEADER_ALIASES = {
     'brand': {'thương hiệu', 'thuong hieu', 'brand', 'hãng'},
     'model': {'model', 'mẫu'},
     'variant': {'biến thể', 'bien the', 'variant'},
-    'unit': {'đơn vị', 'don vi', 'unit', 'dvt'},
+    'unit': {
+        'đơn vị', 'don vi', 'unit', 'dvt',
+        'đơn vị tồn kho', 'don vi ton kho', 'base unit', 'base_unit',
+    },
+    'purchase_unit': {
+        'đơn vị nhập', 'don vi nhap', 'purchase unit', 'purchase_unit',
+        'đơn vị đóng gói', 'don vi dong goi', 'đóng gói', 'dong goi',
+        'đơn vị thùng', 'don vi thung',
+    },
+    'conversion_factor': {
+        'hệ số quy đổi', 'he so quy doi', 'conversion factor', 'conversion_factor',
+        'số chiếc/hộp', 'so chiec/hop', 'số cái/hộp', 'so cai/hop',
+        'số cái trong hộp', 'so cai trong hop', 'số chiếc trong hộp',
+        'sl trong hộp', 'sl trong hop', 'qty per box', 'pcs per box',
+        'số mét/cuộn', 'so met/cuon', 'met moi cuon',
+    },
     'warranty': {'bảo hành', 'bao hanh', 'warranty'},
     'cost_price': {'giá nhập', 'gia nhap', 'cost', 'cost_price'},
     'retail_price': {'giá bán lẻ', 'gia ban le', 'giá bán', 'retail', 'retail_price'},
@@ -4004,13 +5057,15 @@ def product_row_from_import(row, col_map):
         'model': cell('model'),
         'variant': cell('variant'),
         'unit': cell('unit', 'cái') or 'cái',
+        'purchase_unit': cell('purchase_unit') or cell('unit', 'cái') or 'cái',
+        'conversion_factor': parse_qty(cell('conversion_factor'), 1.0),
         'warranty': cell('warranty'),
         'cost_price': parse_int(cell('cost_price'), 0),
         'retail_price': parse_int(cell('retail_price'), 0),
         'dealer_price': parse_int(cell('dealer_price'), 0),
         'project_price': parse_int(cell('project_price'), 0),
-        'stock': parse_int(cell('stock'), 0),
-        'low_stock': parse_int(cell('low_stock'), 5),
+        'stock': parse_qty(cell('stock'), 0),
+        'low_stock': parse_qty(cell('low_stock'), 5),
         'is_active': parse_import_active_status(cell('status', 'Đang bán')),
     }
     path = resolve_import_category_path(raw)
@@ -4023,6 +5078,19 @@ def product_row_from_import(row, col_map):
         raw['category_parent'] = path
     return raw
 
+def _apply_import_unit_fields(product, data):
+    base = (data.get('unit') or data.get('base_unit') or 'cái').strip() or 'cái'
+    purchase = (data.get('purchase_unit') or base).strip() or base
+    factor = parse_qty(data.get('conversion_factor'), 1.0)
+    if factor <= 0:
+        factor = 1.0
+    enabled = purchase.lower() != base.lower() or factor != 1.0
+    product.unit = base
+    product.base_unit = base
+    product.purchase_unit = purchase if enabled else base
+    product.unit_conversion_enabled = enabled
+    product.conversion_factor = factor if enabled else 1.0
+
 def product_to_export_row(product):
     parent_name, child_name = product_category_parts(product)
     _, sale_label = product_sale_status(product)
@@ -4034,7 +5102,9 @@ def product_to_export_row(product):
         product_brand_name(product),
         product.model or '',
         product.variant or '',
-        product.unit or 'cái',
+        product_base_unit(product),
+        product_purchase_unit(product) if product_has_unit_conversion(product) else product_base_unit(product),
+        product_conversion_factor(product) if product_has_unit_conversion(product) else '',
         product.warranty or '',
         product.cost_price or 0,
         product.retail_price or 0,
@@ -4066,7 +5136,7 @@ def build_products_xlsx_bytes(rows):
         cell.alignment = Alignment(horizontal='center')
     ws.freeze_panes = 'A2'
     from openpyxl.utils import get_column_letter
-    widths = [14, 28, 16, 18, 14, 12, 14, 8, 12, 12, 12, 12, 12, 8, 10, 12]
+    widths = [14, 28, 16, 18, 14, 12, 14, 10, 12, 14, 12, 12, 12, 12, 12, 8, 10, 12]
     for idx, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
     buf = io.BytesIO()
@@ -4175,7 +5245,7 @@ def import_product_data_list(items, update_existing=False):
             existing.name = name
             existing.model = data['model']
             existing.variant = data['variant']
-            existing.unit = data['unit']
+            _apply_import_unit_fields(existing, data)
             existing.warranty = data['warranty']
             existing.cost_price = data['cost_price']
             existing.retail_price = data['retail_price']
@@ -4189,12 +5259,13 @@ def import_product_data_list(items, update_existing=False):
             continue
         p = Product(
             sku=sku, name=name,
-            model=data['model'], variant=data['variant'], unit=data['unit'],
+            model=data['model'], variant=data['variant'],
             warranty=data['warranty'], cost_price=data['cost_price'],
             retail_price=data['retail_price'], dealer_price=data['dealer_price'],
             project_price=data['project_price'], stock=data['stock'],
             low_stock=data['low_stock'], is_active=data['is_active'],
         )
+        _apply_import_unit_fields(p, data)
         _apply_import_taxonomy(p, data)
         db.session.add(p)
         created += 1
@@ -4879,15 +5950,18 @@ def products():
             cost_price=parse_int(request.form.get('cost_price')),
             retail_price=parse_int(request.form.get('retail_price')),
             project_price=parse_int(request.form.get('project_price')),
-            stock=parse_int(request.form.get('stock')),
+            stock=parse_qty(request.form.get('stock')),
         )
         assign_product_taxonomy_from_form(p)
+        apply_product_unit_from_form(p)
+        p.model = request.form.get('model', '')
+        p.variant = request.form.get('variant', '')
+        p.low_stock = parse_qty(request.form.get('low_stock'), 5)
         db.session.add(p)
         db.session.flush()
         if not save_product_images(p, request.files.getlist('images')):
             db.session.rollback()
             return redirect(url_for('products'))
-        apply_product_suppliers_from_form(p)
         db.session.commit()
         flash('Đã thêm sản phẩm', 'success')
         return redirect(url_for('products'))
@@ -4906,9 +5980,6 @@ def products():
         ids = [p.id for p in pagination.items]
         for h in PriceHistory.query.filter(PriceHistory.product_id.in_(ids)).order_by(PriceHistory.created_at.desc()).all():
             price_histories.setdefault(h.product_id, []).append(h)
-        product_suppliers = product_suppliers_map(ids)
-    else:
-        product_suppliers = {}
     return render_template(
         'products.html',
         pagination=pagination,
@@ -4927,7 +5998,6 @@ def products():
         taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
         brands_catalog_json=json.dumps(brands_catalog_json(), ensure_ascii=False),
         price_histories=price_histories,
-        product_suppliers=product_suppliers,
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
         all_suppliers=active_suppliers(),
@@ -4948,14 +6018,12 @@ def product_detail(pid):
         .limit(50)
         .all(),
     }
-    product_suppliers = {p.id: product_supplier_links(p)}
     return render_template(
         'product_detail.html',
         p=p,
         parent_categories=parent_categories(),
         brands_list=Brand.query.order_by(Brand.name).all(),
         price_histories=price_histories,
-        product_suppliers=product_suppliers,
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
         all_suppliers=active_suppliers(),
@@ -4988,7 +6056,6 @@ def update_product(pid):
         delete_all_product_image_files(p)
     if not save_product_images(p, request.files.getlist('images')):
         return products_redirect_after_save()
-    apply_product_suppliers_from_form(p)
     db.session.commit()
     return products_redirect_after_save('Đã cập nhật sản phẩm')
 
@@ -5000,13 +6067,6 @@ def update_price(pid):
     if changed:
         return products_redirect_after_save('Đã cập nhật giá')
     return products_redirect_after_save('Không có thay đổi giá', 'info')
-
-@app.route('/products/<int:pid>/suppliers', methods=['POST'])
-def update_product_suppliers(pid):
-    p = Product.query.get_or_404(pid)
-    apply_product_suppliers_from_form(p)
-    db.session.commit()
-    return products_redirect_after_save('Đã cập nhật nhà cung cấp')
 
 @app.route('/products/export')
 def products_export():
@@ -5187,11 +6247,11 @@ def delete_order(oid):
 def adjust_product_stock(pid):
     ensure_stock_movement_columns()
     p = Product.query.get_or_404(pid)
-    qty = max(parse_int(request.form.get('qty')), 0)
+    qty = max(parse_qty(request.form.get('qty')), 0)
     mtype = request.form.get('movement_type', 'IN')
     if qty <= 0:
         return products_redirect_after_save('Số lượng phải lớn hơn 0', 'warning')
-    if mtype == 'OUT' and p.stock < qty:
+    if mtype == 'OUT' and p.stock < qty - 1e-9:
         return products_redirect_after_save('Tồn kho không đủ để xuất', 'danger')
     if mtype == 'IN':
         p.stock += qty
@@ -5203,6 +6263,7 @@ def adjust_product_stock(pid):
         supplier_id=supplier_id,
         movement_type=mtype,
         qty=qty,
+        purchase_qty=0,
         ref_code=request.form.get('ref_code', '').strip(),
         method=normalize_stock_method(mtype, request.form.get('method')),
         warehouse=DEFAULT_WAREHOUSE,
@@ -5410,15 +6471,34 @@ def update_quote(qid):
     flash('Đã cập nhật báo giá', 'success')
     return quotes_redirect(tab=request.form.get('_tab', 'list'))
 
-def _quote_doc_preview_page(quote, file_path, doc_title, download_endpoint, view_endpoint):
+def _quote_doc_preview_page(
+    quote,
+    file_path,
+    doc_title,
+    download_docx_endpoint,
+    download_pdf_endpoint,
+    view_pdf_endpoint,
+):
     if not file_path or not Path(file_path).is_file():
         flash('Không tìm thấy file tài liệu', 'danger')
+        return redirect(url_for('quote_preview', qid=quote.id))
+    try:
+        urls = preview_pdf_urls(
+            file_path,
+            view_pdf_endpoint,
+            download_docx_endpoint,
+            download_pdf_endpoint,
+            qid=quote.id,
+        )
+    except (RuntimeError, FileNotFoundError) as e:
+        flash(str(e), 'danger')
         return redirect(url_for('quote_preview', qid=quote.id))
     return docx_preview_page(
         doc_title,
         quote_customer_label(quote),
-        url_for(view_endpoint, qid=quote.id),
-        url_for(download_endpoint, qid=quote.id),
+        urls['pdf_url'],
+        urls['docx_download_url'],
+        urls['pdf_download_url'],
         url_for('quote_preview', qid=quote.id),
     )
 
@@ -5430,7 +6510,8 @@ def preview_quote_sale_contract(qid):
         quote, quote.sale_contract_path,
         f'HĐMB/{quote.quote_code}',
         'download_quote_sale_contract',
-        'view_quote_sale_contract',
+        'download_quote_sale_contract_pdf',
+        'view_quote_sale_contract_pdf',
     )
 
 @app.route('/quotes/<int:qid>/sale-contract/view')
@@ -5442,6 +6523,15 @@ def view_quote_sale_contract(qid):
         abort(404)
     return send_docx_inline(quote.sale_contract_path, f'HĐMB-{quote.quote_code}.docx')
 
+@app.route('/quotes/<int:qid>/sale-contract/view.pdf')
+def view_quote_sale_contract_pdf(qid):
+    ensure_quote_columns()
+    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    if not quote.sale_contract_path or not Path(quote.sale_contract_path).is_file():
+        abort(404)
+    pdf_path = ensure_pdf_for_docx(quote.sale_contract_path)
+    return send_pdf_inline(pdf_path, f'HĐMB-{quote.quote_code}.pdf')
+
 @app.route('/quotes/<int:qid>/sale-contract/download')
 def download_quote_sale_contract(qid):
     ensure_quote_columns()
@@ -5451,6 +6541,21 @@ def download_quote_sale_contract(qid):
         return redirect(url_for('quote_preview', qid=qid))
     return send_file(quote.sale_contract_path, as_attachment=True, download_name=Path(quote.sale_contract_path).name)
 
+@app.route('/quotes/<int:qid>/sale-contract/download.pdf')
+def download_quote_sale_contract_pdf(qid):
+    ensure_quote_columns()
+    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    if not quote.sale_contract_path or not Path(quote.sale_contract_path).is_file():
+        flash('Không tìm thấy hợp đồng mua bán', 'danger')
+        return redirect(url_for('quote_preview', qid=qid))
+    pdf_path = ensure_pdf_for_docx(quote.sale_contract_path)
+    return send_file(
+        pdf_path,
+        mimetype=PDF_MIMETYPE,
+        as_attachment=True,
+        download_name=Path(quote.sale_contract_path).stem + '.pdf',
+    )
+
 @app.route('/quotes/<int:qid>/handover/preview')
 def preview_quote_handover(qid):
     ensure_quote_columns()
@@ -5459,7 +6564,8 @@ def preview_quote_handover(qid):
         quote, quote.handover_doc_path,
         f'BBGH/{quote.quote_code}',
         'download_quote_handover',
-        'view_quote_handover',
+        'download_quote_handover_pdf',
+        'view_quote_handover_pdf',
     )
 
 @app.route('/quotes/<int:qid>/handover/view')
@@ -5471,6 +6577,15 @@ def view_quote_handover(qid):
         abort(404)
     return send_docx_inline(quote.handover_doc_path, f'BBGH-{quote.quote_code}.docx')
 
+@app.route('/quotes/<int:qid>/handover/view.pdf')
+def view_quote_handover_pdf(qid):
+    ensure_quote_columns()
+    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    if not quote.handover_doc_path or not Path(quote.handover_doc_path).is_file():
+        abort(404)
+    pdf_path = ensure_pdf_for_docx(quote.handover_doc_path)
+    return send_pdf_inline(pdf_path, f'BBGH-{quote.quote_code}.pdf')
+
 @app.route('/quotes/<int:qid>/handover/download')
 def download_quote_handover(qid):
     ensure_quote_columns()
@@ -5480,16 +6595,43 @@ def download_quote_handover(qid):
         return redirect(url_for('quote_preview', qid=qid))
     return send_file(quote.handover_doc_path, as_attachment=True, download_name=Path(quote.handover_doc_path).name)
 
+@app.route('/quotes/<int:qid>/handover/download.pdf')
+def download_quote_handover_pdf(qid):
+    ensure_quote_columns()
+    quote = ensure_quote_documents(Quote.query.get_or_404(qid))
+    if not quote.handover_doc_path or not Path(quote.handover_doc_path).is_file():
+        flash('Không tìm thấy biên bản nhận hàng', 'danger')
+        return redirect(url_for('quote_preview', qid=qid))
+    pdf_path = ensure_pdf_for_docx(quote.handover_doc_path)
+    return send_file(
+        pdf_path,
+        mimetype=PDF_MIMETYPE,
+        as_attachment=True,
+        download_name=Path(quote.handover_doc_path).stem + '.pdf',
+    )
+
 QUOTE_SALE_DRAFT_KEY = 'quote_sale_draft_path'
 QUOTE_HANDOVER_DRAFT_KEY = 'quote_handover_draft_path'
 
-def _quote_doc_draft_preview(quote, doc, title, view_endpoint, download_endpoint, back_url, session_key):
-    clear_path = session.get(session_key)
-    if clear_path and Path(clear_path).is_file():
-        Path(clear_path).unlink(missing_ok=True)
+def _quote_doc_draft_preview(quote, doc, title, view_pdf_endpoint, download_docx_endpoint, download_pdf_endpoint, back_url, session_key):
+    _unlink_preview_file(session.pop(session_key, None))
     temp_path = save_temp_docx(doc, 'quote_doc_draft')
+    try:
+        ensure_pdf_for_docx(temp_path, force=True)
+    except (RuntimeError, FileNotFoundError) as e:
+        _unlink_preview_file(str(temp_path))
+        flash(str(e), 'danger')
+        return redirect(back_url)
     session[session_key] = str(temp_path)
-    return docx_preview_page(title, quote_customer_label(quote), view_endpoint, download_endpoint, back_url, is_draft=True)
+    return docx_preview_page(
+        title,
+        quote_customer_label(quote),
+        url_for(view_pdf_endpoint),
+        url_for(download_docx_endpoint),
+        url_for(download_pdf_endpoint),
+        back_url,
+        is_draft=True,
+    )
 
 @app.route('/quotes/<int:qid>/sale-contract/update', methods=['POST'])
 def update_quote_sale_contract(qid):
@@ -5526,8 +6668,9 @@ def preview_quote_sale_contract_draft(qid):
     back = url_for('quote_preview', qid=qid) if request.form.get('_back') == 'preview' else url_for('quotes')
     return _quote_doc_draft_preview(
         quote, doc, f'HĐMB/{quote.quote_code}',
-        url_for('view_quote_sale_contract_draft'),
-        url_for('download_quote_sale_contract_draft'),
+        'view_quote_sale_contract_draft_pdf',
+        'download_quote_sale_contract_draft',
+        'download_quote_sale_contract_draft_pdf',
         back, QUOTE_SALE_DRAFT_KEY,
     )
 
@@ -5548,42 +6691,79 @@ def preview_quote_handover_draft(qid):
     back = url_for('quote_preview', qid=qid) if request.form.get('_back') == 'preview' else url_for('quotes')
     return _quote_doc_draft_preview(
         quote, doc, f'BBGH/{quote.quote_code}',
-        url_for('view_quote_handover_draft'),
-        url_for('download_quote_handover_draft'),
+        'view_quote_handover_draft_pdf',
+        'download_quote_handover_draft',
+        'download_quote_handover_draft_pdf',
         back, QUOTE_HANDOVER_DRAFT_KEY,
     )
 
+def _draft_docx_path(session_key):
+    path = session.get(session_key)
+    if not path or not Path(path).is_file():
+        return None
+    return Path(path)
+
 @app.route('/quotes/sale-contract/draft/view')
 def view_quote_sale_contract_draft():
-    path = session.get(QUOTE_SALE_DRAFT_KEY)
-    if not path or not Path(path).is_file():
-        from flask import abort
+    path = _draft_docx_path(QUOTE_SALE_DRAFT_KEY)
+    if not path:
         abort(404)
     return send_docx_inline(path, 'hop-dong-mua-ban-nhap.docx')
 
+@app.route('/quotes/sale-contract/draft/view.pdf')
+def view_quote_sale_contract_draft_pdf():
+    path = _draft_docx_path(QUOTE_SALE_DRAFT_KEY)
+    if not path:
+        abort(404)
+    return send_pdf_inline(ensure_pdf_for_docx(path), 'hop-dong-mua-ban-nhap.pdf')
+
 @app.route('/quotes/sale-contract/draft/download')
 def download_quote_sale_contract_draft():
-    path = session.get(QUOTE_SALE_DRAFT_KEY)
-    if not path or not Path(path).is_file():
+    path = _draft_docx_path(QUOTE_SALE_DRAFT_KEY)
+    if not path:
         flash('Không tìm thấy bản nháp', 'danger')
         return redirect(url_for('quotes'))
-    return send_file(path, as_attachment=True, download_name=Path(path).name)
+    return send_file(path, as_attachment=True, download_name=path.name)
+
+@app.route('/quotes/sale-contract/draft/download.pdf')
+def download_quote_sale_contract_draft_pdf():
+    path = _draft_docx_path(QUOTE_SALE_DRAFT_KEY)
+    if not path:
+        flash('Không tìm thấy bản nháp', 'danger')
+        return redirect(url_for('quotes'))
+    pdf_path = ensure_pdf_for_docx(path)
+    return send_file(pdf_path, mimetype=PDF_MIMETYPE, as_attachment=True, download_name=path.stem + '.pdf')
 
 @app.route('/quotes/handover/draft/view')
 def view_quote_handover_draft():
-    path = session.get(QUOTE_HANDOVER_DRAFT_KEY)
-    if not path or not Path(path).is_file():
-        from flask import abort
+    path = _draft_docx_path(QUOTE_HANDOVER_DRAFT_KEY)
+    if not path:
         abort(404)
     return send_docx_inline(path, 'bien-ban-nhan-hang-nhap.docx')
 
+@app.route('/quotes/handover/draft/view.pdf')
+def view_quote_handover_draft_pdf():
+    path = _draft_docx_path(QUOTE_HANDOVER_DRAFT_KEY)
+    if not path:
+        abort(404)
+    return send_pdf_inline(ensure_pdf_for_docx(path), 'bien-ban-nhan-hang-nhap.pdf')
+
 @app.route('/quotes/handover/draft/download')
 def download_quote_handover_draft():
-    path = session.get(QUOTE_HANDOVER_DRAFT_KEY)
-    if not path or not Path(path).is_file():
+    path = _draft_docx_path(QUOTE_HANDOVER_DRAFT_KEY)
+    if not path:
         flash('Không tìm thấy bản nháp', 'danger')
         return redirect(url_for('quotes'))
-    return send_file(path, as_attachment=True, download_name=Path(path).name)
+    return send_file(path, as_attachment=True, download_name=path.name)
+
+@app.route('/quotes/handover/draft/download.pdf')
+def download_quote_handover_draft_pdf():
+    path = _draft_docx_path(QUOTE_HANDOVER_DRAFT_KEY)
+    if not path:
+        flash('Không tìm thấy bản nháp', 'danger')
+        return redirect(url_for('quotes'))
+    pdf_path = ensure_pdf_for_docx(path)
+    return send_file(pdf_path, mimetype=PDF_MIMETYPE, as_attachment=True, download_name=path.stem + '.pdf')
 
 @app.route('/quotes/<int:qid>/preview')
 def quote_preview(qid):
@@ -5599,6 +6779,7 @@ def quote_preview(qid):
         companies=list_company_profiles(),
         active_company_id=get_company_row().id if get_company_row() else None,
         doc_tab='list',
+        back_url=app_back_url('quotes'),
     )
 
 @app.route('/quotes/<int:qid>/print')
@@ -5636,7 +6817,7 @@ def contracts():
             customer, code, signed, expired, quote_id, company_id = parse_contract_form()
         except ValueError as e:
             flash(str(e), 'warning')
-            return redirect(url_for('contracts'))
+            return redirect(url_for('contracts', open_add='contract'))
         out_path = apply_contract_doc(None, customer, code, signed, expired, company_id)
         contract = Contract(
             contract_code=code,
@@ -5662,6 +6843,8 @@ def contracts():
         active_company_id=get_company_row().id if get_company_row() else None,
         today=today,
         year_end=year_end,
+        open_add_modal=request.args.get('open_add') == 'contract',
+        preselect_customer_id=request.args.get('customer_id', type=int),
     )
 
 @app.route('/contracts/preview', methods=['POST'])
@@ -5672,17 +6855,24 @@ def preview_contract_draft():
         customer, code, signed, expired, _, company_id = parse_contract_form(contract)
     except ValueError as e:
         flash(str(e), 'warning')
-        return redirect(url_for('contracts'))
+        return redirect(url_for('contracts', open_add='contract'))
     doc = build_contract_doc(customer, code, signed, expired, company_id=company_id)
     clear_contract_draft_temp()
     temp_path = save_temp_docx(doc, 'contract_draft')
+    try:
+        ensure_pdf_for_docx(temp_path, force=True)
+    except (RuntimeError, FileNotFoundError) as e:
+        _unlink_preview_file(str(temp_path))
+        flash(str(e), 'danger')
+        return redirect(url_for('contracts', open_add='contract'))
     session[CONTRACT_DRAFT_SESSION_KEY] = str(temp_path)
     return docx_preview_page(
         code,
         customer.name,
-        url_for('view_contract_draft'),
+        url_for('view_contract_draft_pdf'),
         url_for('download_contract_draft'),
-        url_for('contracts'),
+        url_for('download_contract_draft_pdf'),
+        url_for('contracts', open_add='contract'),
         is_draft=True,
     )
 
@@ -5717,9 +6907,15 @@ def update_contract(cid):
 def view_contract_draft():
     path = session.get(CONTRACT_DRAFT_SESSION_KEY)
     if not path or not Path(path).is_file():
-        from flask import abort
         abort(404)
     return send_docx_inline(path, 'hop-dong-nhap.docx')
+
+@app.route('/contracts/preview/view.pdf')
+def view_contract_draft_pdf():
+    path = session.get(CONTRACT_DRAFT_SESSION_KEY)
+    if not path or not Path(path).is_file():
+        abort(404)
+    return send_pdf_inline(ensure_pdf_for_docx(path), 'hop-dong-nhap.pdf')
 
 @app.route('/contracts/preview/download')
 def download_contract_draft():
@@ -5729,32 +6925,80 @@ def download_contract_draft():
         return redirect(url_for('contracts'))
     return send_file(path, as_attachment=True, download_name=Path(path).name)
 
+@app.route('/contracts/preview/download.pdf')
+def download_contract_draft_pdf():
+    path = session.get(CONTRACT_DRAFT_SESSION_KEY)
+    if not path or not Path(path).is_file():
+        flash('Không tìm thấy bản nháp hợp đồng', 'danger')
+        return redirect(url_for('contracts'))
+    pdf_path = ensure_pdf_for_docx(path)
+    return send_file(
+        pdf_path,
+        mimetype=PDF_MIMETYPE,
+        as_attachment=True,
+        download_name=Path(path).stem + '.pdf',
+    )
+
 @app.route('/contracts/<int:cid>/preview')
 def preview_contract(cid):
     c = Contract.query.get_or_404(cid)
-    if not c.file_path or not Path(c.file_path).exists():
+    if not c.file_path or not Path(c.file_path).is_file():
         flash('Không tìm thấy file hợp đồng', 'danger')
+        return redirect(url_for('contracts'))
+    try:
+        urls = preview_pdf_urls(
+            c.file_path,
+            'view_contract_pdf',
+            'download_contract',
+            'download_contract_pdf',
+            cid=c.id,
+        )
+    except (RuntimeError, FileNotFoundError) as e:
+        flash(str(e), 'danger')
         return redirect(url_for('contracts'))
     return docx_preview_page(
         c.contract_code,
         c.customer.name,
-        url_for('view_contract', cid=c.id),
-        url_for('download_contract', cid=c.id),
-        url_for('contracts'),
+        urls['pdf_url'],
+        urls['docx_download_url'],
+        urls['pdf_download_url'],
+        app_back_url('contracts'),
     )
 
 @app.route('/contracts/<int:cid>/view')
 def view_contract(cid):
     c = Contract.query.get_or_404(cid)
     if not c.file_path or not Path(c.file_path).is_file():
-        from flask import abort
         abort(404)
     return send_docx_inline(c.file_path, f'{c.contract_code}.docx')
+
+@app.route('/contracts/<int:cid>/view.pdf')
+def view_contract_pdf(cid):
+    c = Contract.query.get_or_404(cid)
+    if not c.file_path or not Path(c.file_path).is_file():
+        abort(404)
+    pdf_path = ensure_pdf_for_docx(c.file_path)
+    return send_pdf_inline(pdf_path, f'{c.contract_code}.pdf')
 
 @app.route('/download/contract/<int:cid>')
 def download_contract(cid):
     c = Contract.query.get_or_404(cid)
-    return send_file(c.file_path, as_attachment=True)
+    if not c.file_path or not Path(c.file_path).is_file():
+        abort(404)
+    return send_file(c.file_path, as_attachment=True, download_name=Path(c.file_path).name)
+
+@app.route('/download/contract/<int:cid>.pdf')
+def download_contract_pdf(cid):
+    c = Contract.query.get_or_404(cid)
+    if not c.file_path or not Path(c.file_path).is_file():
+        abort(404)
+    pdf_path = ensure_pdf_for_docx(c.file_path)
+    return send_file(
+        pdf_path,
+        mimetype=PDF_MIMETYPE,
+        as_attachment=True,
+        download_name=Path(c.file_path).stem + '.pdf',
+    )
 
 @app.route('/orders', methods=['GET', 'POST'])
 def orders():
@@ -5959,6 +7203,7 @@ def order_preview(oid):
         status=effective_order_status(o),
         payment=order_payment_status(o),
         balance=order_balance(o),
+        back_url=app_back_url('orders'),
     )
 
 @app.route('/orders/<int:oid>/print')
@@ -5981,11 +7226,11 @@ def stock():
     ensure_stock_movement_columns()
     if request.method == 'POST':
         p = Product.query.get_or_404(int(request.form['product_id']))
-        qty = max(parse_int(request.form.get('qty')), 0)
+        qty = max(parse_qty(request.form.get('qty')), 0)
         mtype = request.form.get('movement_type', 'IN')
         if qty <= 0:
             return stock_redirect_after_save('Số lượng phải lớn hơn 0', 'danger')
-        if mtype == 'OUT' and p.stock < qty:
+        if mtype == 'OUT' and p.stock < qty - 1e-9:
             return stock_redirect_after_save('Tồn kho không đủ để xuất', 'danger')
         if mtype == 'IN':
             p.stock += qty
@@ -5997,6 +7242,7 @@ def stock():
             supplier_id=supplier_id,
             movement_type=mtype,
             qty=qty,
+            purchase_qty=0,
             ref_code=request.form.get('ref_code', '').strip(),
             method=normalize_stock_method(mtype, request.form.get('method')),
             warehouse=request.form.get('warehouse', DEFAULT_WAREHOUSE).strip() or DEFAULT_WAREHOUSE,
@@ -6020,11 +7266,11 @@ def stock():
         like = f"%{filters['q']}%"
         query = query.filter(or_(Product.sku.ilike(like), Product.name.ilike(like)))
     if filters['status'] == 'ok':
-        query = query.filter(Product.stock > Product.low_stock)
+        query = query.filter(Product.stock_qty > Product.low_stock)
     elif filters['status'] == 'low':
-        query = query.filter(Product.stock > 0, Product.stock <= Product.low_stock)
+        query = query.filter(Product.stock_qty > 0, Product.stock_qty <= Product.low_stock)
     elif filters['status'] == 'out':
-        query = query.filter(Product.stock <= 0)
+        query = query.filter(Product.stock_qty <= 0)
 
     pagination = query.order_by(Product.name).paginate(page=page, per_page=per_page, error_out=False)
     inventory_rows = [product_stock_row(p, date_from, date_to) for p in pagination.items]
@@ -6102,7 +7348,10 @@ def stock_export():
     writer.writerow(['SKU', 'Sản phẩm', 'Kho', 'Tồn đầu kỳ', 'Nhập', 'Xuất', 'Tồn hiện tại', 'Đơn vị', 'Trạng thái'])
     for r in rows:
         p = r['product']
-        writer.writerow([p.sku, p.name, r['warehouse'], r['opening'], r['inbound'], r['outbound'], r['current'], p.unit, r['status_label']])
+        writer.writerow([
+            p.sku, p.name, r['warehouse'], r['opening'], r['inbound'], r['outbound'],
+            r['current'], product_base_unit(p), r['status_label'],
+        ])
     return Response(
         '\ufeff' + buf.getvalue(),
         mimetype='text/csv; charset=utf-8',
@@ -6356,9 +7605,12 @@ def init_db():
     CONTRACT_SIGNED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ORDER_HANDOVER_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    ensure_company_profiles()
+    SUPPLIER_PAYMENT_RECEIPT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ensure_category_brand_schema()
     ensure_product_supplier_schema()
+    ensure_supplier_intake_schema()
+    ensure_supplier_intake_line_columns()
+    ensure_company_profiles()
     ensure_walkin_customer()
     if User.query.count() == 0:
         admin = User(

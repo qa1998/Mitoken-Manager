@@ -869,6 +869,7 @@ function initProductUnitSetup(root) {
     var hint = panel.querySelector('[data-unit-hint]');
     var presetWireBtn = panel.querySelector('[data-unit-preset-wire]');
     var presetBoxBtn = panel.querySelector('[data-unit-preset-box]');
+    var presetBulkBtn = panel.querySelector('[data-unit-preset-bulk]');
 
     function syncUnitLabels() {
       var base = (baseInput && baseInput.value.trim()) || 'cái';
@@ -900,6 +901,155 @@ function initProductUnitSetup(root) {
       syncUnitLabels();
     }
 
+    var saleBlock = panel.querySelector('[data-unit-sale-block]');
+    var saleModeInput = panel.querySelector('[data-sale-unit-mode-input]');
+    var saleBtnBase = panel.querySelector('[data-sale-btn-base]');
+    var saleBtnPurchase = panel.querySelector('[data-sale-btn-purchase]');
+    var saleBtnLot = panel.querySelector('[data-sale-btn-lot]');
+    var saleHint = panel.querySelector('[data-sale-unit-hint]');
+
+    function getSaleMode() {
+      return (saleModeInput && saleModeInput.value) || 'base';
+    }
+
+    function syncProductCostForSaleMode(prevMode, newMode) {
+      var form = panel.closest('form');
+      if (!form) return;
+      var priceCard = form.querySelector('[data-product-price-setup]');
+      if (!priceCard || priceCard.getAttribute('data-has-conv') !== '1') return;
+      var factor = parseFloat(priceCard.getAttribute('data-conversion-factor')) || 1;
+      if (factor <= 0) return;
+      var base = (baseInput && baseInput.value.trim()) || 'cái';
+      var purchase = (purchaseInput && purchaseInput.value.trim()) || base;
+      var costInput = priceCard.querySelector('[data-product-cost-input]');
+      if (!costInput) return;
+      var raw = (costInput.value || '').replace(/\D/g, '');
+      var val = parseInt(raw, 10) || 0;
+      if (val > 0 && prevMode && newMode && prevMode !== newMode) {
+        if (prevMode === 'purchase' && newMode === 'base') {
+          val = Math.round(val / factor);
+        } else if (prevMode === 'base' && newMode === 'purchase') {
+          val = Math.round(val * factor);
+        }
+        costInput.value =
+          typeof window.formatMoneyInputValue === 'function'
+            ? window.formatMoneyInputValue(String(val))
+            : String(val);
+      }
+      var unitLabel = newMode === 'purchase' ? purchase : base;
+      priceCard.querySelectorAll('[data-cost-unit-label]').forEach(function (el) {
+        el.textContent = unitLabel;
+      });
+      var hint = priceCard.querySelector('[data-cost-equiv-hint]');
+      if (hint) {
+        var disp = parseInt((costInput.value || '').replace(/\D/g, ''), 10) || 0;
+        if (disp > 0) {
+          if (newMode === 'purchase') {
+            var perBase = Math.round(disp / factor);
+            hint.innerHTML =
+              'Tương đương <strong>' +
+              (perBase.toLocaleString('vi-VN')) +
+              ' đ/' +
+              base +
+              '</strong> tồn kho';
+          } else {
+            var perPu = Math.round(disp * factor);
+            hint.innerHTML =
+              'Tương đương <strong>' +
+              (perPu.toLocaleString('vi-VN')) +
+              ' đ/' +
+              purchase +
+              '</strong>';
+          }
+        }
+      }
+      priceCard.setAttribute('data-sale-mode', newMode);
+    }
+
+    function setSaleMode(mode, options) {
+      options = options || {};
+      if (!saleModeInput) return;
+      var prev = getSaleMode();
+      saleModeInput.value = mode;
+      panel.querySelectorAll('.product-sale-unit-btn').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-sale-mode') === mode);
+      });
+      if (!options.skipCostConvert && prev !== mode) {
+        syncProductCostForSaleMode(prev, mode);
+      }
+    }
+
+    function syncSaleUnitLabels() {
+      var base = (baseInput && baseInput.value.trim()) || 'cái';
+      var purchase = (purchaseInput && purchaseInput.value.trim()) || base;
+      var lotName = (lotUnitInput && lotUnitInput.value.trim()) || 'Lô';
+      var convOn = toggle && toggle.checked;
+      panel.querySelectorAll('[data-sale-label-base]').forEach(function (el) {
+        el.textContent = base;
+      });
+      panel.querySelectorAll('[data-sale-label-purchase]').forEach(function (el) {
+        el.textContent = purchase;
+      });
+      panel.querySelectorAll('[data-sale-label-lot]').forEach(function (el) {
+        el.textContent = lotName;
+      });
+      if (saleBtnPurchase) {
+        var purchaseOk = convOn && purchase.toLowerCase() !== base.toLowerCase();
+        saleBtnPurchase.disabled = !purchaseOk;
+        saleBtnPurchase.classList.remove('d-none');
+        saleBtnPurchase.classList.toggle('opacity-50', !purchaseOk);
+        saleBtnPurchase.title = purchaseOk
+          ? ''
+          : convOn
+            ? 'Đặt đơn vị nhập khác đơn vị tồn (VD: Thùng vs kg)'
+            : 'Bật「Có quy đổi đơn vị」hoặc bấm「Mẫu thùng/kg」';
+      }
+      if (saleBtnLot) {
+        var showLot = convOn && lotToggle && lotToggle.checked;
+        saleBtnLot.classList.toggle('d-none', !showLot);
+        saleBtnLot.disabled = !showLot;
+      }
+      if (saleBtnBase) saleBtnBase.disabled = false;
+      if (saleBlock) {
+        saleBlock.classList.toggle('is-disabled', !convOn);
+      }
+      if (saleHint && convOn) {
+        saleHint.innerHTML =
+          'VD: tồn theo <strong>' +
+          base +
+          '</strong> — bán theo <strong>' +
+          purchase +
+          '</strong> (thùng/hộp) hoặc <strong>' +
+          base +
+          '</strong> (lẻ).';
+      } else if (saleHint) {
+        saleHint.textContent =
+          'Bật「Có quy đổi đơn vị」hoặc bấm「Mẫu thùng/kg」để chọn bán theo thùng hoặc ' + base + '.';
+      }
+      if (convOn) {
+        var mode = getSaleMode();
+        if (
+          mode === 'purchase' &&
+          (purchase.toLowerCase() === base.toLowerCase() || (saleBtnPurchase && saleBtnPurchase.disabled))
+        ) {
+          setSaleMode('base', { skipCostConvert: true });
+        } else if (mode === 'lot' && saleBtnLot && saleBtnLot.classList.contains('d-none')) {
+          setSaleMode(convOn && purchase !== base ? 'purchase' : 'base', { skipCostConvert: true });
+        }
+      } else {
+        setSaleMode('base', { skipCostConvert: true });
+      }
+    }
+
+    panel.querySelectorAll('.product-sale-unit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.disabled) return;
+        setSaleMode(btn.getAttribute('data-sale-mode') || 'base');
+      });
+    });
+
     function setConversionEnabled(enabled) {
       if (fieldsWrap) fieldsWrap.classList.toggle('is-single', !enabled);
       if (lotBlock) lotBlock.classList.toggle('d-none', !enabled);
@@ -913,6 +1063,7 @@ function initProductUnitSetup(root) {
         setLotEnabled(lotToggle.checked);
       }
       syncUnitLabels();
+      syncSaleUnitLabels();
     }
 
     if (toggle) {
@@ -924,11 +1075,15 @@ function initProductUnitSetup(root) {
     if (lotToggle) {
       lotToggle.addEventListener('change', function () {
         setLotEnabled(lotToggle.checked);
+        syncSaleUnitLabels();
       });
     }
     [baseInput, purchaseInput, factorInput, lotUnitInput, lotFactorInput].forEach(function (el) {
       if (!el) return;
-      el.addEventListener('input', syncUnitLabels);
+      el.addEventListener('input', function () {
+        syncUnitLabels();
+        syncSaleUnitLabels();
+      });
     });
     if (baseInput && toggle && toggle.checked) {
       baseInput.addEventListener('input', function () {
@@ -945,6 +1100,8 @@ function initProductUnitSetup(root) {
       if (lotFactorInput) lotFactorInput.value = cfg.lot ? String(cfg.lotFactor || 10) : '0';
       setConversionEnabled(true);
       setLotEnabled(!!cfg.lot);
+      syncSaleUnitLabels();
+      setSaleMode(cfg.saleMode || (cfg.lot ? 'lot' : 'purchase'));
     }
 
     if (presetBoxBtn) {
@@ -966,6 +1123,17 @@ function initProductUnitSetup(root) {
           lot: true,
           lotName: 'Lô',
           lotFactor: 10,
+        });
+      });
+    }
+    if (presetBulkBtn) {
+      presetBulkBtn.addEventListener('click', function () {
+        applyUnitPreset({
+          base: 'kg',
+          purchase: 'Thùng',
+          factor: 15,
+          lot: false,
+          saleMode: 'purchase',
         });
       });
     }
@@ -1100,6 +1268,7 @@ document.addEventListener('DOMContentLoaded', function () {
   initProductMultiImages();
   initProductDetailGallery();
   initProductUnitSetup();
+  initProductSuppliersPanels();
   initProductStockMethodSelects();
   initCategoryPickers();
   initTaxonomyPickers();

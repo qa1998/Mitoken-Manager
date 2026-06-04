@@ -1,23 +1,43 @@
 {% macro product_price_setup(product=none) %}
-<div class="product-price-setup-card">
+<div class="product-price-setup-card"{% if product %} data-product-price-setup
+     data-cost-base="{{ product.cost_price or 0 }}"
+     data-conversion-factor="{{ product_conversion_factor(product) }}"
+     data-has-conv="{{ 1 if product_has_unit_conversion(product) else 0 }}"
+     data-sale-mode="{{ product_cost_sale_unit_mode(product) }}"{% endif %}>
   <div class="product-price-setup-head">
     <h6 class="product-price-setup-title"><i class="bi bi-tags me-2"></i>Thiết lập giá bán</h6>
     <p class="product-price-setup-sub mb-0">Thiết lập theo thứ tự từ giá nhập đến giá bán lẻ</p>
   </div>
   <div class="row g-3 product-price-setup-grid">
     <div class="col-md-6 col-xl-3">
-      <label class="form-label-custom">Giá nhập</label>
+      <label class="form-label-custom">
+        Giá nhập
+        {% if product and product_has_unit_conversion(product) %}
+        <span class="text-muted fw-normal">(/ <span data-cost-unit-label>{{ product_cost_unit_label(product) }}</span>)</span>
+        {% endif %}
+      </label>
       <div class="money-input-wrap">
         <input type="text"
                name="cost_price"
                class="form-control money-input"
                inputmode="numeric"
                autocomplete="off"
-               value="{% if product and product.cost_price %}{{ product.cost_price|money_plain }}{% endif %}"
+               data-product-cost-input
+               value="{% if product and product.cost_price %}{{ product_cost_display_amount(product)|money_plain }}{% endif %}"
                placeholder="0">
         <span class="money-input-suffix">đ</span>
       </div>
-      <div class="product-price-field-hint">Giá mua từ nhà cung cấp</div>
+      <div class="product-price-field-hint" data-cost-equiv-hint>
+        {% if product and product_has_unit_conversion(product) %}
+          {% if product_cost_sale_unit_mode(product) == 'purchase' %}
+          Tương đương <strong>{{ product.cost_price|money }}/{{ product_base_unit(product) }}</strong> tồn kho
+          {% else %}
+          Tương đương <strong>{{ purchase_unit_cost_from_base_cost(product, product.cost_price or 0)|money }}/{{ product_purchase_unit(product) }}</strong>
+          {% endif %}
+        {% else %}
+        Giá mua từ nhà cung cấp
+        {% endif %}
+      </div>
     </div>
     <div class="col-md-6 col-xl-3">
       <label class="form-label-custom">Giá công trình</label>

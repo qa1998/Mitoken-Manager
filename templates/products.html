@@ -140,16 +140,24 @@
             </td>
             <td>{{ product_brand_name(p) or '—' }}</td>
             <td class="product-unit-list-cell">
-              <div class="product-unit-list-base">{{ product_base_unit(p) }}</div>
+              {% set udisp = product_list_unit_display(p) %}
+              <div class="product-unit-list-base">{{ udisp.primary }}</div>
               {% if product_has_unit_conversion(p) %}
-              <div class="product-unit-list-sub">{{ product_purchase_unit(p) }}</div>
-              <div class="product-unit-list-conv">{{ product_unit_conversion_label(p) }}</div>
+              {% if udisp.secondary %}
+              <div class="product-unit-list-sub">{{ udisp.secondary }}</div>
+              {% endif %}
+              <div class="product-unit-list-conv">{{ udisp.conv }}</div>
               {% else %}
               <div class="product-unit-list-sub text-muted">—</div>
               {% endif %}
             </td>
             <td class="money product-price-td">{{ p.retail_price|money }}</td>
-            <td class="money">{{ p.cost_price|money }}</td>
+            <td class="money product-cost-list-cell">
+              {{ product_cost_display_amount(p)|money }}
+              {% if product_has_unit_conversion(p) %}
+              <div class="product-cost-list-unit small-muted">/{{ product_cost_unit_label(p) }}</div>
+              {% endif %}
+            </td>
             <td>{{ p.warranty or '—' }}</td>
             <td>
               <span class="product-status-pill status-{{ sale_key }}">{{ sale_label }}</span>
@@ -181,9 +189,9 @@
                     </button>
                   </li>
                   <li>
-                    <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productEdit{{ p.id }}">
+                    <a class="dropdown-item" href="{{ url_for('product_edit', pid=p.id) }}">
                       <i class="bi bi-pencil-square me-2"></i>Sửa sản phẩm
-                    </button>
+                    </a>
                   </li>
                   <li><hr class="dropdown-divider"></li>
                   <li>

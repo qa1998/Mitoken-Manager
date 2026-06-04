@@ -1,0 +1,51 @@
+{% from 'partials/product_unit_setup.html' import product_unit_setup %}
+<div class="modal fade supplier-quick-product-modal" id="supplierQuickProductModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <form id="supplierQuickProductForm" class="supplier-quick-product-form" novalidate>
+        <input type="hidden" name="supplier_id" id="supplierQuickProductSupplierId" value="">
+        <div class="modal-header">
+          <h5 class="modal-title">Thêm sản phẩm vào danh mục</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-3">
+            Nhập SKU, tên và <strong>đơn vị</strong> (tồn: kg/chiếc…; nhập NCC: thùng/hộp/lô).
+            Sau khi thêm, hệ thống tự chọn SP trên dòng nhập và bật nút <strong>Lô / Thùng / đơn vị tồn</strong>.
+          </p>
+          <div class="alert alert-danger d-none py-2 small mb-3" id="supplierQuickProductError" role="alert"></div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">SKU / Mã <span class="text-danger">*</span></label>
+              <input type="text" name="sku" id="supplierQuickProductSku" class="form-control" required
+                     placeholder="VD: QUE-HAN-3.2" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
+              <input type="text" name="name" id="supplierQuickProductName" class="form-control" required
+                     placeholder="Tên hiển thị trong cửa hàng">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Giá nhập (tùy chọn)</label>
+              <div class="money-input-wrap">
+                <input type="text" name="cost_price" id="supplierQuickProductCost" class="form-control money-input"
+                       inputmode="numeric" autocomplete="off" placeholder="0">
+                <span class="money-input-suffix">đ</span>
+              </div>
+              <p class="form-text mb-0">Theo đơn vị nhập (thùng/hộp) nếu có quy đổi.</p>
+            </div>
+          </div>
+          <div class="supplier-quick-product-unit-block mt-3">
+            {{ product_unit_setup() }}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary" id="supplierQuickProductSubmit">
+            <i class="bi bi-plus-lg me-1"></i> Thêm &amp; chọn SP
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

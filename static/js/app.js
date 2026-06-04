@@ -1,5 +1,106 @@
 function fmtMoney(n){return (parseInt(n||0)).toLocaleString('vi-VN')+' đ'}
 
+var APP_TOAST_ICONS = {
+  success: 'bi-check-circle-fill',
+  danger: 'bi-x-circle-fill',
+  warning: 'bi-exclamation-triangle-fill',
+  info: 'bi-info-circle-fill',
+  secondary: 'bi-bell-fill',
+};
+
+function normalizeAppToastCategory(category) {
+  if (category === 'error') return 'danger';
+  if (category && APP_TOAST_ICONS[category]) return category;
+  return 'info';
+}
+
+function ensureAppToastContainer() {
+  var container = document.getElementById('appToastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'appToastContainer';
+    container.className = 'app-toast-container';
+    container.setAttribute('aria-live', 'polite');
+    container.setAttribute('aria-atomic', 'false');
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function dismissAppToast(toastEl) {
+  if (!toastEl || toastEl.classList.contains('is-hiding')) return;
+  toastEl.classList.remove('is-visible');
+  toastEl.classList.add('is-hiding');
+  window.setTimeout(function () {
+    if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+  }, 280);
+}
+
+function showAppToast(message, category, options) {
+  if (!message) return null;
+  options = options || {};
+  var cat = normalizeAppToastCategory(category);
+  var duration = typeof options.duration === 'number' ? options.duration : 5000;
+  var container = ensureAppToastContainer();
+
+  var toast = document.createElement('div');
+  toast.className = 'app-toast app-toast-' + cat;
+  toast.setAttribute('role', 'status');
+
+  var icon = document.createElement('i');
+  icon.className = 'bi ' + (APP_TOAST_ICONS[cat] || APP_TOAST_ICONS.info) + ' app-toast-icon';
+  icon.setAttribute('aria-hidden', 'true');
+
+  var text = document.createElement('span');
+  text.className = 'app-toast-text app-toast-multiline';
+  text.textContent = String(message);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn-close app-toast-close';
+  closeBtn.setAttribute('aria-label', 'Đóng');
+  closeBtn.addEventListener('click', function () {
+    dismissAppToast(toast);
+  });
+
+  toast.appendChild(icon);
+  toast.appendChild(text);
+  toast.appendChild(closeBtn);
+  container.appendChild(toast);
+
+  requestAnimationFrame(function () {
+    toast.classList.add('is-visible');
+  });
+
+  if (duration > 0) {
+    window.setTimeout(function () {
+      dismissAppToast(toast);
+    }, duration);
+  }
+  return toast;
+}
+
+window.showAppToast = showAppToast;
+
+function initAppFlashes() {
+  var dataEl = document.getElementById('app-flash-data');
+  if (!dataEl || !dataEl.textContent) return;
+  try {
+    var messages = JSON.parse(dataEl.textContent);
+    if (!Array.isArray(messages)) return;
+    messages.forEach(function (entry, index) {
+      var category = entry[0];
+      var message = entry[1];
+      window.setTimeout(function () {
+        showAppToast(message, category, { duration: 5000 });
+      }, index * 120);
+    });
+  } catch (e) {
+    /* ignore malformed flash payload */
+  }
+  dataEl.parentNode && dataEl.parentNode.removeChild(dataEl);
+}
+
 function parseMoneyInput(value) {
   return parseInt(String(value || '').replace(/\D/g, ''), 10) || 0;
 }
@@ -242,6 +343,7 @@ function openAppModalsOnLoad() {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+  initAppFlashes();
   initAppPageFillLists();
   initAppFullscreenModals();
   openAppModalsOnLoad();

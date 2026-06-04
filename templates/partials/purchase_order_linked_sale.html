@@ -1,0 +1,25 @@
+{% if po.quote_id or po.order_id or po.customer_id %}
+<div class="panel-card mb-3 p-3 po-linked-sale">
+  <h6 class="section-title mb-2"><i class="bi bi-link-45deg me-1"></i>Liên kết bán hàng</h6>
+  <div class="row g-2">
+    {% if po.quote %}
+    <div class="col-md-4">
+      <span class="small-muted">Báo giá:</span>
+      <a href="{{ url_for('quote_preview', qid=po.quote.id) }}" class="fw-semibold">{{ po.quote.quote_code }}</a>
+    </div>
+    {% endif %}
+    {% if po.customer %}
+    <div class="col-md-4">
+      <span class="small-muted">Khách hàng:</span>
+      <strong>{{ po.customer.name }}</strong>
+    </div>
+    {% endif %}
+    {% if po.order %}
+    <div class="col-md-4">
+      <span class="small-muted">Đơn hàng:</span>
+      <a href="{{ url_for('order_preview', oid=po.order.id) }}" class="fw-semibold">{{ po.order.order_code }}</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

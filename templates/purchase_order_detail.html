@@ -12,9 +12,10 @@
           <div>
             <h2 class="section-title mb-0">{{ po.po_code }}</h2>
             <p class="small-muted mb-0">
-              NCC: {% if po.supplier %}{{ po.supplier.name }}{% else %}<span class="text-warning">Chưa chọn</span>{% endif %}
-              · {{ purchase_order_receipt_mode_label(po.receipt_mode) }}
+              {% if po.supplier %}<span class="text-dark">NCC: {{ po.supplier.name }}</span> · {% endif %}
+              {{ purchase_order_receipt_mode_label(po.receipt_mode) }}
               · <span class="{% if po.status == 'Nháp' %}text-secondary{% else %}text-success{% endif %}">{{ po.status }}</span>
+              {% if po.created_at %} · {{ po.created_at.strftime('%d/%m/%Y %H:%M') }}{% endif %}
             </p>
           </div>
         </div>
@@ -23,7 +24,7 @@
         {% if po.status == 'Nháp' %}
         <form method="post" action="{{ url_for('purchase_order_receive', poid=po.id) }}" class="d-inline po-receive-form"
               data-mode="{{ po.receipt_mode }}" data-has-supplier="{{ '1' if po.supplier_id else '0' }}">
-          <button type="submit" class="btn btn-success" {% if not po.supplier_id %}disabled title="Chọn nhà cung cấp trước"{% endif %}>
+          <button type="submit" class="btn btn-success" {% if not po.supplier_id %}disabled title="Phiếu chưa có NCC"{% endif %}>
             <i class="bi bi-check2-circle me-1"></i> Xác nhận nhận hàng
           </button>
         </form>
@@ -48,7 +49,12 @@
         {% endif %}
       </div>
     </div>
+    {% if po.note %}
+    <p class="small-muted mb-0 mt-2"><strong>Ghi chú:</strong> {{ po.note }}</p>
+    {% endif %}
   </div>
+
+  {% include 'partials/purchase_order_linked_sale.html' %}
 
   {% if po.status == 'Đã nhận hàng' %}
   <div class="row g-3 mb-3">
@@ -80,18 +86,6 @@
       </div>
     </div>
   </div>
-  {% if po.receipt_mode == 'direct_delivery' or (po.receipt_mode == 'no_stock' and po.order_id) %}
-  <div class="panel-card mb-3 p-3">
-    <div class="row g-2">
-      <div class="col-md-6"><span class="small-muted">Khách hàng:</span> <strong>{{ po.customer.name if po.customer else '—' }}</strong></div>
-      <div class="col-md-6"><span class="small-muted">Đơn hàng:</span>
-        {% if po.order %}
-        <a href="{{ url_for('order_preview', oid=po.order.id) }}">{{ po.order.order_code }}</a>
-        {% else %}—{% endif %}
-      </div>
-    </div>
-  </div>
-  {% endif %}
   <div class="panel-card mb-3">
     <h5 class="section-title">Chi tiết hàng</h5>
     <div class="table-responsive">
@@ -99,6 +93,7 @@
         <thead>
           <tr>
             <th>Sản phẩm</th>
+            <th>Nhà cung cấp</th>
             <th class="text-end">SL</th>
             <th class="text-end">Giá nhập</th>
             <th class="text-end">Thành tiền</th>
@@ -109,6 +104,7 @@
           {% for line in lines %}
           <tr>
             <td>{{ line.product.sku }} — {{ line.product.name }}</td>
+            <td>{{ line.supplier.name if line.supplier else (po.supplier.name if po.supplier else '—') }}</td>
             <td class="text-end">{{ line.purchase_qty or line.qty }}</td>
             <td class="text-end">{{ line.cost_price|money }}</td>
             <td class="text-end">{{ line.line_amount|money }}</td>
@@ -118,24 +114,21 @@
         </tbody>
       </table>
     </div>
-    {% if po.ref_code or po.note %}
-    <p class="small-muted mb-0 mt-2">
-      {% if po.ref_code %}Chứng từ: {{ po.ref_code }}{% endif %}
-      {% if po.note %} · {{ po.note }}{% endif %}
-    </p>
+    {% if po.ref_code %}
+    <p class="small-muted mb-0 mt-2">Chứng từ: {{ po.ref_code }}</p>
     {% endif %}
   </div>
   {% else %}
   <div class="panel-card">
     <form method="post" action="{{ url_for('purchase_order_update', poid=po.id) }}" class="po-form">
       {% set form_uid = 'edit' %}
-      {% set po = po %}
-      {% set po_lines = lines %}
+      {% set po_lines = po_lines %}
       {% include 'partials/purchase_order_form_fields.html' %}
       <div class="d-flex gap-2 mt-3">
         <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
         <a href="{{ url_for('purchase_orders') }}" class="btn btn-outline-secondary">Hủy</a>
       </div>
+      <p class="form-text mt-2 mb-0">Phiếu này thuộc NCC <strong>{{ po.supplier.name if po.supplier else '—' }}</strong>. Thêm NCC khác trên dòng sẽ tách thành phiếu mới khi lưu.</p>
     </form>
   </div>
   {% endif %}

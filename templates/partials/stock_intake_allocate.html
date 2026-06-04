@@ -1,0 +1,82 @@
+{# Phân bổ SL nhập kho cho khách — theo đơn vị đang chọn trên dòng SP #}
+{% macro stock_intake_allocate_block(line, plan, gap, intake_customer_choices) %}
+{% set line_base = plan.line_base %}
+{% set line_display = plan.line_display %}
+{% set du = plan.display_unit %}
+{% set mode = plan.unit_mode %}
+{% set alloc_rows = gap.get('customers') or [] %}
+<tr class="stock-intake-alloc-row">
+  <td colspan="7" class="border-0 pb-3">
+    <div class="stock-intake-alloc-block stock-intake-alloc-block--active"
+         data-line-id="{{ line.id }}"
+         data-line-max-base="{{ line_base }}"
+         data-line-max-display="{{ line_display }}"
+         data-unit-mode="{{ mode }}"
+         data-alloc-options='{{ alloc_rows|tojson }}'
+         data-customer-choices='{{ intake_customer_choices|tojson }}'>
+      <div class="stock-intake-alloc-head">
+        <span class="small fw-semibold text-primary"><i class="bi bi-person-check me-1"></i>Phân bổ cho khách hàng</span>
+        <span class="small-muted">Tối đa <strong data-alloc-max-label>{{ format_qty_display(line_display) }} {{ du }}</strong> trên dòng này</span>
+      </div>
+      {% if not alloc_rows %}
+      <p class="small text-muted mb-2">
+        <i class="bi bi-exclamation-circle me-1"></i>Chưa tìm thấy đơn/báo giá có sản phẩm này — bạn vẫn phân bổ thủ công bên dưới hoặc duyệt nhập không phân bổ.
+      </p>
+      {% endif %}
+      <table class="table table-sm table-borderless mb-2 stock-intake-alloc-table">
+        <thead>
+          <tr>
+            <th>Khách hàng / Đơn</th>
+            <th class="text-end">Cần (<span data-alloc-unit-header>{{ du }}</span>)</th>
+            <th class="text-end" style="width:140px">Phân bổ (<span data-alloc-unit-header>{{ du }}</span>)</th>
+            <th style="width:36px"></th>
+          </tr>
+        </thead>
+        <tbody class="stock-intake-alloc-tbody">
+          {% for c in alloc_rows %}
+          {% set need_d = c.qty_display|default(qty_from_base_unit(line.product, c.qty, mode)) %}
+          <tr class="stock-intake-alloc-data-row" data-need-base="{{ c.qty_base|default(c.qty) }}">
+            <td>
+              <strong>{{ c.customer_name }}</strong>
+              {% if c.order_code %}
+              <div class="small">
+                <a href="{{ url_for('order_preview', oid=c.order_id) }}" target="_blank">{{ c.order_code }}</a>
+                {% if c.quote_code %}<span class="text-muted">· {{ c.quote_code }}</span>{% endif %}
+              </div>
+              {% endif %}
+              <input type="hidden" name="alloc_line_id" value="{{ line.id }}">
+              <input type="hidden" name="alloc_customer_id" value="{{ c.customer_id }}">
+              <input type="hidden" name="alloc_order_id" value="{{ c.order_id or '' }}">
+              <input type="hidden" name="alloc_quote_id" value="{{ c.quote_id or '' }}">
+              <input type="hidden" name="alloc_unit_mode" value="{{ mode }}" data-alloc-unit-mode>
+            </td>
+            <td class="text-end" data-need-display>{{ format_qty_display(need_d) }}</td>
+            <td class="text-end">
+              <input type="number" name="alloc_qty" class="form-control form-control-sm text-end stock-intake-alloc-qty"
+                     min="0" step="any"
+                     data-max-display="{{ [need_d, line_display, plan.shortfall_display]|min|round(4) }}"
+                     value="{% if loop.first and plan.shortfall > 0 %}{{ [need_d, line_display, plan.shortfall_display]|min|round(4) }}{% else %}0{% endif %}"
+                     placeholder="0">
+            </td>
+            <td></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="stock-intake-alloc-tfoot">
+            <td class="text-end small fw-semibold">Tổng phân bổ</td>
+            <td></td>
+            <td class="text-end fw-semibold text-primary">
+              <span class="stock-intake-alloc-sum" data-alloc-sum>0</span> <span data-alloc-unit-header>{{ du }}</span>
+            </td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+      <button type="button" class="btn btn-sm btn-outline-primary stock-intake-add-alloc-row">
+        <i class="bi bi-plus-lg me-1"></i>Thêm dòng phân bổ
+      </button>
+    </div>
+  </td>
+</tr>
+{% endmacro %}

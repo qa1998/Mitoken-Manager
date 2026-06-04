@@ -1,11 +1,13 @@
-{% macro product_unit_setup(p=None) %}
-{% set enabled = p.unit_conversion_enabled if p else false %}
-{% set base_u = product_base_unit(p) if p else 'cái' %}
-{% set purchase_u = product_purchase_unit(p) if p else base_u %}
-{% set factor = p.conversion_factor if p and p.conversion_factor else 1 %}
-{% set lot_enabled = product_has_lot_unit(p) if p else false %}
-{% set lot_u = product_lot_unit(p) if p else 'Lô' %}
-{% set lot_f = p.lot_factor if p and p.lot_factor else 10 %}
+{% macro product_unit_setup(p=None, unit_defaults=none) %}
+{% set ud = unit_defaults or {} %}
+{% set enabled = p.unit_conversion_enabled if p else ud.get('conversion_enabled', false) %}
+{% set base_u = product_base_unit(p) if p else ud.get('base_unit', 'cái') %}
+{% set purchase_u = product_purchase_unit(p) if p else ud.get('purchase_unit', base_u) %}
+{% set factor = p.conversion_factor if p and p.conversion_factor else ud.get('conversion_factor', 1) %}
+{% set lot_enabled = product_has_lot_unit(p) if p else ud.get('lot_enabled', false) %}
+{% set lot_u = product_lot_unit(p) if p else ud.get('lot_unit', 'Lô') %}
+{% set lot_f = p.lot_factor if p and p.lot_factor else ud.get('lot_factor', 10) %}
+{% set sale_mode = product_default_sale_unit_mode(p) if p else ud.get('sale_unit_mode', 'purchase' if enabled else 'base') %}
 <div class="product-unit-setup" data-product-unit-setup>
   <div class="product-unit-setup-head">
     <div>
@@ -21,6 +23,9 @@
       </button>
       <button type="button" class="btn btn-outline-secondary btn-sm product-unit-preset-btn" data-unit-preset-wire title="Mét + Cuộn + Lô">
         <i class="bi bi-lightning me-1"></i>Mẫu dây/ống
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm product-unit-preset-btn" data-unit-preset-bulk title="Tồn kg, nhập thùng/bao">
+        <i class="bi bi-boxes me-1"></i>Mẫu thùng/kg
       </button>
     </div>
   </div>
@@ -74,6 +79,31 @@
           </div>
         </div>
       </div>
+    </div>
+    <div class="product-unit-sale-block mt-3" id="productUnitSaleBlock" data-unit-sale-block>
+      <label class="form-label-custom mb-2">Hiển thị &amp; bán theo đơn vị nào? <span class="text-muted fw-normal">(danh sách SP, báo giá, đơn)</span></label>
+      <input type="hidden" name="sale_unit_mode" value="{{ sale_mode }}" data-sale-unit-mode-input>
+      <div class="product-unit-sale-btns d-flex flex-wrap gap-1" role="group" data-sale-unit-mode-group>
+        <button type="button" class="btn btn-outline-secondary product-sale-unit-btn{% if sale_mode == 'base' %} active{% endif %}"
+                data-sale-mode="base" data-sale-btn-base>
+          <span data-sale-label-base>{{ base_u }}</span> <small class="opacity-75">(lẻ / kg)</small>
+        </button>
+        <button type="button" class="btn btn-outline-secondary product-sale-unit-btn{% if sale_mode == 'purchase' %} active{% endif %}"
+                data-sale-mode="purchase" data-sale-btn-purchase>
+          <span data-sale-label-purchase>{{ purchase_u }}</span> <small class="opacity-75">(thùng/hộp)</small>
+        </button>
+        <button type="button" class="btn btn-outline-secondary product-sale-unit-btn{% if sale_mode == 'lot' %} active{% endif %}{% if not lot_enabled %} d-none{% endif %}"
+                data-sale-mode="lot" data-sale-btn-lot>
+          <span data-sale-label-lot>{{ lot_u }}</span>
+        </button>
+      </div>
+      <p class="product-unit-sale-hint small-muted mb-0 mt-2" data-sale-unit-hint>
+        {% if enabled %}
+        VD: tồn theo <strong>{{ base_u }}</strong>, không bán lẻ → chọn <strong>{{ purchase_u }}</strong>. Muốn bán lẻ → chọn <strong>{{ base_u }}</strong>.
+        {% else %}
+        Bật <strong>Có quy đổi đơn vị</strong> phía trên (hoặc bấm <strong>Mẫu thùng/kg</strong>) để chọn bán theo thùng hoặc {{ base_u }}.
+        {% endif %}
+      </p>
     </div>
     <p class="product-unit-hint small-muted mb-0 mt-2" data-unit-hint>
       {% if enabled %}

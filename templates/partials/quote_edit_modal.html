@@ -110,7 +110,7 @@
         </div>
         <script type="application/json" class="quote-edit-items-data">[
           {%- for item in q.items -%}
-          {"product_id":{{ item.product_id }},"qty":{{ item.qty }},"price":{{ item.price }}}{%- if not loop.last -%},{%- endif -%}
+          {"product_id":{{ item.product_id }},"qty":{{ item.qty }},"price":{{ item.price }},"qty_unit_mode":"{{ item.qty_unit_mode or quote_item_unit_mode(item.product, item) }}"}{%- if not loop.last -%},{%- endif -%}
           {%- endfor -%}
         ]</script>
       </form>

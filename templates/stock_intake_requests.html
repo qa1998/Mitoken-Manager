@@ -1,0 +1,173 @@
+{% extends 'base.html' %}
+{% block title %}Yêu cầu nhập kho{% endblock %}
+{% block content %}
+
+<div class="stock-intake-requests-page">
+  <div class="panel-card mb-3">
+    <div class="panel-card-head mb-0">
+      <div class="section-header">
+        <div class="page-header-icon"><i class="bi bi-inbox"></i></div>
+        <div>
+          <h2 class="section-title">Yêu cầu nhập kho</h2>
+          <p class="small-muted mb-0">Danh sách phiếu từ NCC — bấm <strong>Chi tiết</strong> để phân bổ kg cho khách và duyệt nhập.</p>
+        </div>
+      </div>
+      <a href="{{ url_for('stock') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-boxes me-1"></i> Tồn kho
+      </a>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-orange"><i class="bi bi-hourglass-split"></i></div>
+        <div>
+          <div class="stock-stat-label">Chờ duyệt</div>
+          <div class="stock-stat-value text-warning">{{ pending_count }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card mb-3">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label-custom">Tìm kiếm</label>
+        <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Mã phiếu, NCC, chứng từ...">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label-custom">Trạng thái kho</label>
+        <select name="status" class="form-select">
+          <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Chờ nhập kho</option>
+          <option value="received" {% if filters.status == 'received' %}selected{% endif %}>Đã nhập kho</option>
+          <option value="all" {% if filters.status == 'all' %}selected{% endif %}>Tất cả</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search me-1"></i> Lọc</button>
+      </div>
+    </form>
+  </div>
+
+  {% if shortage_products and filters.status != 'received' %}
+  <div class="panel-card mb-3 stock-intake-shortage-panel">
+    <h6 class="mb-2"><i class="bi bi-people me-2"></i>Nhu cầu khách — còn thiếu tồn</h6>
+    <p class="small-muted mb-3">Tổng hợp sản phẩm thiếu trên các phiếu đang chờ. Vào <strong>Chi tiết</strong> từng phiếu để phân bổ.</p>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 stock-intake-shortage-table">
+        <thead>
+          <tr>
+            <th>Sản phẩm</th>
+            <th class="text-end">Tồn (đv)</th>
+            <th class="text-end">Cam kết KH</th>
+            <th class="text-end">Còn thiếu (kg…)</th>
+            <th>Chờ nhập (trang này)</th>
+            <th>Khách hàng (top)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in shortage_products %}
+          <tr>
+            <td>
+              {% if row.product %}
+              <code class="sku-code">{{ row.product.sku }}</code> — {{ row.product.name }}
+              {% else %}
+              SP #{{ row.product_id }}
+              {% endif %}
+            </td>
+            <td class="text-end">{{ format_qty_display(row.stock) }}{% if row.base_unit %} {{ row.base_unit }}{% endif %}</td>
+            <td class="text-end">{{ format_qty_display(row.total_demand) }}{% if row.base_unit %} {{ row.base_unit }}{% endif %}</td>
+            <td class="text-end fw-semibold text-danger">{{ format_qty_display(row.shortfall) }}{% if row.base_unit %} {{ row.base_unit }}{% endif %}</td>
+            <td class="text-end text-primary">{{ format_qty_display(row.pending_incoming|default(0)) }}{% if row.base_unit %} {{ row.base_unit }}{% endif %}</td>
+            <td class="small">
+              {% for c in row.customers[:3] %}
+              <div>{{ c.customer_name }} · {{ c.order_code }}: <strong>{{ format_qty_display(c.qty) }}</strong></div>
+              {% endfor %}
+              {% if row.customers|length > 3 %}
+              <span class="text-muted">+{{ row.customers|length - 3 }} đơn khác</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="panel-card">
+    <div class="table-toolbar">
+      <h5 class="section-title mb-0">Danh sách phiếu NCC</h5>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 supplier-intake-table stock-intake-list-table">
+        <thead>
+          <tr>
+            <th>Mã phiếu</th>
+            <th>Nhà cung cấp</th>
+            <th>Ngày gửi</th>
+            <th>Chứng từ</th>
+            <th class="text-center">Dòng SP</th>
+            <th class="text-end">Tổng tiền</th>
+            <th>Trạng thái kho</th>
+            <th class="text-end">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for intake in intakes %}
+          {% set lines = line_map.get(intake.id, []) %}
+          {% set stock_st = supplier_intake_stock_status(intake) %}
+          <tr class="{% if stock_st == 'Chờ nhập kho' %}stock-intake-row-pending{% endif %}">
+            <td><code class="sku-code">{{ intake.intake_code or ('#' ~ intake.id) }}</code></td>
+            <td>
+              <strong>{{ intake.supplier.name }}</strong>
+              <div class="small-muted">{{ intake.supplier.code }}</div>
+            </td>
+            <td class="text-nowrap">{{ intake.created_at.strftime('%d/%m/%Y %H:%M') if intake.created_at else '—' }}</td>
+            <td>{{ intake.ref_code or '—' }}</td>
+            <td class="text-center">{{ lines|length }}</td>
+            <td class="text-end money">{{ intake.total_amount|money }}</td>
+            <td>
+              {% if stock_st == 'Chờ nhập kho' %}
+              <span class="badge bg-warning text-dark">Chờ nhập kho</span>
+              {% else %}
+              <span class="badge bg-success">Đã nhập kho</span>
+              {% if intake.stock_received_at %}
+              <div class="small-muted">{{ intake.stock_received_at.strftime('%d/%m/%Y %H:%M') }}</div>
+              {% endif %}
+              {% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              <a href="{{ url_for('stock_intake_request_detail', iid=intake.id, status=filters.status, q=filters.q, page=pagination.page) }}"
+                 class="btn btn-sm btn-primary">
+                <i class="bi bi-eye me-1"></i>Chi tiết
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted py-5">Không có phiếu phù hợp</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pagination.pages > 1 %}
+    <nav class="mt-3">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for('stock_intake_requests', page=p, **list_args) }}">{{ p }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+      </ul>
+    </nav>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

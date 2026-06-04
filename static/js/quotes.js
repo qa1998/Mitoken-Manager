@@ -277,6 +277,89 @@
     initProductPicker(cell.querySelector('.quote-product-picker'), row);
   }
 
+  function quoteHasConversion(product) {
+    if (!product) return false;
+    if (window.ProductUnits) return ProductUnits.hasConversion(product);
+    var factor = parseFloat(product.conversion_factor) || 1;
+    var pu = (product.purchase_unit || '').trim();
+    var bu = (product.base_unit || product.unit || '').trim();
+    var diff = pu && bu && pu.toLowerCase() !== bu.toLowerCase();
+    if (factor <= 0 || (!diff && factor === 1)) return false;
+    if (product.unit_conversion_enabled) return diff || factor !== 1;
+    return diff && factor !== 1;
+  }
+
+  function quoteDefaultUnitMode(product) {
+    if (!product) return 'base';
+    return product.sale_unit_mode || (quoteHasConversion(product) ? 'purchase' : 'base');
+  }
+
+  function quoteUnitOptions(product) {
+    if (!product || !quoteHasConversion(product)) return [];
+    var opts = [{ mode: 'base', label: product.base_unit || product.unit || 'cái' }];
+    var pu = (product.purchase_unit || '').trim();
+    var bu = (product.base_unit || product.unit || '').trim();
+    if (pu && bu && pu.toLowerCase() !== bu.toLowerCase()) {
+      opts.push({ mode: 'purchase', label: pu });
+    }
+    if (window.ProductUnits && ProductUnits.hasLot(product)) {
+      opts.push({ mode: 'lot', label: product.lot_unit || 'Lô' });
+    } else if (product.has_lot_unit && product.lot_unit) {
+      opts.push({ mode: 'lot', label: product.lot_unit });
+    }
+    return opts.length > 1 ? opts : [];
+  }
+
+  function renderQuoteUnitCell(row, product, selectedMode) {
+    var cell = row.querySelector('.quote-line-unit-cell');
+    if (!cell) return;
+    if (!product) {
+      cell.innerHTML = '<span class="text-muted">—</span>';
+      return;
+    }
+    var mode = selectedMode || quoteDefaultUnitMode(product);
+    var opts = quoteUnitOptions(product);
+    if (!opts.length) {
+      cell.innerHTML =
+        '<span class="quote-line-unit-label">' + (product.unit || 'cái') + '</span>' +
+        '<input type="hidden" name="qty_unit_mode" value="base">';
+      return;
+    }
+    var html =
+      '<div class="quote-line-unit-picker" data-quote-unit-picker>' +
+      '<input type="hidden" name="qty_unit_mode" value="' + mode + '" data-quote-qty-unit-mode>';
+    html += '<div class="btn-group btn-group-sm flex-wrap" role="group">';
+    opts.forEach(function (opt) {
+      html +=
+        '<button type="button" class="btn btn-outline-secondary btn-sm quote-unit-mode-btn' +
+        (opt.mode === mode ? ' active' : '') +
+        '" data-unit-mode="' +
+        opt.mode +
+        '">' +
+        opt.label +
+        '</button>';
+    });
+    html += '</div></div>';
+    cell.innerHTML = html;
+    cell.querySelectorAll('.quote-unit-mode-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var m = btn.getAttribute('data-unit-mode');
+        cell.querySelector('[data-quote-qty-unit-mode]').value = m;
+        cell.querySelectorAll('.quote-unit-mode-btn').forEach(function (b) {
+          b.classList.toggle('active', b === btn);
+        });
+        updateRowStock(row, product);
+      });
+    });
+  }
+
+  function getRowUnitMode(row) {
+    var inp = row.querySelector('[data-quote-qty-unit-mode]');
+    return (inp && inp.value) || 'base';
+  }
+
   function updateRowStock(row, product) {
     var stockCell = row.querySelector('.quote-line-stock');
     if (!stockCell) return;
@@ -284,11 +367,26 @@
       stockCell.innerHTML = '<span class="quote-stock-empty">—</span>';
       return;
     }
+    var mode = getRowUnitMode(row);
+    var displayQty = product.stock || 0;
+    var unitLabel = product.unit || product.base_unit || 'cái';
+    if (quoteHasConversion(product)) {
+      displayQty = window.ProductUnits
+        ? ProductUnits.baseToDisplay(product, product.stock || 0, mode)
+        : product.stock || 0;
+      unitLabel =
+        mode === 'lot' &&
+          ((window.ProductUnits && ProductUnits.hasLot(product)) || product.has_lot_unit)
+          ? product.lot_unit
+          : mode === 'purchase'
+            ? product.purchase_unit
+            : product.base_unit || product.unit;
+    }
     stockCell.innerHTML =
       '<span class="quote-stock-qty ' + stockAmountClass(product.stock_status) + '">' +
-      (product.stock || 0).toLocaleString('vi-VN') +
+      (window.ProductUnits ? ProductUnits.formatQty(displayQty) : displayQty.toLocaleString('vi-VN')) +
       '</span>' +
-      '<span class="quote-stock-unit">' + (product.unit || 'cái') + '</span>';
+      '<span class="quote-stock-unit">' + unitLabel + '</span>';
   }
 
   function setRowProduct(row, product, options) {
@@ -297,7 +395,7 @@
     var form = resolveQuoteForm(row);
     renderProductCell(row, product);
     row.dataset.productId = String(product.id);
-    row.querySelector('.quote-line-unit').textContent = product.unit || 'cái';
+    renderQuoteUnitCell(row, product, options.qty_unit_mode);
     var priceInput = row.querySelector('input[name="price"]');
     if (!options.keepPrice) {
       var price = getProductPrice(product, getPriceListType(form));
@@ -310,14 +408,14 @@
   function clearRowProduct(row) {
     renderProductCell(row, null);
     row.dataset.productId = '';
-    row.querySelector('.quote-line-unit').textContent = '—';
+    renderQuoteUnitCell(row, null);
     row.querySelector('input[name="price"]').value = '';
     updateRowStock(row, null);
     updateRowAmount(row);
   }
 
   function updateRowAmount(row) {
-    var qty = parseInt(row.querySelector('input[name="qty"]').value, 10) || 0;
+    var qty = parseFloat(row.querySelector('input[name="qty"]').value) || 0;
     var price = parseMoneyInput(row.querySelector('input[name="price"]').value);
     var lineDisc = parseFloat(row.querySelector('input[name="line_discount"]').value) || 0;
     var gross = qty * price;
@@ -722,8 +820,8 @@
       '<td class="quote-line-num">1</td>' +
       '<td class="quote-line-product-cell"></td>' +
       '<td class="quote-line-stock"><span class="quote-stock-empty">—</span></td>' +
-      '<td class="quote-line-unit text-muted">—</td>' +
-      '<td><input type="number" name="qty" class="form-control form-control-sm quote-qty-input" value="1" min="1"></td>' +
+      '<td class="quote-line-unit-cell"><span class="text-muted">—</span></td>' +
+      '<td><input type="number" name="qty" class="form-control form-control-sm quote-qty-input" value="1" min="0.0001" step="any"></td>' +
       '<td class="quote-line-price-cell">' +
       '<div class="money-input-wrap quote-price-input-wrap">' +
       '<input type="text" name="price" class="form-control form-control-sm money-input quote-price-input" inputmode="numeric" autocomplete="off" value="" placeholder="0">' +
@@ -809,7 +907,12 @@
     items.forEach(function (item) {
       var product = findProduct(item.product_id);
       if (!product) return;
-      addQuoteRow(form, product, { keepPrice: true, qty: item.qty, price: item.price });
+      addQuoteRow(form, product, {
+        keepPrice: true,
+        qty: item.qty,
+        price: item.price,
+        qty_unit_mode: item.qty_unit_mode,
+      });
     });
     if (!tbody.children.length) addQuoteRow(form);
     recalcQuoteTotals(form, true);

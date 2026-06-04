@@ -1,5 +1,6 @@
 var supplierProductOptionsCache = null;
 var supplierPickerScrollHandler = null;
+var supplierQuickProductTargetPicker = null;
 
 function fetchSupplierProductOptions() {
   if (supplierProductOptionsCache) {
@@ -24,12 +25,22 @@ function findSupplierProduct(id) {
   });
 }
 
+function supplierPickerProductInput(picker) {
+  if (!picker) return null;
+  var field = picker.getAttribute('data-product-field') || 'sp_product_id';
+  return picker.querySelector('input[name="' + field + '"]');
+}
+
 function supplierProductHasConversion(p) {
-  if (!p || !p.unit_conversion_enabled) return false;
+  if (window.ProductUnits) return ProductUnits.hasConversion(p);
+  if (!p) return false;
   var factor = parseFloat(p.conversion_factor) || 1;
   var pu = (p.purchase_unit || '').trim();
   var bu = (p.base_unit || p.unit || '').trim();
-  return factor > 0 && (factor !== 1 || (pu && bu && pu !== bu));
+  var diff = pu && bu && pu.toLowerCase() !== bu.toLowerCase();
+  if (factor <= 0 || (!diff && factor === 1)) return false;
+  if (p.unit_conversion_enabled) return diff || factor !== 1;
+  return diff && factor !== 1;
 }
 
 function supplierProductHasLot(p) {
@@ -44,9 +55,30 @@ function formatSupplierQtyPlain(value) {
 }
 
 function getSupplierQtyUnitMode(row) {
-  var sel = row.querySelector('[data-supplier-qty-unit-mode]:not([disabled])');
-  if (sel && !sel.closest('.d-none')) return sel.value || 'purchase';
+  var hidden = row && row.querySelector('input[data-supplier-qty-unit-mode]');
+  if (hidden) return hidden.value || 'base';
   return 'base';
+}
+
+function supplierQtyModeUnitLabel(product, mode) {
+  if (!product) return '—';
+  var pu = product.purchase_unit || product.base_unit || '';
+  var bu = product.base_unit || product.unit || '';
+  if (mode === 'lot' && supplierProductHasLot(product)) return product.lot_unit || 'Lô';
+  if (mode === 'purchase' && supplierProductHasConversion(product)) return pu;
+  return bu;
+}
+
+function setSupplierQtyUnitMode(row, mode, userTouched) {
+  if (!row) return;
+  var hidden = row.querySelector('input[data-supplier-qty-unit-mode]');
+  if (hidden) hidden.value = mode;
+  if (userTouched) row.dataset.supplierQtyModeTouched = '1';
+  row.querySelectorAll('[data-supplier-qty-unit-btn]').forEach(function (btn) {
+    var active = btn.getAttribute('data-mode') === mode && !btn.disabled;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 function resolveSupplierIntakeQtyClient(product, entered, unitMode) {
@@ -76,81 +108,98 @@ function resolveSupplierIntakeQtyClient(product, entered, unitMode) {
 
 function syncSupplierQtyUnitMode(row, product) {
   var modeWrap = row.querySelector('[data-supplier-qty-unit-mode-wrap]');
-  var modeSelect = row.querySelector('[data-supplier-qty-unit-mode]');
-  var modeHidden = row.querySelector('[data-supplier-qty-unit-mode-hidden]');
+  var modeHidden = row.querySelector('input[data-supplier-qty-unit-mode]');
   var convBadge = row.querySelector('[data-supplier-conv-badge]');
   var setupHint = row.querySelector('[data-supplier-qty-setup-hint]');
+  var modeHint = row.querySelector('[data-supplier-qty-mode-hint]');
   var qtyLabel = row.querySelector('[data-supplier-qty-unit-label]');
+  var qtySuffix = row.querySelector('[data-supplier-qty-unit-suffix]');
+  var qtyInput = row.querySelector('[data-supplier-qty-input]');
+  var lotBtn = row.querySelector('[data-supplier-qty-mode-lot]');
+  var purchaseBtn = row.querySelector('[data-supplier-qty-unit-btn][data-mode="purchase"]');
+  var baseBtn = row.querySelector('[data-supplier-qty-unit-btn][data-mode="base"]');
   var hasProduct = !!(product && product.id);
   var hasConv = hasProduct && supplierProductHasConversion(product);
+  var hasLot = hasConv && supplierProductHasLot(product);
+  var pu = hasProduct ? product.purchase_unit || 'ĐV nhập' : '—';
+  var bu = hasProduct ? product.base_unit || product.unit || 'ĐV tồn' : '—';
 
-  if (modeWrap) modeWrap.classList.toggle('d-none', !hasProduct);
+  if (modeWrap) modeWrap.classList.toggle('is-awaiting-product', !hasProduct);
   if (setupHint) setupHint.classList.toggle('d-none', !hasProduct || hasConv);
+  if (qtyInput) qtyInput.disabled = !hasProduct;
   if (modeHidden) {
-    modeHidden.disabled = hasProduct;
     if (!hasProduct) modeHidden.value = 'base';
   }
-  if (modeSelect) {
-    modeSelect.disabled = !hasProduct;
-    var lotOpt = modeSelect.querySelector('[data-supplier-qty-mode-lot]');
-    var hasLot = hasConv && supplierProductHasLot(product);
-    if (lotOpt) {
-      lotOpt.hidden = !hasLot;
-      lotOpt.disabled = !hasLot;
-      if (hasLot) lotOpt.textContent = 'Theo ' + (product.lot_unit || 'Lô');
+
+  if (lotBtn) {
+    lotBtn.textContent = hasLot ? (product.lot_unit || 'Lô') : 'Lô';
+    lotBtn.disabled = !hasLot;
+    lotBtn.classList.toggle('d-none', !hasLot);
+  }
+  if (purchaseBtn) {
+    purchaseBtn.textContent = hasConv ? pu : bu;
+    purchaseBtn.disabled = !hasProduct || !hasConv;
+    purchaseBtn.classList.toggle('d-none', hasProduct && !hasConv);
+  }
+  if (baseBtn) {
+    baseBtn.textContent = bu;
+    baseBtn.disabled = !hasProduct;
+  }
+
+  var mode = getSupplierQtyUnitMode(row);
+  if (hasProduct) {
+    if (!hasConv) {
+      mode = 'base';
+    } else if (!row.dataset.supplierQtyModeTouched) {
+      mode = hasLot ? 'lot' : 'purchase';
+    } else if (!hasLot && mode === 'lot') {
+      mode = 'purchase';
+    } else if (mode === 'purchase' && !hasConv) {
+      mode = 'base';
     }
-    var pu = hasProduct ? product.purchase_unit || 'ĐV nhập' : '—';
-    var bu = hasProduct ? product.base_unit || product.unit || 'ĐV tồn' : '—';
-    var purchaseOpt = modeSelect.querySelector('option[value="purchase"]');
-    var baseOpt = modeSelect.querySelector('option[value="base"]');
-    if (purchaseOpt) purchaseOpt.textContent = hasConv ? 'Theo ' + pu : 'Theo ' + bu + ' (chưa quy đổi)';
-    if (baseOpt) baseOpt.textContent = 'Theo ' + bu;
-    if (hasProduct) {
-      if (!hasConv) {
-        modeSelect.value = 'base';
-        if (purchaseOpt) purchaseOpt.disabled = true;
-        if (lotOpt) lotOpt.disabled = true;
-        if (baseOpt) baseOpt.disabled = false;
-      } else {
-        if (purchaseOpt) purchaseOpt.disabled = false;
-        if (baseOpt) baseOpt.disabled = false;
-        if (!modeSelect.dataset.userTouched) {
-          modeSelect.value = hasLot ? 'lot' : 'purchase';
-        } else if (!hasLot && modeSelect.value === 'lot') {
-          modeSelect.value = 'purchase';
-        }
-      }
+    setSupplierQtyUnitMode(row, mode, false);
+  } else {
+    setSupplierQtyUnitMode(row, 'base', false);
+  }
+
+  mode = getSupplierQtyUnitMode(row);
+  var unitName = supplierQtyModeUnitLabel(product, mode);
+  if (qtyLabel) {
+    qtyLabel.textContent = hasProduct ? 'Số lượng (' + unitName + ')' : 'Số lượng';
+  }
+  if (qtySuffix) qtySuffix.textContent = hasProduct ? unitName : '—';
+  if (qtyInput && hasProduct) {
+    qtyInput.placeholder = 'VD: 2 ' + unitName;
+  } else if (qtyInput) {
+    qtyInput.placeholder = '0';
+  }
+  if (modeHint) {
+    if (!hasProduct) {
+      modeHint.textContent = 'Chọn sản phẩm để bật Lô / Hộp / đơn vị tồn.';
+    } else if (hasLot) {
+      modeHint.textContent =
+        '1 ' +
+        (product.lot_unit || 'Lô') +
+        ' = ' +
+        formatSupplierQtyPlain(product.lot_factor) +
+        ' ' +
+        pu;
+    } else if (hasConv) {
+      modeHint.textContent = '1 ' + pu + ' = ' + formatSupplierQtyPlain(product.conversion_factor) + ' ' + bu;
+    } else {
+      modeHint.textContent = 'Nhập theo ' + bu + ' (SP không quy đổi đơn vị).';
     }
-    if (qtyLabel) {
-      qtyLabel.textContent = hasProduct ? 'Số lượng (' + (modeSelect.options[modeSelect.selectedIndex]?.textContent || bu) + ')' : 'Số lượng';
-    }
-    if (convBadge) {
-      if (hasConv) {
-        var factor = parseFloat(product.conversion_factor) || 1;
-        var badge = '1 ' + pu + ' = ' + formatSupplierQtyPlain(factor) + ' ' + bu;
-        if (hasLot) {
-          badge +=
-            ' · 1 ' +
-            (product.lot_unit || 'Lô') +
-            ' = ' +
-            formatSupplierQtyPlain(product.lot_factor) +
-            ' ' +
-            pu;
-        }
-        convBadge.textContent = badge;
-        convBadge.classList.remove('d-none');
-      } else {
-        convBadge.classList.add('d-none');
-        convBadge.textContent = '';
-      }
-    }
+  }
+  if (convBadge) {
+    convBadge.classList.add('d-none');
+    convBadge.textContent = '';
   }
 }
 
 function updateSupplierRowQtyHint(row) {
   if (!row) return;
   var picker = row.querySelector('.supplier-product-picker');
-  var input = picker && picker.querySelector('input[name="sp_product_id"]');
+  var input = picker && supplierPickerProductInput(picker);
   var qtyInput = row.querySelector('.supplier-intake-qty');
   var unitLabel = row.querySelector('[data-supplier-qty-unit-label]');
   var hint = row.querySelector('[data-supplier-qty-convert-hint]');
@@ -235,7 +284,7 @@ function supplierProductLabel(p) {
 }
 
 function setSupplierProductPickerValue(picker, product) {
-  var input = picker.querySelector('input[name="sp_product_id"]');
+  var input = supplierPickerProductInput(picker);
   var btn = picker.querySelector('.supplier-product-picker-btn');
   var label = picker.querySelector('.supplier-product-picker-label');
   if (!input || !btn || !label) return;
@@ -257,7 +306,8 @@ function applySupplierProductCost(row, product) {
   if (!row || !product) return;
   var panel = row.closest('[data-supplier-products-panel]');
   if (panel && panel.getAttribute('data-skip-auto-cost') === '1') return;
-  var costInput = row.querySelector('input[name="sp_cost_price"]');
+  var costInput =
+    row.querySelector('input[name="sp_cost_price"]') || row.querySelector('input[name="catalog_cost_price"]');
   if (!costInput || costInput.value) return;
   var cost = product.purchase_cost_price || product.cost_price || 0;
   if (cost <= 0) return;
@@ -271,8 +321,31 @@ function applySupplierProductCost(row, product) {
   }
 }
 
+function getSupplierPickerMenu(picker) {
+  if (!picker) return null;
+  if (picker._floatedMenu) return picker._floatedMenu;
+  return picker.querySelector('.supplier-product-picker-menu');
+}
+
+function floatSupplierPickerMenuToBody(picker) {
+  var menu = getSupplierPickerMenu(picker);
+  if (!menu) return null;
+  if (menu.parentElement !== document.body) {
+    document.body.appendChild(menu);
+    menu._supplierPickerOwner = picker;
+    picker._floatedMenu = menu;
+  }
+  return menu;
+}
+
 function dockSupplierProductPickerMenu(menu) {
   if (!menu) return;
+  var picker = menu._supplierPickerOwner;
+  if (picker && menu.parentElement === document.body) {
+    picker.appendChild(menu);
+    delete menu._supplierPickerOwner;
+    delete picker._floatedMenu;
+  }
   menu.classList.remove('open', 'is-floating', 'is-drop-up');
   menu.style.removeProperty('top');
   menu.style.removeProperty('left');
@@ -322,31 +395,208 @@ function unbindSupplierPickerScrollListeners() {
 function bindSupplierPickerScrollListeners(picker) {
   unbindSupplierPickerScrollListeners();
   supplierPickerScrollHandler = function () {
-    var menu = picker.querySelector('.supplier-product-picker-menu.open');
-    if (menu) positionSupplierProductPickerMenu(picker, menu);
+    var menu = getSupplierPickerMenu(picker);
+    if (menu && menu.classList.contains('open')) positionSupplierProductPickerMenu(picker, menu);
   };
   window.addEventListener('scroll', supplierPickerScrollHandler, true);
   window.addEventListener('resize', supplierPickerScrollHandler);
-  document.querySelectorAll('.supplier-products-table-wrap, .modal-body, .supplier-intake-modal').forEach(function (el) {
+  document.querySelectorAll(
+    '.supplier-products-table-wrap, .modal-body, .supplier-intake-modal, .supplier-detail-modal, .supplier-catalog-table-wrap'
+  ).forEach(function (el) {
     el.addEventListener('scroll', supplierPickerScrollHandler, { passive: true });
   });
 }
 
 function closeAllSupplierProductPickers(exceptPicker) {
   document.querySelectorAll('.supplier-product-picker-menu.open').forEach(function (menu) {
-    if (exceptPicker && exceptPicker.contains(menu)) return;
+    if (exceptPicker && (exceptPicker.contains(menu) || menu._supplierPickerOwner === exceptPicker)) return;
     dockSupplierProductPickerMenu(menu);
   });
   unbindSupplierPickerScrollListeners();
 }
 
+function getSupplierIdFromPicker(picker) {
+  if (!picker) return null;
+  var catalogPanel = picker.closest('[data-supplier-catalog-panel]');
+  if (catalogPanel) return catalogPanel.getAttribute('data-supplier-id');
+  var intakeModal = picker.closest('.supplier-intake-import-modal, [id^="productsModal"]');
+  if (intakeModal) return intakeModal.getAttribute('data-supplier-id');
+  return null;
+}
+
+function appendSupplierProductPickerFooter(picker, list, search) {
+  var footer = document.createElement('div');
+  footer.className = 'supplier-product-picker-footer';
+  var q = (search && search.value ? search.value : '').trim();
+  if (!list.children.length) {
+    var empty = document.createElement('div');
+    empty.className = 'supplier-product-empty';
+    empty.textContent = q
+      ? 'Không có trong danh mục cửa hàng'
+      : 'Gõ SKU hoặc tên để tìm';
+    list.appendChild(empty);
+  }
+  var hint = document.createElement('p');
+  hint.className = 'supplier-product-empty-hint small-muted mb-2';
+  hint.textContent = q
+    ? '「' + q + '」 chưa có — thêm mới vào danh mục trước khi nhập kho.'
+    : 'Chưa chọn sản phẩm — tìm trong danh mục hoặc thêm mới.';
+  footer.appendChild(hint);
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-sm btn-primary w-100 supplier-product-quick-add-btn';
+  btn.innerHTML = '<i class="bi bi-plus-lg me-1"></i>Thêm sản phẩm mới';
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    openSupplierQuickProductModal(picker, q);
+  });
+  footer.appendChild(btn);
+  list.appendChild(footer);
+}
+
+function openSupplierQuickProductModal(picker, searchQuery) {
+  var modalEl = document.getElementById('supplierQuickProductModal');
+  var form = document.getElementById('supplierQuickProductForm');
+  if (!modalEl || !form || !window.bootstrap) return;
+  var sid = getSupplierIdFromPicker(picker);
+  var sidInput = document.getElementById('supplierQuickProductSupplierId');
+  if (sidInput) sidInput.value = sid || '';
+  supplierQuickProductTargetPicker = picker || null;
+  var err = document.getElementById('supplierQuickProductError');
+  if (err) {
+    err.classList.add('d-none');
+    err.textContent = '';
+  }
+  var skuIn = document.getElementById('supplierQuickProductSku');
+  var nameIn = document.getElementById('supplierQuickProductName');
+  var costIn = document.getElementById('supplierQuickProductCost');
+  if (skuIn) skuIn.value = '';
+  if (nameIn) nameIn.value = '';
+  if (costIn) costIn.value = '';
+  var q = (searchQuery || '').trim();
+  if (q) {
+    if (/^[a-z0-9._-]+$/i.test(q) && q.indexOf(' ') === -1) {
+      if (skuIn) skuIn.value = q;
+    } else if (nameIn) {
+      nameIn.value = q;
+    }
+  }
+  if (typeof window.initMoneyInputs === 'function') {
+    window.initMoneyInputs(modalEl);
+  }
+  var unitPanel = modalEl.querySelector('[data-product-unit-setup]');
+  if (unitPanel) {
+    unitPanel.dataset.unitSetupInit = '0';
+    if (typeof initProductUnitSetup === 'function') {
+      initProductUnitSetup(modalEl);
+    }
+  }
+  closeAllSupplierProductPickers();
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  if (skuIn && !skuIn.value && nameIn && nameIn.value) {
+    nameIn.focus();
+  } else if (skuIn) {
+    skuIn.focus();
+  }
+}
+
+function applyQuickCreatedProductToPicker(picker, product) {
+  if (!picker || !product) return;
+  var row = picker.closest('.supplier-product-row') || picker.closest('[data-supplier-catalog-add-row]');
+  if (row) {
+    delete row.dataset.supplierQtyModeTouched;
+    row.dataset.supplierProductId = String(product.id);
+  }
+  setSupplierProductPickerValue(picker, product);
+  if (row) {
+    var costFromModal = document.getElementById('supplierQuickProductCost');
+    var costInput = row.querySelector('input[name="sp_cost_price"]');
+    if (costInput && costFromModal && costFromModal.value) {
+      costInput.value = costFromModal.value;
+      if (typeof window.initMoneyInputs === 'function') {
+        window.initMoneyInputs(row);
+      }
+    } else {
+      applySupplierProductCost(row, product);
+    }
+    updateSupplierRowQtyHint(row);
+    var qtyInput = row.querySelector('[data-supplier-qty-input]');
+    if (qtyInput) qtyInput.focus();
+    updateSupplierCatalogCostHint(row.closest('[data-supplier-catalog-panel]'), product);
+  }
+}
+
+function initSupplierQuickProductModal() {
+  var form = document.getElementById('supplierQuickProductForm');
+  if (!form || form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var sid = (document.getElementById('supplierQuickProductSupplierId') || {}).value;
+    if (!sid) return;
+    var errEl = document.getElementById('supplierQuickProductError');
+    var submitBtn = document.getElementById('supplierQuickProductSubmit');
+    if (submitBtn) submitBtn.disabled = true;
+    if (errEl) {
+      errEl.classList.add('d-none');
+      errEl.textContent = '';
+    }
+    var formData = new FormData(form);
+    fetch('/suppliers/' + sid + '/products/quick-create', {
+      method: 'POST',
+      body: formData,
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) throw new Error((data && data.error) || 'Không thêm được sản phẩm');
+          return data;
+        });
+      })
+      .then(function (data) {
+        supplierProductOptionsCache = null;
+        return fetchSupplierProductOptions().then(function () {
+          var product = (data && data.product) || findSupplierProduct(String(data.product.id));
+          var picker = supplierQuickProductTargetPicker;
+          var quickModal = document.getElementById('supplierQuickProductModal');
+          if (quickModal && window.bootstrap) {
+            bootstrap.Modal.getInstance(quickModal)?.hide();
+          }
+          if (picker && product) {
+            applyQuickCreatedProductToPicker(picker, product);
+          }
+          if (data.linked_existing && errEl) {
+            // brief info via hint only
+          }
+        });
+      })
+      .catch(function (err) {
+        var msg = err.message || 'Lỗi thêm sản phẩm';
+        if (typeof window.showAppToast === 'function') {
+          window.showAppToast(msg, 'danger');
+        } else if (errEl) {
+          errEl.textContent = msg;
+          errEl.classList.remove('d-none');
+        } else {
+          alert(msg);
+        }
+      })
+      .finally(function () {
+        if (submitBtn) submitBtn.disabled = false;
+      });
+  });
+}
+
 function renderSupplierProductMenu(picker) {
-  var list = picker.querySelector('.supplier-product-list');
-  var search = picker.querySelector('.supplier-product-search');
+  var menu = getSupplierPickerMenu(picker);
+  if (!menu) return;
+  var list = menu.querySelector('.supplier-product-list');
+  var search = menu.querySelector('.supplier-product-search');
   if (!list) return;
 
   var q = (search && search.value ? search.value : '').toLowerCase().trim();
-  var currentId = picker.querySelector('input[name="sp_product_id"]').value;
+  var inputEl = supplierPickerProductInput(picker);
+  var currentId = inputEl ? inputEl.value : '';
   list.innerHTML = '';
 
   (supplierProductOptionsCache || []).forEach(function (p) {
@@ -378,33 +628,32 @@ function renderSupplierProductMenu(picker) {
         : '');
 
     btn.addEventListener('click', function () {
-      var row = picker.closest('.supplier-product-row');
-      var modeSelect = row && row.querySelector('[data-supplier-qty-unit-mode]');
-      if (modeSelect && String(row.dataset.supplierProductId || '') !== String(p.id)) {
-        delete modeSelect.dataset.userTouched;
+      var row =
+        picker.closest('.supplier-product-row') || picker.closest('[data-supplier-catalog-add-row]');
+      if (row && String(row.dataset.supplierProductId || '') !== String(p.id)) {
+        delete row.dataset.supplierQtyModeTouched;
         row.dataset.supplierProductId = String(p.id);
       }
       setSupplierProductPickerValue(picker, p);
       applySupplierProductCost(row, p);
+      updateSupplierCatalogCostHint(picker.closest('[data-supplier-catalog-panel]'), p);
       updateSupplierRowQtyHint(row);
-      dockSupplierProductPickerMenu(picker.querySelector('.supplier-product-picker-menu'));
+      if (row && row.closest('.po-products-panel') && typeof window.poOnProductSelected === 'function') {
+        window.poOnProductSelected(row, p);
+      }
+      dockSupplierProductPickerMenu(getSupplierPickerMenu(picker));
       unbindSupplierPickerScrollListeners();
     });
     list.appendChild(btn);
   });
 
-  if (!list.children.length) {
-    var empty = document.createElement('div');
-    empty.className = 'supplier-product-empty';
-    empty.textContent = q ? 'Không tìm thấy sản phẩm' : 'Chưa có sản phẩm đang bán';
-    list.appendChild(empty);
-  }
+  appendSupplierProductPickerFooter(picker, list, search);
 }
 
 function syncSupplierProductPickerLabels(panel) {
   if (!panel || !supplierProductOptionsCache) return;
   panel.querySelectorAll('.supplier-product-picker').forEach(function (picker) {
-    var input = picker.querySelector('input[name="sp_product_id"]');
+    var input = supplierPickerProductInput(picker);
     if (!input || !input.value) return;
     var product = findSupplierProduct(input.value);
     if (product) setSupplierProductPickerValue(picker, product);
@@ -416,8 +665,8 @@ function initSupplierProductPicker(picker) {
   picker.dataset.supplierPickerInit = '1';
 
   var btn = picker.querySelector('.supplier-product-picker-btn');
-  var menu = picker.querySelector('.supplier-product-picker-menu');
-  var search = picker.querySelector('.supplier-product-search');
+  var menu = getSupplierPickerMenu(picker);
+  var search = menu ? menu.querySelector('.supplier-product-search') : null;
   if (!btn || !menu) return;
 
   btn.addEventListener('click', function (e) {
@@ -425,15 +674,18 @@ function initSupplierProductPicker(picker) {
     var isOpen = menu.classList.contains('open');
     closeAllSupplierProductPickers(picker);
     if (!isOpen) {
-      menu.classList.add('open');
-      renderSupplierProductMenu(picker);
-      positionSupplierProductPickerMenu(picker, menu);
-      bindSupplierPickerScrollListeners(picker);
-      if (search) {
-        search.value = '';
+      fetchSupplierProductOptions().then(function () {
+        var floated = floatSupplierPickerMenuToBody(picker) || menu;
+        floated.classList.add('open');
         renderSupplierProductMenu(picker);
-        search.focus();
-      }
+        positionSupplierProductPickerMenu(picker, floated);
+        bindSupplierPickerScrollListeners(picker);
+        if (search) {
+          search.value = '';
+          renderSupplierProductMenu(picker);
+          search.focus();
+        }
+      });
     }
   });
 
@@ -454,7 +706,6 @@ function initSupplierProductPicker(picker) {
 function bindSupplierProductRow(row) {
   var picker = row.querySelector('.supplier-product-picker');
   var qtyInput = row.querySelector('.supplier-intake-qty');
-  var modeSelect = row.querySelector('[data-supplier-qty-unit-mode]');
   if (picker) initSupplierProductPicker(picker);
   if (qtyInput) {
     qtyInput.addEventListener('input', function () {
@@ -467,10 +718,16 @@ function bindSupplierProductRow(row) {
       updateSupplierRowQtyHint(row);
     });
   }
-  if (modeSelect) {
-    modeSelect.addEventListener('change', function () {
-      modeSelect.dataset.userTouched = '1';
-      updateSupplierRowQtyHint(row);
+  if (row.dataset.supplierQtyBtnsBound !== '1') {
+    row.dataset.supplierQtyBtnsBound = '1';
+    row.querySelectorAll('[data-supplier-qty-unit-btn]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.disabled) return;
+        var mode = btn.getAttribute('data-mode');
+        if (!mode) return;
+        setSupplierQtyUnitMode(row, mode, true);
+        updateSupplierRowQtyHint(row);
+      });
     });
   }
   updateSupplierRowQtyHint(row);
@@ -550,6 +807,10 @@ document.addEventListener('click', function () {
 
 document.addEventListener('shown.bs.modal', function (e) {
   var modal = e.target;
+  if (modal.classList.contains('supplier-intake-import-modal') && modal.getAttribute('data-show-preview') === '1') {
+    var sid = modal.getAttribute('data-supplier-id');
+    if (sid) activateSupplierIntakeTab(modal, 'supplierIntakeExcelTab' + sid);
+  }
   modal.querySelectorAll('[data-supplier-products-panel]').forEach(function (panel) {
     fetchSupplierProductOptions().then(function () {
       syncSupplierProductPickerLabels(panel);
@@ -624,9 +885,361 @@ function initSupplierPaymentModals() {
   });
 }
 
+function initSupplierIntakeImportModals() {
+  if (typeof initImportPreviewPanel !== 'function') return;
+  document.querySelectorAll('.supplier-intake-import-modal').forEach(function (modalEl) {
+    var sid = modalEl.getAttribute('data-supplier-id');
+    if (!sid) return;
+    initImportPreviewPanel({
+      modalId: 'productsModal' + sid,
+      stepUploadId: 'supplierIntakeUpload' + sid,
+      stepPreviewId: 'supplierIntakePreview' + sid,
+      summaryId: 'supplierIntakeSummary' + sid,
+      tbodyId: 'supplierIntakePreviewBody' + sid,
+      selectAllId: 'supplierIntakeSelectAll' + sid,
+      confirmFormId: 'supplierIntakeConfirm' + sid,
+      btnBackId: 'supplierIntakeBack' + sid,
+      previewQueryKey: 'intake_import_preview',
+      emptyAlert: 'Vui lòng chọn ít nhất một dòng để nhập kho.',
+      showUpdateChip: true,
+    });
+  });
+}
+
+function activateSupplierIntakeTab(modalEl, tabButtonId) {
+  if (!modalEl || !window.bootstrap) return;
+  var tabBtn = document.getElementById(tabButtonId);
+  if (tabBtn) bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+}
+
+function updateSupplierCatalogCostHint(panel, product) {
+  if (!panel) return;
+  var hint = panel.querySelector('[data-supplier-catalog-cost-hint]');
+  if (!hint) return;
+  if (!product) {
+    hint.textContent = '/ đơn vị nhập';
+    return;
+  }
+  var pu = product.purchase_unit || product.base_unit || '';
+  var bu = product.base_unit || product.unit || '';
+  if (supplierProductHasConversion(product)) {
+    hint.textContent = '/ ' + pu + ' (≈ ' + bu + ' trong kho)';
+  } else {
+    hint.textContent = '/ ' + bu;
+  }
+}
+
+function initSupplierCatalogPanels(root) {
+  var scope = root || document;
+  scope.querySelectorAll('[data-supplier-catalog-panel]').forEach(function (panel) {
+    var picker = panel.querySelector('.supplier-product-picker');
+    if (picker) initSupplierProductPicker(picker);
+  });
+  fetchSupplierProductOptions().then(function () {
+    scope.querySelectorAll('[data-supplier-catalog-panel]').forEach(syncSupplierProductPickerLabels);
+  });
+  initSupplierCatalogForms(scope);
+}
+
+function showSupplierCatalogFlash(panel, message, category) {
+  if (typeof window.showAppToast === 'function') {
+    window.showAppToast(message, category);
+  }
+}
+
+function catalogListCtxFromForm(form) {
+  return {
+    _q: (form.querySelector('[name="_q"]') || {}).value || '',
+    _page: (form.querySelector('[name="_page"]') || {}).value || '1',
+    _per_page: (form.querySelector('[name="_per_page"]') || {}).value || '10',
+    _sort: (form.querySelector('[name="_sort"]') || {}).value || 'created_at',
+    _order: (form.querySelector('[name="_order"]') || {}).value || 'desc',
+  };
+}
+
+function catalogListCtxHiddenInputs(ctx) {
+  return (
+    '<input type="hidden" name="_q" value="' +
+    (ctx._q || '').replace(/"/g, '&quot;') +
+    '">' +
+    '<input type="hidden" name="_page" value="' +
+    (ctx._page || '1') +
+    '">' +
+    '<input type="hidden" name="_per_page" value="' +
+    (ctx._per_page || '10') +
+    '">' +
+    '<input type="hidden" name="_sort" value="' +
+    (ctx._sort || 'created_at') +
+    '">' +
+    '<input type="hidden" name="_order" value="' +
+    (ctx._order || 'desc') +
+    '">'
+  );
+}
+
+function bumpSupplierCatalogTabCount(sid) {
+  var tabBtn = document.getElementById('supplierCatalogTab' + sid);
+  if (!tabBtn) return;
+  var badge = tabBtn.querySelector('.badge');
+  var count = badge ? (parseInt(badge.textContent, 10) || 0) + 1 : 1;
+  if (badge) {
+    badge.textContent = String(count);
+  } else {
+    var span = document.createElement('span');
+    span.className = 'badge rounded-pill bg-light text-dark border ms-1';
+    span.textContent = String(count);
+    tabBtn.appendChild(span);
+  }
+}
+
+function bindSupplierCatalogRemoveForm(form) {
+  if (!form || form.dataset.removeBound === '1') return;
+  form.dataset.removeBound = '1';
+  form.addEventListener('submit', function (e) {
+    var label = form.getAttribute('data-product-label') || 'sản phẩm này';
+    if (!confirm('Gỡ ' + label + ' khỏi danh mục NCC?\n\nKhông xóa sản phẩm trong cửa hàng — chỉ bỏ liên kết.')) {
+      e.preventDefault();
+    }
+  });
+}
+
+function buildSupplierCatalogRowHtml(link, listCtx, sid) {
+  var p = link.product;
+  var unitCell = link.has_conversion
+    ? link.purchase_unit +
+      '<div class="small-muted">≈ ' +
+      link.base_cost_hint +
+      ' đ/' +
+      link.base_unit +
+      '</div>'
+    : link.base_unit || '—';
+  var primaryCell = link.is_primary
+    ? '<span class="badge bg-primary-subtle text-primary border border-primary-subtle">Mặc định</span>'
+    : '<form method="post" action="/suppliers/' +
+      sid +
+      '/catalog/' +
+      link.product_id +
+      '/primary" class="d-inline m-0">' +
+      catalogListCtxHiddenInputs(listCtx) +
+      '<button type="submit" class="btn btn-link btn-sm p-0">Đặt mặc định</button></form>';
+  return (
+    '<td><a href="' +
+    p.detail_url +
+    '" class="text-decoration-none fw-semibold"><code class="sku-code">' +
+    p.sku +
+    '</code> — ' +
+    p.name +
+    '</a></td>' +
+    '<td class="text-end money">' +
+    (link.cost_price ? link.cost_display + ' đ' : '—') +
+    '</td>' +
+    '<td>' +
+    unitCell +
+    '</td>' +
+    '<td>' +
+    (link.supplier_sku || '—') +
+    '</td>' +
+    '<td class="text-center">' +
+    primaryCell +
+    '</td>' +
+    '<td class="text-end text-nowrap"><form method="post" action="/suppliers/' +
+    sid +
+    '/catalog/' +
+    link.product_id +
+    '/remove" class="d-inline m-0 supplier-catalog-remove-form" data-product-label="' +
+    p.sku +
+    '">' +
+    catalogListCtxHiddenInputs(listCtx) +
+    '<button type="submit" class="btn btn-sm btn-outline-danger" title="Gỡ khỏi NCC"><i class="bi bi-trash"></i></button></form></td>'
+  );
+}
+
+function updateOrAppendSupplierCatalogRow(panel, link, listCtx) {
+  var tbody = panel.querySelector('[data-supplier-catalog-body]');
+  if (!tbody || !link || !link.product) return;
+  var empty = tbody.querySelector('.supplier-catalog-empty-row');
+  if (empty) empty.remove();
+  var sid = panel.getAttribute('data-supplier-id');
+  var existing = tbody.querySelector('[data-catalog-product-id="' + link.product_id + '"]');
+  if (existing) {
+    existing.innerHTML = buildSupplierCatalogRowHtml(link, listCtx, sid);
+    existing.querySelectorAll('.supplier-catalog-remove-form').forEach(bindSupplierCatalogRemoveForm);
+    return;
+  }
+  var tr = document.createElement('tr');
+  tr.setAttribute('data-catalog-product-id', String(link.product_id));
+  tr.innerHTML = buildSupplierCatalogRowHtml(link, listCtx, sid);
+  tbody.appendChild(tr);
+  tr.querySelectorAll('.supplier-catalog-remove-form').forEach(bindSupplierCatalogRemoveForm);
+}
+
+function appendSupplierCatalogRow(panel, link, listCtx) {
+  updateOrAppendSupplierCatalogRow(panel, link, listCtx);
+}
+
+function resetSupplierCatalogAddForm(form) {
+  var picker = form.querySelector('.supplier-product-picker');
+  if (picker) setSupplierProductPickerValue(picker, null);
+  var cost = form.querySelector('[name="catalog_cost_price"]');
+  var sku = form.querySelector('[name="catalog_supplier_sku"]');
+  var primary = form.querySelector('[name="catalog_is_primary"]');
+  if (cost) cost.value = '';
+  if (sku) sku.value = '';
+  if (primary) primary.checked = false;
+  var panel = form.closest('[data-supplier-catalog-panel]');
+  if (panel) updateSupplierCatalogCostHint(panel, null);
+}
+
+function handleSupplierCatalogAddSubmit(e, form) {
+  e.preventDefault();
+  var picker = form.querySelector('.supplier-product-picker');
+  var input = supplierPickerProductInput(picker);
+  if (!input || !input.value) {
+    if (typeof window.showAppToast === 'function') {
+      window.showAppToast('Vui lòng chọn sản phẩm cần gắn với nhà cung cấp.', 'warning');
+    } else {
+      alert('Vui lòng chọn sản phẩm cần gắn với nhà cung cấp.');
+    }
+    return;
+  }
+  var panel = form.closest('[data-supplier-catalog-panel]');
+  var submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  fetch(form.getAttribute('action'), {
+    method: 'POST',
+    body: new FormData(form),
+    headers: { 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+  })
+    .then(function (res) {
+      var ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.indexOf('json') === -1) {
+        throw new Error('Không nhận được phản hồi từ máy chủ — thử tải lại trang hoặc đăng nhập lại.');
+      }
+      return res.json().then(function (data) {
+        if (!res.ok) throw new Error((data && data.error) || 'Không thêm được sản phẩm');
+        return data;
+      });
+    })
+    .then(function (data) {
+      if (!data || !data.ok || !data.link || !data.link.product) {
+        throw new Error('Phản hồi máy chủ không hợp lệ — tải lại trang và thử lại.');
+      }
+      if (panel) {
+        var toastCat = data.updated ? 'info' : 'success';
+        showSupplierCatalogFlash(panel, data.message || 'Đã lưu sản phẩm.', toastCat);
+        updateOrAppendSupplierCatalogRow(panel, data.link, catalogListCtxFromForm(form));
+        if (!data.updated) {
+          var sid = panel.getAttribute('data-supplier-id');
+          if (sid) bumpSupplierCatalogTabCount(sid);
+        }
+      }
+      supplierProductOptionsCache = null;
+      resetSupplierCatalogAddForm(form);
+    })
+    .catch(function (err) {
+      showSupplierCatalogFlash(panel, err.message || 'Lỗi thêm sản phẩm', 'danger');
+    })
+    .finally(function () {
+      if (submitBtn) submitBtn.disabled = false;
+    });
+}
+
+function initSupplierCatalogForms(root) {
+  (root || document).querySelectorAll('.supplier-catalog-remove-form').forEach(bindSupplierCatalogRemoveForm);
+}
+
+function initSupplierCatalogFormDelegation() {
+  if (document.body.dataset.supplierCatalogDelegate === '1') return;
+  document.body.dataset.supplierCatalogDelegate = '1';
+  document.addEventListener(
+    'submit',
+    function (e) {
+      var form = e.target && e.target.closest ? e.target.closest('.supplier-catalog-add-form') : null;
+      if (!form) return;
+      handleSupplierCatalogAddSubmit(e, form);
+    },
+    true
+  );
+}
+
+function openSupplierDetailModalFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  var sid = params.get('open_detail_sid');
+  if (!sid) return;
+  var modalEl = document.getElementById('detailModal' + sid);
+  if (!modalEl || !window.bootstrap) return;
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  if (params.get('detail_tab') === 'catalog') {
+    activateSupplierIntakeTab(modalEl, 'supplierCatalogTab' + sid);
+  }
+  params.delete('open_detail_sid');
+  params.delete('detail_tab');
+  var qs = params.toString();
+  var next = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+  window.history.replaceState({}, '', next);
+}
+
+function openSupplierIntakeModalFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  var sid = params.get('intake_sid') || params.get('open_intake_sid');
+  if (!sid) return;
+  var modalEl = document.getElementById('productsModal' + sid);
+  if (!modalEl || !window.bootstrap) return;
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  if (params.get('intake_import_preview') === '1' || modalEl.getAttribute('data-show-preview') === '1') {
+    activateSupplierIntakeTab(modalEl, 'supplierIntakeExcelTab' + sid);
+  } else {
+    activateSupplierIntakeTab(modalEl, 'supplierIntakeManualTab' + sid);
+  }
+  var openQuick = params.get('open_quick_product') === '1';
+  params.delete('intake_import_preview');
+  params.delete('intake_sid');
+  params.delete('open_intake_sid');
+  params.delete('open_quick_product');
+  var qs = params.toString();
+  var next = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+  window.history.replaceState({}, '', next);
+  if (openQuick) {
+    setTimeout(function () {
+      var panel = modalEl.querySelector('[data-supplier-products-panel]');
+      var picker = panel && panel.querySelector('.supplier-product-picker');
+      openSupplierQuickProductModal(picker, '');
+    }, 400);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
+  initSupplierQuickProductModal();
+  initSupplierIntakeImportModals();
+  openSupplierIntakeModalFromQuery();
+  openSupplierDetailModalFromQuery();
   initSupplierProductsPanels();
+  initSupplierCatalogFormDelegation();
+  initSupplierCatalogPanels();
   initSupplierPaymentModals();
+  document.querySelectorAll('.supplier-detail-modal').forEach(function (modal) {
+    modal.addEventListener('shown.bs.modal', function () {
+      initSupplierCatalogPanels(modal);
+    });
+  });
+  document.querySelectorAll('[data-supplier-catalog-tab]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var sid = btn.getAttribute('data-supplier-catalog-tab');
+      if (!sid) return;
+      setTimeout(function () {
+        var modalEl = document.getElementById('detailModal' + sid);
+        if (modalEl) activateSupplierIntakeTab(modalEl, 'supplierCatalogTab' + sid);
+      }, 200);
+    });
+  });
+  document.querySelectorAll('.supplier-catalog-remove-form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      var label = form.getAttribute('data-product-label') || 'sản phẩm này';
+      if (!confirm('Gỡ ' + label + ' khỏi danh mục NCC?\n\nKhông xóa sản phẩm trong cửa hàng — chỉ bỏ liên kết.')) {
+        e.preventDefault();
+      }
+    });
+  });
   document.querySelectorAll('.supplier-delete-form').forEach(function (form) {
     form.addEventListener('submit', function (e) {
       var name = form.getAttribute('data-name') || 'nhà cung cấp này';
@@ -638,13 +1251,15 @@ document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('.supplier-intake-delete-form').forEach(function (form) {
     form.addEventListener('submit', function (e) {
       var code = form.getAttribute('data-code') || 'phiếu này';
-      var msg =
-        'Xóa phiếu nhập ' +
-        code +
-        '?\n\n' +
-        '• Tồn kho sẽ được trừ lại theo số lượng đã nhập\n' +
-        '• Các khoản thanh toán liên quan cũng bị xóa\n' +
-        'Hành động không thể hoàn tác.';
+      var pendingOnly = form.getAttribute('data-pending-only') === '1';
+      var msg = pendingOnly
+        ? 'Hủy yêu cầu nhập kho ' + code + '?\n\nPhiếu chưa duyệt — không ảnh hưởng tồn kho.'
+        : 'Xóa phiếu nhập ' +
+          code +
+          '?\n\n' +
+          '• Tồn kho sẽ được trừ lại theo số lượng đã nhập\n' +
+          '• Các khoản thanh toán liên quan cũng bị xóa\n' +
+          'Hành động không thể hoàn tác.';
       if (!confirm(msg)) {
         e.preventDefault();
       }

@@ -1,0 +1,248 @@
+{% extends 'base.html' %}
+{% from 'partials/product_image_upload_panel.html' import product_image_upload_panel as product_image_gallery %}
+{% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
+{% from 'partials/product_price_setup.html' import product_price_setup %}
+{% from 'partials/product_unit_setup.html' import product_unit_setup %}
+{% from 'partials/product_suppliers_panel.html' import product_suppliers_panel %}
+{% block title %}Chỉnh sửa — {{ p.name }}{% endblock %}
+{% block content %}
+
+{% set imgs = product_image_urls(p) %}
+{% set stock_low = p.stock <= p.low_stock %}
+{% set supplier_links = product_supplier_links(p) %}
+{% set bu = product_base_unit(p) %}
+{% set pu = product_purchase_unit(p) %}
+
+<div class="product-edit-page">
+  <form method="post" action="{{ url_for('update_product', pid=p.id) }}" enctype="multipart/form-data" id="productEditForm" class="product-edit-form">
+    <input type="hidden" name="_from_edit" value="1">
+    <input type="hidden" name="_pid" value="{{ p.id }}">
+
+    <header class="product-edit-header">
+      <div class="product-edit-header-left">
+        <a href="{{ url_for('product_detail', pid=p.id) }}" class="btn btn-light btn-product-edit-back" title="Quay lại">
+          <i class="bi bi-arrow-left"></i>
+          <span class="d-none d-sm-inline ms-1">Quay lại</span>
+        </a>
+        <h1 class="product-edit-title">Chỉnh sửa sản phẩm</h1>
+      </div>
+      <div class="product-edit-header-actions">
+        <a href="{{ url_for('product_detail', pid=p.id) }}" class="btn btn-light">Hủy</a>
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-floppy me-1"></i>Lưu thay đổi
+        </button>
+      </div>
+    </header>
+
+    <nav class="product-edit-tabs" aria-label="Phần chỉnh sửa">
+      <button type="button" class="product-edit-tab active" data-product-edit-tab="info">Thông tin</button>
+      <button type="button" class="product-edit-tab" data-product-edit-tab="price">Giá bán</button>
+      <button type="button" class="product-edit-tab" data-product-edit-tab="stock">Kho hàng</button>
+      <button type="button" class="product-edit-tab" data-product-edit-tab="suppliers">Nhà cung cấp</button>
+      <button type="button" class="product-edit-tab" data-product-edit-tab="history">Lịch sử</button>
+    </nav>
+
+    <div class="product-edit-body">
+      <div class="row g-4 product-edit-main-row" id="productEditSectionInfo">
+        <div class="col-lg-8">
+          <section class="product-edit-card">
+            <h3 class="product-edit-card-title">Thông tin sản phẩm</h3>
+            <div class="product-edit-info-layout">
+              <div class="product-edit-image-col">
+                {{ product_image_gallery(p, editable=true) }}
+              </div>
+              <div class="product-edit-fields-col">
+                <div class="mb-3">
+                  <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
+                  <input type="text" name="name" class="form-control" required value="{{ p.name }}" placeholder="Nhập tên sản phẩm">
+                </div>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label-custom">SKU <span class="text-danger">*</span></label>
+                    <input type="text" name="sku" class="form-control" required value="{{ p.sku }}">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label-custom">Mã model</label>
+                    <input type="text" name="model" class="form-control" value="{{ p.model }}" placeholder="Nhập mã model">
+                  </div>
+                </div>
+                <div class="mt-3">
+                  {{ product_taxonomy_picker(parent_categories, brands_list, p.category_id, p.brand_id, inline=true) }}
+                </div>
+                <div class="row g-3 mt-1">
+                  <div class="col-md-4">
+                    <label class="form-label-custom">Biến thể</label>
+                    <input type="text" name="variant" class="form-control" value="{{ p.variant }}" placeholder="—">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label-custom">Bảo hành</label>
+                    <div class="input-group">
+                      <input type="text" name="warranty" class="form-control" value="{{ p.warranty }}" placeholder="VD: 12">
+                      <span class="input-group-text">tháng</span>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label-custom">Tồn tối thiểu</label>
+                    <div class="input-group">
+                      <input type="number" name="low_stock" class="form-control" value="{{ p.low_stock }}" step="any" min="0">
+                      <span class="input-group-text data-edit-low-stock-suffix">{{ bu }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="product-edit-card product-edit-desc-card">
+            <h3 class="product-edit-card-title">Mô tả sản phẩm</h3>
+            <div class="product-edit-desc-toolbar" aria-hidden="true">
+              <span class="product-edit-desc-tool">H</span>
+              <span class="product-edit-desc-tool"><i class="bi bi-type-bold"></i></span>
+              <span class="product-edit-desc-tool"><i class="bi bi-type-italic"></i></span>
+              <span class="product-edit-desc-tool"><i class="bi bi-type-underline"></i></span>
+              <span class="product-edit-desc-tool"><i class="bi bi-list-ul"></i></span>
+              <span class="product-edit-desc-tool"><i class="bi bi-list-ol"></i></span>
+              <span class="product-edit-desc-tool"><i class="bi bi-link-45deg"></i></span>
+              <span class="product-edit-desc-tool"><i class="bi bi-image"></i></span>
+            </div>
+            <textarea name="description" class="form-control product-edit-desc-input" rows="6"
+                      placeholder="Nhập mô tả sản phẩm..." disabled
+                      title="Mô tả sẽ bổ sung trong phiên bản sau"></textarea>
+            <p class="small-muted mb-0 mt-2">Mô tả chi tiết sẽ được lưu trong bản cập nhật tiếp theo.</p>
+          </section>
+
+          <section class="product-edit-card product-edit-unit-card">
+            <h3 class="product-edit-card-title">Quản lý đơn vị</h3>
+            {{ product_unit_setup(p) }}
+          </section>
+        </div>
+
+        <div class="col-lg-4 product-edit-sidebar">
+          <section class="product-edit-card product-edit-stock-card" id="productEditStock">
+            <h3 class="product-edit-card-title">Tồn kho &amp; Đơn vị</h3>
+            <div class="product-edit-stock-metrics">
+              <div class="product-edit-stock-metric">
+                <span class="product-edit-stock-metric-label">Tồn hiện tại</span>
+                <span class="product-edit-stock-metric-value{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">
+                  {{ format_qty_display(p.stock) }} <span data-edit-sidebar-base-unit>{{ bu }}</span>
+                </span>
+              </div>
+              <div class="product-edit-stock-metric">
+                <span class="product-edit-stock-metric-label">Tồn tối thiểu</span>
+                <span class="product-edit-stock-metric-value product-edit-stock-metric-value--sm">
+                  {{ format_qty_display(p.low_stock) }} <span data-edit-sidebar-base-unit>{{ bu }}</span>
+                </span>
+              </div>
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label-custom small">Đơn vị tồn kho</label>
+                <div class="form-control form-control-sm bg-light text-center product-edit-sidebar-unit-val">
+                  <span data-edit-sidebar-base-unit>{{ bu }}</span>
+                </div>
+              </div>
+              <div class="col-6">
+                <label class="form-label-custom small">Đơn vị nhập</label>
+                <div class="form-control form-control-sm bg-light text-center product-edit-sidebar-unit-val">
+                  <span data-edit-sidebar-purchase-unit>{{ pu }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-edit-conv-banner{% if not product_has_unit_conversion(p) %} d-none{% endif %}" data-edit-conv-summary>
+              Quy đổi: {{ product_unit_conversion_label(p) }}
+            </div>
+            {% if product_has_unit_conversion(p) %}
+            <div class="product-edit-sale-display mt-2 small">
+              <span class="text-muted">Hiển thị danh sách:</span>
+              <strong class="text-primary" data-edit-sale-unit-label>{{ product_unit_label(p, product_default_sale_unit_mode(p)) }}</strong>
+            </div>
+            {% endif %}
+            <label class="form-label-custom small mt-3 mb-1">Cập nhật tồn trực tiếp</label>
+            <div class="input-group input-group-sm">
+              <input type="number" name="stock" class="form-control" value="{{ p.stock }}" step="any" min="0"
+                     data-product-edit-stock-input>
+              <span class="input-group-text" data-edit-sidebar-base-unit>{{ bu }}</span>
+            </div>
+          </section>
+
+          <section class="product-edit-card" id="productEditPrices">
+            {{ product_price_setup(p) }}
+          </section>
+
+          {{ product_suppliers_panel(p, supplier_links, all_suppliers) }}
+        </div>
+      </div>
+
+      <section class="product-edit-card product-edit-history-card" id="productEditHistory">
+        <h3 class="product-edit-card-title">Lịch sử</h3>
+        <ul class="nav nav-tabs product-edit-history-tabs mb-3" role="tablist">
+          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#editHistPrice" type="button">Giá</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#editHistStock" type="button">Kho</button></li>
+        </ul>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="editHistPrice">
+            <div class="table-responsive">
+              <table class="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th>Thời gian</th>
+                    <th>Loại giá</th>
+                    <th>Giá cũ</th>
+                    <th>Giá mới</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for h in price_histories %}
+                  <tr>
+                    <td>{{ h.created_at.strftime('%d/%m/%Y %H:%M') if h.created_at else '—' }}</td>
+                    <td>{{ price_type_label(h.price_type) }}</td>
+                    <td class="money">{{ h.old_price|money }}</td>
+                    <td class="money">{{ h.new_price|money }}</td>
+                  </tr>
+                  {% else %}
+                  <tr><td colspan="4" class="text-center text-muted py-4">Chưa có lịch sử thay đổi giá</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="editHistStock">
+            <div class="table-responsive">
+              <table class="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th>Thời gian</th>
+                    <th>Loại</th>
+                    <th>SL</th>
+                    <th>Lý do</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for m in stock_movements %}
+                  <tr>
+                    <td>{{ m.created_at.strftime('%d/%m/%Y %H:%M') if m.created_at else '—' }}</td>
+                    <td>{% if m.movement_type == 'IN' %}<span class="text-success">Nhập</span>{% else %}<span class="text-danger">Xuất</span>{% endif %}</td>
+                    <td>{{ format_qty_display(m.qty) }} {{ bu }}</td>
+                    <td>{{ m.method or '—' }}</td>
+                  </tr>
+                  {% else %}
+                  <tr><td colspan="4" class="text-center text-muted py-4">Chưa có lịch sử kho</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </form>
+</div>
+
+<script id="taxonomyCatalogData" type="application/json">{{ taxonomy_catalog_json|safe }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/product_units.js') }}"></script>
+<script src="{{ url_for('static', filename='js/products.js') }}"></script>
+<script src="{{ url_for('static', filename='js/product_edit.js') }}"></script>
+{% endblock %}

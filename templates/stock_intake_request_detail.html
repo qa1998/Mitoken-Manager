@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+{% from 'partials/stock_intake_allocate.html' import stock_intake_allocate_block %}
+{% from 'partials/product_unit_mode_bar.html' import product_unit_mode_bar %}
+{% block title %}Chi tiết yêu cầu nhập kho{% endblock %}
+{% block content %}
+
+<div class="stock-intake-detail-page">
+  <div class="panel-card mb-3">
+    <div class="panel-card-head mb-0">
+      <div class="section-header">
+        <a href="{{ back_url }}" class="btn btn-light btn-sm me-2" title="Quay lại danh sách">
+          <i class="bi bi-arrow-left"></i>
+        </a>
+        <div class="page-header-icon"><i class="bi bi-inbox"></i></div>
+        <div>
+          <h2 class="section-title mb-1">Chi tiết phiếu nhập kho</h2>
+          <p class="small-muted mb-0">
+            <code class="sku-code">{{ intake.intake_code or ('#' ~ intake.id) }}</code>
+            · {{ intake.supplier.name }}
+          </p>
+        </div>
+      </div>
+      {% if stock_st == 'Chờ nhập kho' %}
+      <span class="badge bg-warning text-dark">Chờ nhập kho</span>
+      {% else %}
+      <span class="badge bg-success">Đã nhập kho</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel-card mb-3">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="small-muted">Nhà cung cấp</div>
+        <strong>{{ intake.supplier.name }}</strong>
+        <div class="small-muted">{{ intake.supplier.code }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="small-muted">Ngày gửi</div>
+        <div>{{ intake.created_at.strftime('%d/%m/%Y %H:%M') if intake.created_at else '—' }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="small-muted">Chứng từ</div>
+        <div>{{ intake.ref_code or '—' }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="small-muted">Tổng tiền</div>
+        <div class="money fw-semibold">{{ intake.total_amount|money }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="small-muted">Số dòng SP</div>
+        <div class="fw-semibold">{{ lines|length }}</div>
+      </div>
+      {% if intake.stock_received_at %}
+      <div class="col-md-3">
+        <div class="small-muted">Nhập kho lúc</div>
+        <div>{{ intake.stock_received_at.strftime('%d/%m/%Y %H:%M') }}</div>
+      </div>
+      {% endif %}
+      {% if intake.note %}
+      <div class="col-12">
+        <div class="small-muted">Ghi chú phiếu</div>
+        <div>{{ intake.note }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if stock_st == 'Chờ nhập kho' %}
+  <div class="alert alert-info stock-intake-howto mb-3">
+    <strong><i class="bi bi-info-circle me-1"></i>Phân bổ &amp; duyệt</strong>
+    <p class="mb-0 mt-2 small">Chọn <strong>đơn vị</strong> (Thùng / kg / Lô) trên từng sản phẩm, phân bổ cho khách theo đơn vị đó, rồi bấm <strong>Duyệt nhập kho</strong>.</p>
+  </div>
+  {% endif %}
+
+  <div class="panel-card">
+    {% if stock_st == 'Chờ nhập kho' %}
+    <form method="post" action="{{ url_for('approve_supplier_intake_stock', iid=intake.id) }}" class="stock-intake-approve-form">
+      <input type="hidden" name="return_to" value="detail">
+      <input type="hidden" name="list_status" value="{{ list_filters.status }}">
+      <input type="hidden" name="list_q" value="{{ list_filters.q }}">
+      <input type="hidden" name="list_page" value="{{ list_filters.page }}">
+    {% endif %}
+
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 stock-intake-lines-detail-table">
+        <thead>
+          <tr>
+            <th>Sản phẩm</th>
+            <th class="text-end">Tồn</th>
+            <th class="text-end">Cam kết KH</th>
+            <th class="text-end">Còn thiếu</th>
+            <th class="text-end">SL phiếu nhập</th>
+            <th class="text-end">Sau nhập còn thiếu</th>
+            <th class="text-end">Giá / TT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+          {% set gap = product_gap_map.get(line.product_id, {}) %}
+          {% set plan = stock_intake_line_plan(line, gap) %}
+          {% set line_base = plan.line_base %}
+          {% set saved_allocs = saved_alloc_map.get(line.id, []) %}
+          <tr>
+            <td colspan="7" class="pt-3 pb-0 border-0">
+              <strong>{{ line.product.sku }}</strong> — {{ line.product.name }}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="7" class="border-0 pb-2">
+            <div class="stock-intake-line-plan"
+                                 data-line-id="{{ line.id }}"
+                                 data-line-max-base="{{ line_base }}"
+                                 data-unit-mode="{{ plan.unit_mode }}"
+                                 data-stock-base="{{ plan.stock }}"
+                                 data-shortfall-base="{{ plan.shortfall }}"
+                                 data-remain-base="{{ plan.remain_after }}"
+                                 data-demand-base="{{ plan.total_demand }}">
+                              {{ product_unit_mode_bar(line.product, plan.unit_mode, 'mb-2') }}
+                              <div class="stock-intake-plan-grid">
+                                <div class="stock-intake-plan-item">
+                                  <span class="stock-intake-plan-label">Tồn</span>
+                                  <span class="stock-intake-plan-value" data-plan-stock>{{ format_qty_display(plan.stock_display) }} <span data-plan-unit>{{ plan.display_unit }}</span></span>
+                                  {% if plan.has_conversion %}<span class="small-muted d-block" data-plan-stock-base>({{ format_qty_display(plan.stock) }} {{ plan.base_unit }} tồn)</span>{% endif %}
+                                </div>
+                                <div class="stock-intake-plan-item">
+                                  <span class="stock-intake-plan-label">Còn thiếu</span>
+                                  <span class="stock-intake-plan-value text-danger" data-plan-shortfall>{{ format_qty_display(plan.shortfall_display) }} <span data-plan-unit>{{ plan.display_unit }}</span></span>
+                                </div>
+                                <div class="stock-intake-plan-item">
+                                  <span class="stock-intake-plan-label">SL phiếu nhập</span>
+                                  <span class="stock-intake-plan-value text-primary" data-plan-line-qty>{{ format_qty_display(plan.line_display) }} <span data-plan-unit>{{ plan.display_unit }}</span></span>
+                                  {% if plan.has_conversion %}<span class="small-muted d-block" data-plan-line-base>({{ format_qty_display(line_base) }} {{ plan.base_unit }} tồn)</span>{% endif %}
+                                </div>
+                                {% if stock_st == 'Chờ nhập kho' %}
+                                <div class="stock-intake-plan-item stock-intake-plan-alloc">
+                                  <span class="stock-intake-plan-label">Đã phân bổ</span>
+                                  <span class="stock-intake-plan-value">
+                                    <strong class="stock-intake-alloc-sum" data-alloc-sum>0</strong>
+                                    <span class="text-muted">/ <span data-plan-max-display>{{ format_qty_display(plan.line_display) }}</span> <span data-plan-unit>{{ plan.display_unit }}</span></span>
+                                  </span>
+                                </div>
+                                <div class="stock-intake-plan-item">
+                                  <span class="stock-intake-plan-label">Chưa phân</span>
+                                  <span class="stock-intake-plan-value"><strong class="stock-intake-unalloc-sum" data-unalloc-sum>{{ format_qty_display(plan.line_display) }}</strong> <span data-plan-unit>{{ plan.display_unit }}</span></span>
+                                </div>
+                                {% endif %}
+                                <div class="stock-intake-plan-item">
+                                  <span class="stock-intake-plan-label">Sau duyệt còn thiếu</span>
+                                  <span class="stock-intake-plan-value {% if plan.remain_after > 0 %}text-warning{% else %}text-success{% endif %}" data-plan-remain>
+                                    {{ format_qty_display(plan.remain_after_display) }} <span data-plan-unit>{{ plan.display_unit }}</span>
+                                  </span>
+                                </div>
+                              </div>
+                              {% if plan.remain_after > 0 and stock_st == 'Chờ nhập kho' %}
+                              <div class="stock-intake-continue-hint mt-2" data-plan-continue-hint>
+                                <i class="bi bi-arrow-repeat me-1"></i>Vẫn thiếu <strong data-plan-remain-strong>{{ format_qty_display(plan.remain_after_display) }} {{ plan.display_unit }}</strong> sau khi duyệt —
+                                <a href="{{ url_for('suppliers') }}">nhập tiếp tại Nhà cung cấp</a>.
+                              </div>
+                              {% endif %}
+                            </div>
+            </td>
+          </tr>
+          <tr>
+            <td class="text-muted small">Chi tiết</td>
+                          <td class="text-end">{{ format_qty_display(plan.stock_display) }} {{ plan.display_unit }}</td>
+                          <td class="text-end">{{ format_qty_display(plan.total_demand_display) }} {{ plan.display_unit }}</td>
+                          <td class="text-end text-danger">{{ format_qty_display(plan.shortfall_display) }} {{ plan.display_unit }}</td>
+                          <td class="text-end fw-semibold">{{ format_qty_display(plan.line_display) }} {{ plan.display_unit }}</td>
+                          <td class="text-end {% if plan.remain_after > 0 %}text-warning fw-semibold{% else %}text-success{% endif %}">{{ format_qty_display(plan.remain_after_display) }} {{ plan.display_unit }}</td>
+            <td class="text-end money">{{ line.line_amount|money }}</td>
+          </tr>
+          {% if stock_st == 'Chờ nhập kho' %}
+          {{ stock_intake_allocate_block(line, plan, gap, intake_customer_choices) }}
+          {% elif saved_allocs %}
+          <tr>
+            <td colspan="7" class="border-0 pb-3">
+              <div class="stock-intake-saved-alloc px-2">
+                <span class="small fw-semibold"><i class="bi bi-check2-square me-1"></i>Đã phân bổ khi nhập:</span>
+                {% for a in saved_allocs %}
+                <span class="badge bg-light text-dark border me-1">{{ a.customer_name }}{% if a.order_code %} · {{ a.order_code }}{% endif %}: {{ format_qty_display(a.qty) }} {{ plan.base_unit }}</span>
+                {% endfor %}
+              </div>
+            </td>
+          </tr>
+          {% elif gap.customers %}
+          <tr>
+            <td colspan="7" class="small-muted border-0 pb-2">
+              {% for c in gap.customers[:4] %}
+              {{ c.customer_name }} ({{ c.order_code }}: {{ format_qty_display(c.qty) }} {{ plan.base_unit }}){% if not loop.last %}; {% endif %}
+              {% endfor %}
+            </td>
+          </tr>
+          {% endif %}
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted py-4">Phiếu không có dòng sản phẩm</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if stock_st == 'Chờ nhập kho' %}
+    <div class="stock-intake-detail-actions d-flex flex-wrap align-items-center gap-2 px-3 py-3 border-top">
+      <button type="submit" class="btn btn-success">
+        <i class="bi bi-check2-circle me-1"></i>Duyệt nhập kho
+      </button>
+      <span class="small-muted">Tổng phân bổ mỗi dòng không được vượt SL nhập trên phiếu.</span>
+    </div>
+    </form>
+    <form method="post" action="{{ url_for('reject_supplier_intake_stock', iid=intake.id) }}" class="px-3 pb-3 supplier-intake-delete-form"
+          data-code="{{ intake.intake_code }}" data-pending-only="1">
+      <input type="hidden" name="return_to" value="list">
+      <input type="hidden" name="list_status" value="{{ list_filters.status }}">
+      <input type="hidden" name="list_q" value="{{ list_filters.q }}">
+      <input type="hidden" name="list_page" value="{{ list_filters.page }}">
+      <button type="submit" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-x-lg me-1"></i>Hủy yêu cầu nhập kho
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/product_units.js') }}"></script>
+<script src="{{ url_for('static', filename='js/suppliers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/stock_intake.js') }}"></script>
+{% endblock %}

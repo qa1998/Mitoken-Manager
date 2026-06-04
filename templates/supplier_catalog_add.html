@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+{% from 'partials/product_unit_setup.html' import product_unit_setup %}
+{% block title %}Thêm sản phẩm — {{ supplier.name }}{% endblock %}
+{% block content %}
+
+<div class="supplier-sp-add-page" data-supplier-sp-add-page>
+  <form method="post" action="{{ url_for('supplier_catalog_new', sid=supplier.id) }}" id="supplierCatalogNewForm" class="supplier-sp-add-form" novalidate>
+    <input type="hidden" name="_q" value="{{ list_ctx.q }}">
+    <input type="hidden" name="_page" value="{{ list_ctx.page }}">
+    <input type="hidden" name="_per_page" value="{{ list_ctx.per_page }}">
+    <input type="hidden" name="_sort" value="{{ list_ctx.sort }}">
+    <input type="hidden" name="_order" value="{{ list_ctx.order }}">
+
+    <header class="supplier-sp-add-header">
+      <div class="supplier-sp-add-header-left">
+        <a href="{{ cancel_url }}" class="btn btn-light btn-supplier-sp-add-back" title="Quay lại">
+          <i class="bi bi-arrow-left"></i>
+          <span class="d-none d-sm-inline ms-1">Quay lại</span>
+        </a>
+        <div>
+          <h1 class="supplier-sp-add-title">Thêm sản phẩm của nhà cung cấp</h1>
+          <p class="supplier-sp-add-subtitle mb-0">
+            Nhập đầy đủ thông tin sản phẩm và đơn vị tính để quản lý nhập hàng, tồn kho và giá.
+            <span class="text-muted">· NCC: <strong>{{ supplier.name }}</strong> <code class="sku-code">{{ supplier.code }}</code></span>
+          </p>
+        </div>
+      </div>
+    </header>
+
+    <div class="row g-4 supplier-sp-add-main">
+      <div class="col-lg-8">
+        <section class="supplier-sp-add-card">
+          <h2 class="supplier-sp-add-card-title">Thông tin sản phẩm</h2>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label-custom">SKU / Mã sản phẩm <span class="text-danger">*</span></label>
+              <input type="text" name="sku" class="form-control" required
+                     value="{{ form_data.sku }}" placeholder="VD: QH-VD-3M" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Tên sản phẩm <span class="text-danger">*</span></label>
+              <input type="text" name="name" class="form-control" required
+                     value="{{ form_data.name }}" placeholder="VD: Que hàn Việt Đức 3ly">
+            </div>
+            <div class="col-12">
+              <label class="form-label-custom">Giá nhập (mặc định) <span class="text-danger">*</span></label>
+              <div class="money-input-wrap supplier-sp-add-cost-wrap">
+                <input type="text" name="cost_price" class="form-control money-input supplier-sp-add-cost-input"
+                       inputmode="numeric" autocomplete="off" required
+                       value="{{ form_data.cost_price }}" placeholder="0" data-supplier-catalog-cost-input>
+                <span class="money-input-suffix">đ</span>
+              </div>
+              <p class="form-text mb-0">Giá nhập sẽ là giá mặc định khi tạo đơn mua hàng — theo <span data-supplier-catalog-cost-unit>đơn vị nhập</span>.</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label-custom">Mã NCC (tùy chọn)</label>
+              <input type="text" name="catalog_supplier_sku" class="form-control"
+                     value="{{ form_data.catalog_supplier_sku }}" placeholder="Mã SP trên hóa đơn NCC">
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+              <div class="form-check mb-2">
+                <input type="checkbox" name="catalog_is_primary" value="1" class="form-check-input" id="catalogIsPrimary"
+                       {% if form_data.catalog_is_primary %}checked{% endif %}>
+                <label class="form-check-label" for="catalogIsPrimary">Đặt làm nhà cung cấp mặc định cho sản phẩm</label>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="supplier-sp-add-card supplier-sp-add-unit-card">
+          <div class="supplier-sp-add-unit-head">
+            <h2 class="supplier-sp-add-card-title mb-0">Quản lý đơn vị tính</h2>
+          </div>
+          <p class="supplier-sp-add-unit-desc small-muted">
+            Chọn mẫu nhanh hoặc cấu hình quy đổi giữa đơn vị tồn kho và đơn vị nhập từ NCC.
+          </p>
+          {{ product_unit_setup(unit_defaults={
+            'conversion_enabled': form_data.unit_conversion_enabled,
+            'base_unit': form_data.base_unit,
+            'purchase_unit': form_data.purchase_unit,
+            'conversion_factor': form_data.conversion_factor,
+            'lot_enabled': form_data.lot_enabled,
+            'lot_unit': form_data.lot_unit,
+            'lot_factor': form_data.lot_factor,
+            'sale_unit_mode': form_data.sale_unit_mode,
+          }) }}
+        </section>
+
+        <div class="supplier-sp-add-footnote">
+          <i class="bi bi-info-circle me-2"></i>
+          Sau khi thêm, bạn có thể cập nhật thêm danh mục, thương hiệu, mô tả và ảnh trên trang chi tiết sản phẩm.
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <aside class="supplier-sp-add-sidebar">
+          <section class="supplier-sp-add-card supplier-sp-add-summary-card">
+            <h2 class="supplier-sp-add-card-title">Tóm tắt quy đổi</h2>
+            <div class="supplier-sp-add-conv-hero" data-supplier-catalog-conv-hero>1 đơn vị = 1 đơn vị</div>
+            <ul class="supplier-sp-add-summary-list">
+              <li>
+                <span class="supplier-sp-add-summary-label">Đơn vị tồn kho</span>
+                <span class="supplier-sp-add-summary-value" data-edit-sidebar-base-unit>cái</span>
+              </li>
+              <li>
+                <span class="supplier-sp-add-summary-label">Đơn vị nhập</span>
+                <span class="supplier-sp-add-summary-value" data-edit-sidebar-purchase-unit>cái</span>
+              </li>
+              <li class="supplier-sp-add-summary-conv-row{% if not form_data.unit_conversion_enabled %} d-none{% endif %}" data-supplier-catalog-conv-row>
+                <span class="supplier-sp-add-summary-label">Quy đổi</span>
+                <span class="supplier-sp-add-summary-value" data-edit-conv-summary>—</span>
+              </li>
+              <li>
+                <span class="supplier-sp-add-summary-label">Giá nhập mặc định</span>
+                <span class="supplier-sp-add-summary-value text-primary" data-supplier-catalog-cost-display>—</span>
+              </li>
+              <li>
+                <span class="supplier-sp-add-summary-label">Hiển thị &amp; bán</span>
+                <span class="supplier-sp-add-summary-value" data-edit-sale-unit-label>cái</span>
+              </li>
+            </ul>
+            <div class="supplier-sp-add-summary-tip" data-supplier-catalog-summary-tip>
+              Tồn kho được quản lý theo đơn vị tồn. Khi nhập hàng theo đơn vị đóng gói, hệ thống tự quy đổi sang đơn vị tồn.
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <footer class="supplier-sp-add-footer">
+      <a href="{{ cancel_url }}" class="btn btn-light">Hủy</a>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i>Thêm &amp; gắn NCC
+      </button>
+    </footer>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/product_units.js') }}"></script>
+<script src="{{ url_for('static', filename='js/products.js') }}"></script>
+<script src="{{ url_for('static', filename='js/supplier_catalog_add.js') }}"></script>
+{% endblock %}

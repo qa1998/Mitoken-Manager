@@ -1,6 +1,6 @@
-{% macro supplier_product_picker(selected_id='', selected_label='', placeholder='— Chọn sản phẩm —') %}
-<div class="supplier-product-picker">
-  <input type="hidden" name="sp_product_id" value="{{ selected_id }}" required>
+{% macro supplier_product_picker(selected_id='', selected_label='', placeholder='— Chọn sản phẩm —', field_name='sp_product_id') %}
+<div class="supplier-product-picker" data-product-field="{{ field_name }}">
+  <input type="hidden" name="{{ field_name }}" value="{{ selected_id }}"{% if selected_id %} required{% endif %}>
   <button type="button" class="supplier-product-picker-btn{% if not selected_id %} is-placeholder{% endif %}">
     <span class="supplier-product-picker-label">{{ selected_label or placeholder }}</span>
     <i class="bi bi-chevron-down supplier-product-picker-caret"></i>
@@ -18,19 +18,23 @@
 {% macro supplier_intake_qty_cell(product=none) %}
 <td class="supplier-qty-cell">
   <div class="supplier-qty-fields">
-    <div class="supplier-qty-unit-mode-wrap d-none" data-supplier-qty-unit-mode-wrap>
+    <div class="supplier-qty-unit-mode-wrap is-awaiting-product" data-supplier-qty-unit-mode-wrap>
       <label class="supplier-qty-micro-label">Nhập theo</label>
-      <select name="sp_qty_unit_mode" class="form-select form-select-sm supplier-qty-unit-mode-select" data-supplier-qty-unit-mode>
-        <option value="purchase">Theo đơn vị nhập</option>
-        <option value="lot" data-supplier-qty-mode-lot>Theo lô</option>
-        <option value="base">Theo đơn vị tồn</option>
-      </select>
+      <div class="supplier-qty-unit-btns btn-group btn-group-sm w-100" role="group" aria-label="Đơn vị nhập" data-supplier-qty-unit-btns>
+        <button type="button" class="btn btn-outline-secondary" data-supplier-qty-unit-btn data-mode="lot" data-supplier-qty-mode-lot disabled>Lô</button>
+        <button type="button" class="btn btn-outline-secondary" data-supplier-qty-unit-btn data-mode="purchase" disabled>Hộp</button>
+        <button type="button" class="btn btn-outline-secondary active" data-supplier-qty-unit-btn data-mode="base" disabled>ĐV tồn</button>
+      </div>
+      <input type="hidden" name="sp_qty_unit_mode" value="base" data-supplier-qty-unit-mode>
+      <p class="supplier-qty-mode-hint small-muted mb-0" data-supplier-qty-mode-hint>Chọn sản phẩm để bật Lô / Hộp / đơn vị tồn.</p>
     </div>
-    <input type="hidden" name="sp_qty_unit_mode" value="base" data-supplier-qty-unit-mode-hidden>
     <div class="supplier-qty-amount-wrap">
       <label class="supplier-qty-micro-label" data-supplier-qty-unit-label>Số lượng</label>
-      <input type="number" name="sp_qty" class="form-control form-control-sm supplier-intake-qty" min="0" step="any"
-             value="{% if link and (link.purchase_qty or link.qty) %}{% if link.purchase_qty and link.purchase_qty > 0 %}{{ link.purchase_qty }}{% else %}{{ link.qty }}{% endif %}{% else %}0{% endif %}" placeholder="0">
+      <div class="supplier-qty-input-row">
+        <input type="number" name="sp_qty" class="form-control form-control-sm supplier-intake-qty" min="0" step="any"
+               value="0" placeholder="0" disabled data-supplier-qty-input>
+        <span class="supplier-qty-unit-suffix text-muted" data-supplier-qty-unit-suffix>—</span>
+      </div>
     </div>
     <div class="supplier-qty-convert-hint small-muted" data-supplier-qty-convert-hint></div>
     <div class="supplier-qty-conv-badge small-muted d-none" data-supplier-conv-badge></div>
@@ -48,7 +52,8 @@
     <div>
       <h6 class="supplier-products-panel-title"><i class="bi bi-box-seam me-2"></i>Sản phẩm nhập từ NCC</h6>
       <p class="supplier-products-panel-sub mb-0">
-        Chọn <strong>Nhập theo</strong> (hộp, cuộn, lô, mét, chiếc…) rồi nhập số lượng — hệ thống tự quy đổi tồn kho.
+        SP phải có trong <strong>danh mục cửa hàng</strong> — không thấy thì <strong>Thêm sản phẩm mới</strong> trong ô chọn SP.
+        Sau đó chọn <strong>Lô / Hộp / đơn vị tồn</strong> và nhập số lượng.
       </p>
     </div>
     <button type="button" class="btn btn-outline-primary btn-sm supplier-products-add-btn">
@@ -70,7 +75,7 @@
       <thead>
         <tr>
           <th class="col-product">Sản phẩm</th>
-          <th class="col-qty">Số lượng nhập</th>
+          <th class="col-qty">Nhập theo · Số lượng</th>
           <th class="col-cost">Giá nhập</th>
           <th class="col-note">Ghi chú</th>
           <th class="col-actions text-end">Xóa</th>

@@ -1,17 +1,7 @@
-{% from 'partials/supplier_products_panel.html' import supplier_products_panel %}
+{% from 'partials/purchase_order_products_panel.html' import purchase_order_products_panel %}
 <div class="purchase-order-meta mb-3">
   <div class="row g-3">
-    <div class="col-md-6">
-      <label class="form-label-custom">Nhà cung cấp</label>
-      <select name="supplier_id" class="form-select" data-po-supplier>
-        <option value="" {% if not po or not po.supplier_id %}selected{% endif %}>— Chưa chọn (gán sau) —</option>
-        {% for s in suppliers %}
-        <option value="{{ s.id }}" {% if po and po.supplier_id == s.id %}selected{% endif %}>{{ s.code }} — {{ s.name }}</option>
-        {% endfor %}
-      </select>
-      <div class="form-text mb-0">Bắt buộc khi <strong>xác nhận nhận hàng</strong> — có thể lưu nháp trước khi chọn NCC</div>
-    </div>
-    <div class="col-md-6">
+    <div class="col-12">
       <label class="form-label-custom d-block">Hình thức nhận hàng <span class="text-danger">*</span></label>
       <div class="po-receipt-mode-group">
         <div class="form-check form-check-inline">
@@ -29,9 +19,6 @@
                  {% if po and po.receipt_mode == 'no_stock' %}checked{% endif %} data-po-receipt-mode>
           <label class="form-check-label" for="receipt_mode_no_stock_{{ form_uid }}">Không nhập kho</label>
         </div>
-      </div>
-      <div class="form-text mb-0">
-        <strong>Không nhập kho</strong>: chỉ ghi mua NCC / công nợ, không tăng tồn (đã xuất kho hoặc giao thẳng).
       </div>
     </div>
     <div class="col-md-6 po-direct-fields{% if not po or po.receipt_mode != 'direct_delivery' %} d-none{% endif %}" data-po-direct-fields>
@@ -51,8 +38,13 @@
         <option value="{{ po.order.id }}" selected>{{ po.order.order_code }} — {{ po.order.status }}</option>
         {% endif %}
       </select>
-      <div class="form-text mb-0">Dùng khi hàng giao / sẽ giao thẳng cho khách theo đơn</div>
     </div>
+    {% if po and po.receipt_mode != 'direct_delivery' and (po.customer_id or po.order_id) %}
+    <input type="hidden" name="customer_id" value="{{ po.customer_id or '' }}">
+    <input type="hidden" name="order_id" value="{{ po.order_id or '' }}">
+    {% endif %}
   </div>
 </div>
-{{ supplier_products_panel(links=po_lines if po_lines is defined else [], skip_auto_cost=true) }}
+{% set form_lines = po_lines if po_lines is defined and po_lines else [] %}
+{% set lock_supplier = po is defined and po and po.supplier_id %}
+{{ purchase_order_products_panel(lines=form_lines, lock_supplier=lock_supplier, po=po if po is defined else none) }}

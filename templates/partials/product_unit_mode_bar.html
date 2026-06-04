@@ -1,0 +1,22 @@
+{# Chọn đơn vị xem/nhập: Lô · Thùng/Hộp · ĐV tồn (kg…) #}
+{% macro product_unit_mode_bar(product, selected_mode, bar_class='') %}
+{% if product and product_unit_mode_options(product)|length > 1 %}
+<div class="product-unit-mode-bar {{ bar_class }}" data-product-unit-mode-bar
+     data-selected-mode="{{ selected_mode }}"
+     data-base-unit="{{ product_base_unit(product) }}"
+     data-purchase-unit="{{ product_purchase_unit(product) }}"
+     data-lot-unit="{{ product_lot_unit(product) }}"
+     data-conversion-factor="{{ product_conversion_factor(product) }}"
+     data-lot-factor="{{ product_lot_factor(product) }}"
+     data-has-lot="{{ 1 if product_has_lot_unit(product) else 0 }}"
+     data-has-conv="{{ 1 if (product.unit_conversion_enabled or product_has_unit_conversion(product)) else 0 }}">
+  <span class="product-unit-mode-label small-muted me-2">Đơn vị:</span>
+  <div class="btn-group btn-group-sm" role="group" aria-label="Chọn đơn vị">
+    {% for opt in product_unit_mode_options(product) %}
+    <button type="button" class="btn btn-outline-secondary product-unit-mode-btn{% if opt.mode == selected_mode %} active{% endif %}"
+            data-unit-mode="{{ opt.mode }}">{{ opt.label }}</button>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}

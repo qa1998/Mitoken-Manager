@@ -1,0 +1,27 @@
+{% if status == 'Đã chốt' and shortage_rows %}
+<div id="quote-purchase" class="alert alert-warning quote-purchase-alert no-print mb-3">
+  <strong><i class="bi bi-exclamation-triangle me-1"></i>Thiếu tồn kho</strong>
+  <ul class="mb-0 mt-2 small">
+    {% for row in shortage_rows[:5] %}
+    <li>{{ row.item.product_name or row.product.name }}: cần {{ row.item.qty|int }}, tồn {{ (row.product.stock or 0)|int }}</li>
+    {% endfor %}
+    {% if shortage_rows|length > 5 %}
+    <li>… và {{ shortage_rows|length - 5 }} dòng khác</li>
+    {% endif %}
+  </ul>
+  <p class="small-muted mb-0 mt-2">
+    Bổ sung hàng qua <a href="{{ url_for('suppliers') }}">Nhà cung cấp</a> (nhập Excel) — thủ kho duyệt tại
+    <a href="{{ url_for('stock_intake_requests') }}">Yêu cầu nhập kho</a>.
+  </p>
+</div>
+{% elif status == 'Mới tạo' and shortage_rows %}
+<div class="alert alert-warning quote-purchase-alert no-print mb-3">
+  <strong><i class="bi bi-exclamation-triangle me-1"></i>Thiếu tồn kho</strong>
+  <span class="small"> — Vẫn có thể chốt báo giá; hệ thống không tự nhập kho khi thiếu tồn.</span>
+  <ul class="mb-0 mt-2 small">
+    {% for row in shortage_rows[:5] %}
+    <li>{{ row.item.product_name or row.product.name }}: cần {{ row.item.qty|int }}, tồn {{ (row.product.stock or 0)|int }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}

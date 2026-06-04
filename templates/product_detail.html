@@ -4,22 +4,27 @@
 
 {% set imgs = product_image_urls(p) %}
 {% set sale_key, sale_label = product_list_status(p) %}
+{% set stock_key, stock_label = product_inventory_level(p) %}
 {% set cat_path = product_category_path(p) %}
 {% set brand_name = product_brand_name(p) %}
 {% set stock_low = p.stock <= p.low_stock %}
+{% set sale_mode = product_default_sale_unit_mode(p) %}
+{% set sale_unit = product_unit_label(p, sale_mode) %}
+{% set bu = product_base_unit(p) %}
+{% set pu = product_purchase_unit(p) %}
+{% set stock_purchase = qty_from_base_unit(p, p.stock, 'purchase') if product_has_unit_conversion(p) else p.stock %}
 
-<div class="product-detail-page">
-  <div class="product-detail-topbar">
+<div class="product-detail-page product-detail-v2">
+  <header class="product-detail-topbar">
     <div class="product-detail-topbar-left">
-      <a href="{{ url_for('products') }}" class="btn btn-light btn-product-detail-back" aria-label="Quay lại">
-        <i class="bi bi-arrow-left"></i>
+      <a href="{{ url_for('products') }}" class="btn btn-light btn-product-detail-back">
+        <i class="bi bi-arrow-left me-1"></i>Quay lại danh sách
       </a>
-      <h1 class="product-detail-topbar-title">Chi tiết sản phẩm</h1>
     </div>
     <div class="product-detail-topbar-actions">
-      <button type="button" class="btn btn-light btn-product-detail-edit js-open-product-modal" data-modal-target="#productEdit{{ p.id }}">
+      <a href="{{ url_for('product_edit', pid=p.id) }}" class="btn btn-primary btn-product-detail-edit">
         <i class="bi bi-pencil me-2"></i>Chỉnh sửa
-      </button>
+      </a>
       <div class="dropdown">
         <button class="btn btn-light btn-product-detail-more" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed","placement":"bottom-end"}' aria-expanded="false">
           <i class="bi bi-three-dots"></i>
@@ -27,12 +32,12 @@
         <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
           <li>
             <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productPrice{{ p.id }}">
-              <i class="bi bi-tag me-2"></i>Sửa giá
+              <i class="bi bi-tag me-2"></i>Sửa giá nhanh
             </button>
           </li>
           <li>
             <button type="button" class="dropdown-item js-open-product-modal" data-modal-target="#productStock{{ p.id }}">
-              <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho &amp; giá
+              <i class="bi bi-box-seam me-2"></i>Chỉnh tồn kho
             </button>
           </li>
           <li>
@@ -45,12 +50,11 @@
             <form method="post" action="{{ url_for('toggle_product_active', pid=p.id) }}" class="m-0">
               <input type="hidden" name="_from_detail" value="1">
               <input type="hidden" name="_pid" value="{{ p.id }}">
-              <button type="submit" class="dropdown-item text-danger">
+              <button type="submit" class="dropdown-item">
                 <i class="bi bi-power me-2"></i>{% if p.is_active %}Ngừng bán{% else %}Bật bán lại{% endif %}
               </button>
             </form>
           </li>
-          <li><hr class="dropdown-divider"></li>
           <li>
             <form method="post" action="{{ url_for('delete_product', pid=p.id) }}" class="m-0 product-delete-form" data-name="{{ p.name }}">
               <input type="hidden" name="_from_detail" value="1">
@@ -61,13 +65,12 @@
           </li>
         </ul>
       </div>
-      <a href="{{ url_for('products') }}" class="btn btn-primary btn-product-detail-back-list">Quay lại danh sách</a>
     </div>
-  </div>
+  </header>
 
-  <div class="panel-card product-detail-card">
-    <div class="row g-4 g-xl-5">
-      <div class="col-lg-5">
+  <section class="panel-card product-detail-hero-card">
+    <div class="row g-4">
+      <div class="col-lg-4 col-xl-3">
         <div class="product-detail-gallery"{% if imgs %} data-images='{{ imgs|tojson }}'{% endif %}>
           <div class="product-detail-main-image">
             {% if imgs %}
@@ -92,37 +95,23 @@
           </div>
           {% endif %}
         </div>
-
-        <section class="product-detail-section">
-          <h3 class="product-detail-section-title">Mô tả sản phẩm</h3>
-          <p class="product-detail-text product-detail-empty-text">Chưa có mô tả sản phẩm.</p>
-        </section>
-
-        <section class="product-detail-section">
-          <h3 class="product-detail-section-title">Tính năng nổi bật</h3>
-          <p class="product-detail-text product-detail-empty-text mb-0">Chưa có thông tin tính năng.</p>
-        </section>
       </div>
 
-      <div class="col-lg-7">
-        <div class="product-detail-summary">
-          <h2 class="product-detail-name">{{ p.name }}</h2>
+      <div class="col-lg-8 col-xl-9">
+        <div class="product-detail-hero-head">
+          <h1 class="product-detail-name">{{ p.name }}</h1>
           <div class="product-detail-badges">
+            <span class="product-detail-badge stock-{{ stock_key }}">{{ stock_label }}</span>
             <span class="product-detail-badge status-{{ sale_key }}">{{ sale_label }}</span>
             {% if brand_name %}
             <span class="product-detail-badge badge-genuine">Chính hãng</span>
             {% endif %}
-            {% if stock_low and p.stock > 0 %}
-            <span class="product-detail-badge badge-warning">Tồn thấp</span>
-            {% elif p.stock <= 0 %}
-            <span class="product-detail-badge badge-danger">Hết hàng</span>
-            {% endif %}
           </div>
         </div>
 
-        <div class="product-detail-info-grid">
+        <div class="product-detail-info-grid product-detail-info-grid--hero">
           <div class="product-detail-info-item">
-            <span class="product-detail-info-label">SKU</span>
+            <span class="product-detail-info-label">SKU / Mã vạch</span>
             <span class="product-detail-info-value">{{ p.sku }}</span>
           </div>
           <div class="product-detail-info-item">
@@ -141,97 +130,192 @@
             <span class="product-detail-info-label">Biến thể</span>
             <span class="product-detail-info-value">{{ p.variant or '—' }}</span>
           </div>
-          <div class="product-detail-info-item product-detail-info-item-wide">
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Mã vạch</span>
+            <span class="product-detail-info-value">{{ product_barcode(p) or '—' }}</span>
+          </div>
+          <div class="product-detail-info-item">
             <span class="product-detail-info-label">Bảo hành</span>
+            <span class="product-detail-info-value">{{ p.warranty or '—' }}</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Ngày tạo</span>
             <span class="product-detail-info-value">
-              {% if p.warranty %}
-              <i class="bi bi-shield-check text-primary me-1"></i>{{ p.warranty }}
-              {% else %}—{% endif %}
+              {% if p.created_at %}{{ p.created_at.strftime('%d/%m/%Y %H:%M') }}{% else %}—{% endif %}
+            </span>
+          </div>
+          <div class="product-detail-info-item product-detail-info-item-wide">
+            <span class="product-detail-info-label">Mô tả ngắn</span>
+            <span class="product-detail-info-value text-muted">—</span>
+          </div>
+          <div class="product-detail-info-item">
+            <span class="product-detail-info-label">Cập nhật lần cuối</span>
+            <span class="product-detail-info-value">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="product-detail-kpi-row">
+      <div class="product-detail-kpi-card">
+        <span class="product-detail-kpi-label">Tồn kho hiện tại</span>
+        <span class="product-detail-kpi-value{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">
+          {{ format_qty_display(p.stock) }} <small>{{ bu }}</small>
+        </span>
+        {% if product_has_unit_conversion(p) %}
+        <span class="product-detail-kpi-sub">({{ format_qty_display(stock_purchase) }} {{ pu }})</span>
+        {% endif %}
+      </div>
+      <div class="product-detail-kpi-card">
+        <span class="product-detail-kpi-label">Giá nhập mặc định</span>
+        <span class="product-detail-kpi-value">{{ product_cost_display_amount(p)|money }}</span>
+        <span class="product-detail-kpi-sub">/ {{ product_cost_unit_label(p) }}</span>
+      </div>
+      <div class="product-detail-kpi-card">
+        <span class="product-detail-kpi-label">Giá bán lẻ</span>
+        <span class="product-detail-kpi-value price-retail">{{ p.retail_price|money }}</span>
+        <span class="product-detail-kpi-sub">/ {{ sale_unit }}</span>
+      </div>
+      <div class="product-detail-kpi-card">
+        <span class="product-detail-kpi-label">Nhà cung cấp chính</span>
+        {% if primary_supplier and primary_supplier.supplier %}
+        <span class="product-detail-kpi-value product-detail-kpi-value--sm">{{ primary_supplier.supplier.name }}</span>
+        <span class="product-detail-kpi-sub">{{ primary_supplier.cost_price|money }} / {{ pu if product_has_unit_conversion(p) else bu }}</span>
+        {% else %}
+        <span class="product-detail-kpi-value product-detail-kpi-value--muted">—</span>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <div class="row g-4 product-detail-body-row">
+    <div class="col-lg-7">
+      <section class="panel-card product-detail-section-card">
+        <h2 class="product-detail-section-title">Giá bán</h2>
+        <div class="product-detail-price-grid">
+          <div class="product-detail-price-card">
+            <span class="product-detail-price-label">Giá nhập</span>
+            <span class="product-detail-price-value">{{ product_cost_display_amount(p)|money }}</span>
+            <span class="product-detail-price-unit">/ {{ product_cost_unit_label(p) }}</span>
+            {% if product_has_unit_conversion(p) and product_cost_sale_unit_mode(p) == 'purchase' %}
+            <span class="product-detail-price-equiv">{{ p.cost_price|money }}/{{ bu }} tồn</span>
+            {% endif %}
+          </div>
+          <div class="product-detail-price-card">
+            <span class="product-detail-price-label">Giá đại lý</span>
+            <span class="product-detail-price-value price-dealer">{{ p.dealer_price|money }}</span>
+            <span class="product-detail-price-unit">/ {{ sale_unit }}</span>
+          </div>
+          <div class="product-detail-price-card">
+            <span class="product-detail-price-label">Giá công trình</span>
+            <span class="product-detail-price-value price-project">{{ p.project_price|money }}</span>
+            <span class="product-detail-price-unit">/ {{ sale_unit }}</span>
+          </div>
+          <div class="product-detail-price-card">
+            <span class="product-detail-price-label">Giá bán lẻ</span>
+            <span class="product-detail-price-value price-retail">{{ p.retail_price|money }}</span>
+            <span class="product-detail-price-unit">/ {{ sale_unit }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-card product-detail-section-card">
+        <div class="product-detail-section-head">
+          <h2 class="product-detail-section-title mb-0">Nhà cung cấp</h2>
+          <a href="{{ url_for('product_edit', pid=p.id) }}#productEditSuppliers" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-pencil me-1"></i>Quản lý
+          </a>
+        </div>
+        <div class="table-responsive product-detail-suppliers-table-wrap">
+          <table class="table table-sm product-detail-suppliers-table mb-0">
+            <thead>
+              <tr>
+                <th>Nhà cung cấp</th>
+                <th class="text-end">Giá nhập</th>
+                <th>Đơn vị nhập</th>
+                <th class="text-center">Mặc định</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for link in supplier_links %}
+              <tr>
+                <td class="fw-semibold">{{ link.supplier.name if link.supplier else '—' }}</td>
+                <td class="text-end money">{{ link.cost_price|money }}</td>
+                <td>{{ pu if product_has_unit_conversion(p) else bu }}</td>
+                <td class="text-center">
+                  {% if link.is_primary %}
+                  <i class="bi bi-check-circle-fill text-primary" title="Mặc định"></i>
+                  {% else %}
+                  <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="4" class="text-center text-muted py-4">Chưa liên kết nhà cung cấp</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-lg-5">
+      <section class="panel-card product-detail-section-card">
+        <div class="product-detail-section-head">
+          <h2 class="product-detail-section-title mb-0">Kho hàng &amp; Đơn vị</h2>
+          <a href="{{ url_for('product_edit', pid=p.id) }}#productUnitSaleBlock" class="btn btn-sm btn-outline-secondary">Chỉnh sửa</a>
+        </div>
+        <div class="product-detail-unit-panel">
+          <div class="product-detail-unit-row">
+            <span class="product-detail-unit-key">Đơn vị tồn kho</span>
+            <span class="product-detail-unit-val">{{ bu }}</span>
+          </div>
+          <div class="product-detail-unit-row">
+            <span class="product-detail-unit-key">Đơn vị nhập</span>
+            <span class="product-detail-unit-val">{{ pu }}</span>
+          </div>
+          <div class="product-detail-unit-row">
+            <span class="product-detail-unit-key">Hiển thị &amp; bán theo</span>
+            <span class="product-detail-unit-val text-primary fw-semibold">{{ sale_unit }}</span>
+          </div>
+          {% if product_has_unit_conversion(p) %}
+          <div class="product-detail-unit-conv-banner">
+            <i class="bi bi-arrow-left-right me-1"></i>{{ product_unit_conversion_label(p) }}
+          </div>
+          {% endif %}
+          <div class="product-detail-unit-row">
+            <span class="product-detail-unit-key">Tồn tối thiểu</span>
+            <span class="product-detail-unit-val">{{ format_qty_display(p.low_stock) }} {{ bu }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-card product-detail-section-card">
+        <h2 class="product-detail-section-title">Mô tả sản phẩm</h2>
+        <p class="product-detail-desc text-muted mb-0">Chưa có mô tả sản phẩm.</p>
+      </section>
+
+      <section class="panel-card product-detail-section-card">
+        <h2 class="product-detail-section-title">Thông tin khác</h2>
+        <div class="product-detail-other-list">
+          <div class="product-detail-other-item">
+            <span class="product-detail-other-label">Trạng thái kho</span>
+            <span class="product-detail-badge stock-{{ stock_key }}">{{ stock_label }}</span>
+          </div>
+          <div class="product-detail-other-item">
+            <span class="product-detail-other-label">Trạng thái kinh doanh</span>
+            <span class="product-detail-badge status-{{ sale_key }}">{{ sale_label }}</span>
+          </div>
+          <div class="product-detail-other-item">
+            <span class="product-detail-other-label">Ngày tạo</span>
+            <span class="product-detail-other-val">
+              {% if p.created_at %}{{ p.created_at.strftime('%d/%m/%Y %H:%M') }}{% else %}—{% endif %}
             </span>
           </div>
         </div>
-
-        <section class="product-detail-block">
-          <h3 class="product-detail-block-title">Giá</h3>
-          <div class="row g-3 product-detail-metric-row">
-            <div class="col-md-4">
-              <div class="product-detail-metric">
-                <span class="product-detail-metric-label">Giá bán lẻ</span>
-                <span class="product-detail-metric-value price-retail">{{ p.retail_price|money }}</span>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="product-detail-metric">
-                <span class="product-detail-metric-label">Giá đại lý</span>
-                <span class="product-detail-metric-value price-dealer">{{ p.dealer_price|money }}</span>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="product-detail-metric">
-                <span class="product-detail-metric-label">Giá dự án</span>
-                <span class="product-detail-metric-value price-project">{{ p.project_price|money }}</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="product-detail-block product-detail-stock-block">
-          <h3 class="product-detail-block-title">Tồn kho</h3>
-          <div class="product-detail-stock-hero">
-            <div class="product-detail-stock-main">
-              <span class="product-detail-stock-label">Tồn kho hiện tại</span>
-              <span class="product-detail-stock-value stock-current{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">
-                {{ format_qty_display(p.stock) }} <span class="product-detail-stock-unit">{{ product_base_unit(p) }}</span>
-              </span>
-            </div>
-            {% set equiv = product_stock_equivalent_text(p) %}
-            {% if equiv %}
-            <div class="product-detail-stock-equiv">
-              <span class="product-detail-stock-label">Tương đương</span>
-              <span class="product-detail-stock-equiv-value">{{ equiv }}</span>
-            </div>
-            {% endif %}
-          </div>
-          <div class="product-detail-unit-grid">
-            <div class="product-detail-unit-card">
-              <span class="product-detail-unit-card-label">Đơn vị tồn kho</span>
-              <span class="product-detail-unit-card-value">{{ product_base_unit(p) }}</span>
-            </div>
-            <div class="product-detail-unit-card">
-              <span class="product-detail-unit-card-label">Đơn vị nhập</span>
-              <span class="product-detail-unit-card-value">{{ product_purchase_unit(p) }}</span>
-            </div>
-            <div class="product-detail-unit-card product-detail-unit-card-wide">
-              <span class="product-detail-unit-card-label">Quy đổi</span>
-              <span class="product-detail-unit-card-value">{{ product_unit_conversion_label(p) }}</span>
-            </div>
-            <div class="product-detail-unit-card">
-              <span class="product-detail-unit-card-label">Tồn tối thiểu</span>
-              <span class="product-detail-unit-card-value">{{ format_qty_display(p.low_stock) }} {{ product_base_unit(p) }}</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="product-detail-block product-detail-block-last">
-          <h3 class="product-detail-block-title">Thông tin khác</h3>
-          <div class="product-detail-meta-grid">
-            <div class="product-detail-meta-item">
-              <span class="product-detail-meta-label">Ngày tạo</span>
-              <span class="product-detail-meta-value">
-                {% if p.created_at %}{{ p.created_at.strftime('%d/%m/%Y %H:%M') }}{% else %}—{% endif %}
-              </span>
-            </div>
-            <div class="product-detail-meta-item">
-              <span class="product-detail-meta-label">Giá nhập</span>
-              <span class="product-detail-meta-value">{{ p.cost_price|money }}</span>
-            </div>
-            <div class="product-detail-meta-item">
-              <span class="product-detail-meta-label">Mã vạch</span>
-              <span class="product-detail-meta-value">{{ product_barcode(p) or '—' }}</span>
-            </div>
-          </div>
-        </section>
-      </div>
+      </section>
     </div>
   </div>
 </div>

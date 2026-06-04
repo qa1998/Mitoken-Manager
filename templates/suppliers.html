@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'partials/supplier_products_panel.html' import supplier_products_panel %}
+{% from 'partials/supplier_intake_import_modal.html' import supplier_intake_import_modal %}
 {% from 'partials/supplier_detail_modal.html' import supplier_detail_modal %}
 {% macro sort_th(label, field) %}
 <th>
@@ -68,12 +68,24 @@
 {% block content %}
 
 <div class="supplier-page">
+  {% if pending_stock_intake_count and pending_stock_intake_count > 0 %}
+  <div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <span>
+      <i class="bi bi-inbox me-1"></i>
+      Có <strong>{{ pending_stock_intake_count }}</strong> phiếu chờ nhập kho — cần <strong>phân bổ kg cho khách</strong> rồi duyệt.
+    </span>
+    <a href="{{ url_for('stock_intake_requests') }}" class="btn btn-sm btn-warning">
+      <i class="bi bi-inbox me-1"></i>Yêu cầu nhập kho
+    </a>
+  </div>
+  {% endif %}
+
   <div class="panel-card supplier-header-card mb-3">
     <div class="section-header mb-0">
       <div class="page-header-icon"><i class="bi bi-truck"></i></div>
       <div>
         <h2 class="section-title">Nhà cung cấp</h2>
-        <p class="small-muted mb-0">Quản lý thông tin nhà cung cấp và liên kết phiếu nhập kho</p>
+        <p class="small-muted mb-0">Quản lý NCC — nhập hàng gửi yêu cầu kho, thủ kho duyệt tại Yêu cầu nhập kho</p>
       </div>
     </div>
   </div>
@@ -161,7 +173,11 @@
           <td>
             {% set pc = product_counts.get(s.id, 0) %}
             {% if pc %}
-            <span class="badge bg-light text-dark border">{{ pc }} SP</span>
+            <button type="button" class="badge bg-light text-dark border border-0 supplier-sp-count-badge"
+                    data-bs-toggle="modal" data-bs-target="#detailModal{{ s.id }}"
+                    data-supplier-catalog-tab="{{ s.id }}" title="Xem sản phẩm cung cấp">
+              {{ pc }} SP
+            </button>
             {% else %}
             <span class="text-muted">—</span>
             {% endif %}
@@ -281,15 +297,15 @@
           </button>
           <button type="submit" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i> Thêm nhà cung cấp
-          </button>
-        </div>
-      </form>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
-</div>
 
-{% for s in suppliers %}
-<div class="modal fade" id="editModal{{ s.id }}" tabindex="-1" aria-hidden="true">
+  {% for s in suppliers %}
+  <div class="modal fade" id="editModal{{ s.id }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
       <form method="post" action="{{ url_for('update_supplier', sid=s.id) }}" class="supplier-form">
@@ -314,32 +330,13 @@
   </div>
 </div>
 
-<div class="modal fade supplier-intake-modal" id="productsModal{{ s.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="{{ url_for('supplier_products_intake', sid=s.id) }}" class="supplier-intake-form">
-        <input type="hidden" name="_q" value="{{ q }}">
-        <input type="hidden" name="_page" value="{{ pagination.page }}">
-        <input type="hidden" name="_per_page" value="{{ per_page }}">
-        <input type="hidden" name="_sort" value="{{ sort }}">
-        <input type="hidden" name="_order" value="{{ order }}">
-        <div class="modal-header">
-          <h5 class="modal-title">Nhập sản phẩm — {{ s.name }}</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          {{ supplier_products_panel(links=supplier_products.get(s.id, [])) }}
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-primary">
-            <i class="bi bi-box-arrow-in-down me-1"></i>Nhập kho
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
+{{ supplier_intake_import_modal(
+  s,
+  intake_import_payload=intake_import_payload,
+  show_preview=(intake_preview_sid == s.id),
+  supplier_links=supplier_products.get(s.id, []),
+  list_ctx={'q': q, 'page': pagination.page, 'per_page': per_page, 'sort': sort, 'order': order}
+) }}
 
 {{ supplier_detail_modal(s, intake_board, intake_line_map, {
   'q': q,
@@ -347,11 +344,15 @@
   'per_page': per_page,
   'sort': sort,
   'order': order,
-}) }}
+}, supplier_products.get(s.id, [])) }}
 {% endfor %}
+
+{% include 'partials/supplier_quick_product_modal.html' %}
 
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/product_units.js') }}"></script>
+<script src="{{ url_for('static', filename='js/products.js') }}"></script>
 <script src="{{ url_for('static', filename='js/suppliers.js') }}"></script>
 {% endblock %}

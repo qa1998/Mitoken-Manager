@@ -1,0 +1,117 @@
+{% from 'partials/supplier_products_panel.html' import supplier_product_picker, supplier_intake_qty_cell %}
+{% macro purchase_order_products_panel(lines=none, lock_supplier=false, po=none) %}
+{% set lines = lines or [] %}
+<div class="supplier-products-panel po-products-panel" data-supplier-products-panel data-skip-auto-cost="1">
+  <div class="supplier-products-panel-head">
+    <div>
+      <h6 class="supplier-products-panel-title"><i class="bi bi-box-seam me-2"></i>Sản phẩm mua hàng</h6>
+      <p class="supplier-products-panel-sub mb-0">
+        Mỗi dòng chọn <strong>NCC</strong> riêng — khi lưu hệ thống tự tách phiếu theo nhà cung cấp.
+      </p>
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm supplier-products-add-btn">
+      <i class="bi bi-plus-lg me-1"></i>Thêm dòng
+    </button>
+  </div>
+  <div class="row g-3 mb-3 supplier-intake-meta-row">
+    <div class="col-md-6">
+      <label class="form-label-custom">Số chứng từ / HĐ</label>
+      <input type="text" name="ref_code" class="form-control form-control-sm" placeholder="VD: HD-2024-001"
+             value="{{ po.ref_code if po else '' }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label-custom">Ghi chú chung</label>
+      <input type="text" name="note" class="form-control form-control-sm" placeholder="Tùy chọn"
+             value="{{ po.note if po else '' }}">
+    </div>
+  </div>
+  <div class="supplier-products-table-wrap">
+    <table class="table table-sm supplier-products-table po-products-table mb-0">
+      <thead>
+        <tr>
+          <th class="col-product">Sản phẩm</th>
+          <th class="col-supplier">Nhà cung cấp</th>
+          <th class="col-qty">Đơn vị nhập / SL</th>
+          <th class="col-cost">Giá nhập</th>
+          <th class="col-amount text-end">Thành tiền</th>
+          <th class="col-note">Ghi chú</th>
+          <th class="col-actions text-end">Xóa</th>
+        </tr>
+      </thead>
+      <tbody class="supplier-products-body">
+        {% for line in lines %}
+        <tr class="supplier-product-row" data-po-line>
+          <td class="supplier-product-picker-cell">
+            {{ supplier_product_picker(
+              selected_id=line.product_id,
+              selected_label=line.product.sku ~ ' — ' ~ line.product.name
+            ) }}
+          </td>
+          <td class="po-supplier-cell">
+            <select name="sp_supplier_id" class="form-select form-select-sm po-line-supplier" required
+                    data-selected="{{ line.supplier_id or '' }}"
+                    {% if lock_supplier and line.supplier_id %}data-lock-supplier="1"{% endif %}>
+              {% if line.supplier %}
+              <option value="{{ line.supplier_id }}" selected>{{ line.supplier.code }} — {{ line.supplier.name }}</option>
+              {% else %}
+              <option value="">— Chọn NCC —</option>
+              {% endif %}
+            </select>
+          </td>
+          {{ supplier_intake_qty_cell(line.product) }}
+          <td class="supplier-cost-cell">
+            <div class="money-input-wrap">
+              <input type="text" name="sp_cost_price" class="form-control form-control-sm money-input po-line-cost" inputmode="numeric" autocomplete="off"
+                     value="{% if line.cost_price %}{{ line.cost_price|money_plain }}{% endif %}" placeholder="0">
+              <span class="money-input-suffix">đ</span>
+            </div>
+            <div class="form-text mb-0" data-supplier-cost-unit-hint>
+              / {% if line.product and product_has_unit_conversion(line.product) %}{{ product_purchase_unit(line.product) }}{% else %}đơn vị nhập{% endif %}
+            </div>
+          </td>
+          <td class="text-end align-middle po-line-amount-cell">
+            <span class="po-line-amount fw-semibold" data-po-line-amount>{% if line.line_amount %}{{ line.line_amount|money }}{% else %}0 đ{% endif %}</span>
+          </td>
+          <td>
+            <input type="text" name="sp_note" class="form-control form-control-sm" value="{{ line.note or '' }}" placeholder="Tùy chọn">
+          </td>
+          <td class="text-end col-actions">
+            <button type="button" class="btn btn-sm btn-outline-danger supplier-product-remove-btn" title="Xóa dòng"><i class="bi bi-trash"></i></button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="supplier-products-empty small-muted mb-0{% if lines %} d-none{% endif %}">Chưa có sản phẩm — bấm 「Thêm dòng」.</p>
+  <template class="supplier-product-row-template">
+    <tr class="supplier-product-row" data-po-line>
+      <td class="supplier-product-picker-cell">
+        {{ supplier_product_picker() }}
+      </td>
+      <td class="po-supplier-cell">
+        <select name="sp_supplier_id" class="form-select form-select-sm po-line-supplier" required>
+          <option value="">— Chọn NCC —</option>
+        </select>
+      </td>
+      {{ supplier_intake_qty_cell() }}
+      <td class="supplier-cost-cell">
+        <div class="money-input-wrap">
+          <input type="text" name="sp_cost_price" class="form-control form-control-sm money-input po-line-cost" inputmode="numeric" autocomplete="off" value="" placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+        <div class="form-text mb-0" data-supplier-cost-unit-hint>/ đơn vị nhập</div>
+      </td>
+      <td class="text-end align-middle po-line-amount-cell">
+        <span class="po-line-amount fw-semibold" data-po-line-amount>0 đ</span>
+      </td>
+      <td>
+        <input type="text" name="sp_note" class="form-control form-control-sm" value="" placeholder="Tùy chọn">
+      </td>
+      <td class="text-end col-actions">
+        <button type="button" class="btn btn-sm btn-outline-danger supplier-product-remove-btn" title="Xóa dòng"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>
+  </template>
+</div>
+{% endmacro %}

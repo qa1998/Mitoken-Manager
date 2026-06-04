@@ -12,7 +12,9 @@
 {% endif %}
 {% endmacro %}
 
-{% macro supplier_detail_modal(s, intake_board, intake_line_map, list_ctx) %}
+{% from 'partials/supplier_products_panel.html' import supplier_product_picker %}
+
+{% macro supplier_detail_modal(s, intake_board, intake_line_map, list_ctx, catalog_links=[]) %}
 {% set summary = intake_board.summaries.get(s.id, {}) %}
 {% set intakes = intake_board.intakes.get(s.id, []) %}
 {% set payments = intake_board.payments.get(s.id, []) %}
@@ -56,13 +58,19 @@
 
         <ul class="nav nav-tabs supplier-detail-tabs" role="tablist">
           <li class="nav-item">
-            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#supplierIntakes{{ s.id }}" type="button">
+            <button class="nav-link active" id="supplierIntakesTab{{ s.id }}" data-bs-toggle="tab" data-bs-target="#supplierIntakes{{ s.id }}" type="button">
               Lịch sử nhập hàng
               {% if intakes %}<span class="badge rounded-pill bg-light text-dark border ms-1">{{ intakes|length }}</span>{% endif %}
             </button>
           </li>
           <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#supplierPayments{{ s.id }}" type="button">
+            <button class="nav-link" id="supplierCatalogTab{{ s.id }}" data-bs-toggle="tab" data-bs-target="#supplierCatalog{{ s.id }}" type="button">
+              Sản phẩm cung cấp
+              {% if catalog_links %}<span class="badge rounded-pill bg-light text-dark border ms-1">{{ catalog_links|length }}</span>{% endif %}
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" id="supplierPaymentsTab{{ s.id }}" data-bs-toggle="tab" data-bs-target="#supplierPayments{{ s.id }}" type="button">
               Lịch sử thanh toán
               {% if payments %}<span class="badge rounded-pill bg-light text-dark border ms-1">{{ payments|length }}</span>{% endif %}
             </button>
@@ -82,7 +90,8 @@
                     <th class="text-end">Tổng tiền</th>
                     <th class="text-end">Đã trả</th>
                     <th class="text-end">Còn lại</th>
-                    <th>Trạng thái</th>
+                    <th>Thanh toán</th>
+                    <th>Kho</th>
                     <th class="text-end">Thao tác</th>
                   </tr>
                 </thead>
@@ -137,7 +146,7 @@
                   </tr>
                   {% if lines %}
                   <tr class="supplier-intake-lines-row">
-                    <td colspan="9" class="p-0 border-0">
+                    <td colspan="10" class="p-0 border-0">
                       <div class="collapse" id="intakeLines{{ intake.id }}">
                         <div class="supplier-intake-lines-panel">
                           <table class="table table-sm mb-0">
@@ -184,10 +193,127 @@
                   </tr>
                   {% endif %}
                   {% else %}
-                  <tr><td colspan="9" class="text-center text-muted py-4">Chưa có phiếu nhập hàng</td></tr>
+                  <tr><td colspan="10" class="text-center text-muted py-4">Chưa có phiếu nhập hàng</td></tr>
                   {% endfor %}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          <div class="tab-pane fade" id="supplierCatalog{{ s.id }}">
+            <div class="supplier-catalog-panel" data-supplier-catalog-panel data-supplier-id="{{ s.id }}">
+              <div class="supplier-catalog-panel-head">
+                <p class="small-muted mb-0">
+                  Sản phẩm NCC này cung cấp — dùng khi nhập hàng hoặc gắn NCC trên trang sản phẩm.
+                  <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-bs-toggle="modal" data-bs-target="#productsModal{{ s.id }}">Nhập hàng</button>
+                </p>
+                <div class="supplier-catalog-panel-actions">
+                  <a href="{{ url_for('supplier_catalog_new', sid=s.id, _q=list_ctx.q, _page=list_ctx.page, _per_page=list_ctx.per_page, _sort=list_ctx.sort, _order=list_ctx.order) }}"
+                     class="btn btn-primary btn-sm">
+                    <i class="bi bi-plus-lg me-1"></i>Thêm sản phẩm mới
+                  </a>
+                </div>
+              </div>
+              <div class="supplier-catalog-link-existing mb-3">
+                <p class="form-label-custom mb-2">Gắn sản phẩm đã có trong cửa hàng</p>
+                <form method="post" action="{{ url_for('supplier_catalog_add', sid=s.id) }}" class="supplier-catalog-add-form" novalidate>
+                  <input type="hidden" name="_q" value="{{ list_ctx.q }}">
+                  <input type="hidden" name="_page" value="{{ list_ctx.page }}">
+                  <input type="hidden" name="_per_page" value="{{ list_ctx.per_page }}">
+                  <input type="hidden" name="_sort" value="{{ list_ctx.sort }}">
+                  <input type="hidden" name="_order" value="{{ list_ctx.order }}">
+                  <div class="row g-2 align-items-end supplier-catalog-add-row" data-supplier-catalog-add-row>
+                    <div class="col-md-6">
+                      {{ supplier_product_picker(field_name='product_id', placeholder='— Chọn sản phẩm —') }}
+                    </div>
+                    <div class="col-md-3">
+                      <div class="money-input-wrap">
+                        <input type="text" name="catalog_cost_price" class="form-control form-control-sm money-input" inputmode="numeric" autocomplete="off" placeholder="Giá nhập">
+                        <span class="money-input-suffix">đ</span>
+                      </div>
+                      <div class="form-text mb-0" data-supplier-catalog-cost-hint>/ đơn vị nhập</div>
+                    </div>
+                    <div class="col-md-3">
+                      <button type="submit" class="btn btn-outline-primary btn-sm w-100">
+                        <i class="bi bi-link-45deg me-1"></i>Gắn SP
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+              <div class="table-responsive supplier-catalog-table-wrap">
+                <table class="table table-sm supplier-catalog-table mb-0">
+                  <thead>
+                    <tr>
+                      <th>Sản phẩm</th>
+                      <th class="text-end">Giá nhập</th>
+                      <th>Đơn vị nhập</th>
+                      <th>Mã NCC</th>
+                      <th class="text-center">Mặc định</th>
+                      <th class="text-end">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody id="supplierCatalogBody{{ s.id }}" data-supplier-catalog-body>
+                    {% for link in catalog_links %}
+                    {% set prod = link.product %}
+                    {% set pu = product_purchase_unit(prod) if prod else '' %}
+                    {% set bu = product_base_unit(prod) if prod else '' %}
+                    <tr data-catalog-product-id="{{ link.product_id }}">
+                      <td>
+                        {% if prod %}
+                        <a href="{{ url_for('product_detail', pid=prod.id) }}" class="text-decoration-none fw-semibold">
+                          <code class="sku-code">{{ prod.sku }}</code> — {{ prod.name }}
+                        </a>
+                        {% else %}—{% endif %}
+                      </td>
+                      <td class="text-end money">{{ link.cost_price|money if link.cost_price else '—' }}</td>
+                      <td>
+                        {% if prod and product_has_unit_conversion(prod) %}
+                        {{ pu }}
+                        <div class="small-muted">≈ {{ base_unit_cost_from_purchase_cost(prod, link.cost_price)|money }}/{{ bu }}</div>
+                        {% elif prod %}{{ bu }}{% else %}—{% endif %}
+                      </td>
+                      <td>{{ link.supplier_sku or '—' }}</td>
+                      <td class="text-center">
+                        {% if link.is_primary %}
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Mặc định</span>
+                        {% else %}
+                        <form method="post" action="{{ url_for('supplier_catalog_set_primary', sid=s.id, pid=link.product_id) }}" class="d-inline m-0">
+                          <input type="hidden" name="_q" value="{{ list_ctx.q }}">
+                          <input type="hidden" name="_page" value="{{ list_ctx.page }}">
+                          <input type="hidden" name="_per_page" value="{{ list_ctx.per_page }}">
+                          <input type="hidden" name="_sort" value="{{ list_ctx.sort }}">
+                          <input type="hidden" name="_order" value="{{ list_ctx.order }}">
+                          <button type="submit" class="btn btn-link btn-sm p-0">Đặt mặc định</button>
+                        </form>
+                        {% endif %}
+                      </td>
+                      <td class="text-end text-nowrap">
+                        <form method="post"
+                              action="{{ url_for('supplier_catalog_remove', sid=s.id, pid=link.product_id) }}"
+                              class="d-inline m-0 supplier-catalog-remove-form"
+                              data-product-label="{{ prod.sku if prod else link.product_id }}">
+                          <input type="hidden" name="_q" value="{{ list_ctx.q }}">
+                          <input type="hidden" name="_page" value="{{ list_ctx.page }}">
+                          <input type="hidden" name="_per_page" value="{{ list_ctx.per_page }}">
+                          <input type="hidden" name="_sort" value="{{ list_ctx.sort }}">
+                          <input type="hidden" name="_order" value="{{ list_ctx.order }}">
+                          <button type="submit" class="btn btn-sm btn-outline-danger" title="Gỡ khỏi NCC">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% else %}
+                    <tr class="supplier-catalog-empty-row">
+                      <td colspan="6" class="text-center text-muted py-4">
+                        Chưa có sản phẩm — bấm <strong>Thêm sản phẩm mới</strong> hoặc gắn SP có sẵn phía trên.
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 

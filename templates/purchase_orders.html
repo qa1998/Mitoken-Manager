@@ -9,7 +9,7 @@
         <div class="page-header-icon"><i class="bi bi-receipt"></i></div>
         <div>
           <h2 class="section-title">Phiếu mua hàng</h2>
-          <p class="small-muted mb-0">Mua hàng NCC — nhập kho hoặc giao thẳng khách hàng</p>
+          <p class="small-muted mb-0">Chọn NCC từng dòng sản phẩm — lưu sẽ tự tách phiếu theo nhà cung cấp</p>
         </div>
       </div>
       <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createPoModal">
@@ -52,18 +52,9 @@
     <form method="get" class="row g-3 align-items-end">
       <div class="col-md-3">
         <label class="form-label-custom">Tìm kiếm</label>
-        <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Mã phiếu, NCC, chứng từ...">
+        <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="Mã phiếu, chứng từ...">
       </div>
-      <div class="col-md-2">
-        <label class="form-label-custom">NCC</label>
-        <select name="supplier_id" class="form-select">
-          <option value="">Tất cả</option>
-          {% for s in suppliers %}
-          <option value="{{ s.id }}" {% if supplier_id and supplier_id|int == s.id %}selected{% endif %}>{{ s.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
+      <div class="col-md-3">
         <label class="form-label-custom">Trạng thái</label>
         <select name="status" class="form-select">
           <option value="">Tất cả</option>
@@ -106,7 +97,6 @@
         <thead>
           <tr>
             <th>Mã phiếu</th>
-            <th>NCC</th>
             <th>Hình thức</th>
             <th>Khách / Đơn</th>
             <th>Ngày tạo</th>
@@ -119,13 +109,16 @@
           {% for po in purchase_orders %}
           <tr class="list-row-clickable" data-list-detail-href="{{ url_for('purchase_order_detail', poid=po.id) }}">
             <td><a href="{{ url_for('purchase_order_detail', poid=po.id) }}" class="fw-semibold">{{ po.po_code }}</a></td>
-            <td>{% if po.supplier %}{{ po.supplier.name }}{% else %}<span class="text-muted">Chưa gán NCC</span>{% endif %}</td>
             <td><span class="badge bg-light text-dark border">{{ purchase_order_receipt_mode_label(po.receipt_mode) }}</span></td>
             <td class="small">
-              {% if po.receipt_mode == 'direct_delivery' %}
-                {{ po.customer.name if po.customer else '—' }}
-                {% if po.order %}<br><span class="text-muted">{{ po.order.order_code }}</span>{% endif %}
-              {% else %}—{% endif %}
+              {% if po.quote %}
+              <a href="{{ url_for('quote_preview', qid=po.quote.id) }}" class="d-block">{{ po.quote.quote_code }}</a>
+              {% endif %}
+              {% if po.order %}
+              <a href="{{ url_for('order_preview', oid=po.order.id) }}">{{ po.order.order_code }}</a>
+              {% elif po.customer %}
+              {{ po.customer.name }}
+              {% elif not po.quote %}—{% endif %}
             </td>
             <td class="text-nowrap">{{ po.created_at.strftime('%d/%m/%Y') if po.created_at else '—' }}</td>
             <td class="text-end fw-semibold">{{ po.total_amount|money }}</td>
@@ -142,7 +135,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="8" class="text-center text-muted py-4">Chưa có phiếu mua hàng</td></tr>
+          <tr><td colspan="7" class="text-center text-muted py-4">Chưa có phiếu mua hàng</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -179,7 +172,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-primary">Lưu nháp</button>
+          <button type="submit" class="btn btn-primary">Lưu — tự tách phiếu theo NCC</button>
         </div>
       </form>
     </div>

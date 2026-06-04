@@ -1,0 +1,200 @@
+{% from 'partials/supplier_products_panel.html' import supplier_products_panel %}
+{% macro supplier_intake_import_modal(s, intake_import_payload=none, show_preview=false, list_ctx=none, supplier_links=none) %}
+{% set ctx = list_ctx or {} %}
+{% set links = supplier_links or [] %}
+{% set preview_rows = intake_import_payload.rows if intake_import_payload and intake_import_payload.supplier_id == s.id else [] %}
+{% set excel_active = show_preview and preview_rows %}
+<div class="modal fade supplier-intake-import-modal supplier-intake-modal" id="productsModal{{ s.id }}" tabindex="-1" aria-hidden="true"
+     data-supplier-id="{{ s.id }}"
+     data-show-preview="{% if excel_active %}1{% else %}0{% endif %}">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header border-bottom-0 pb-0">
+        <div class="w-100">
+          <h5 class="modal-title mb-2">Nhập sản phẩm — {{ s.name }}</h5>
+          <ul class="nav nav-tabs supplier-intake-mode-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link{% if not excel_active %} active{% endif %}" id="supplierIntakeManualTab{{ s.id }}"
+                      data-bs-toggle="tab" data-bs-target="#supplierIntakeManual{{ s.id }}" type="button" role="tab">
+                <i class="bi bi-pencil-square me-1"></i> Nhập tay
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link{% if excel_active %} active{% endif %}" id="supplierIntakeExcelTab{{ s.id }}"
+                      data-bs-toggle="tab" data-bs-target="#supplierIntakeExcel{{ s.id }}" type="button" role="tab">
+                <i class="bi bi-file-earmark-excel me-1"></i> Import Excel
+              </button>
+            </li>
+          </ul>
+        </div>
+        <button type="button" class="btn-close ms-2 align-self-start" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="tab-content supplier-intake-tab-content">
+        <div class="tab-pane fade{% if not excel_active %} show active{% endif %}" id="supplierIntakeManual{{ s.id }}" role="tabpanel">
+          <form method="post" action="{{ url_for('supplier_products_intake', sid=s.id) }}" class="supplier-intake-manual-form">
+            <input type="hidden" name="_q" value="{{ ctx.get('q', '') }}">
+            <input type="hidden" name="_page" value="{{ ctx.get('page', 1) }}">
+            <input type="hidden" name="_per_page" value="{{ ctx.get('per_page', 10) }}">
+            <input type="hidden" name="_sort" value="{{ ctx.get('sort', 'created_at') }}">
+            <input type="hidden" name="_order" value="{{ ctx.get('order', 'desc') }}">
+            <div class="modal-body pt-3">
+              <p class="small-muted mb-3">
+                Chọn SP trong danh mục (chưa có thì <strong>Thêm sản phẩm mới</strong>) → <strong>Lô / Hộp / đơn vị tồn</strong> → số lượng và giá nhập.
+                Phiếu gửi chờ duyệt tại <em>Yêu cầu nhập kho</em> — chưa cộng tồn ngay.
+              </p>
+              {{ supplier_products_panel(links=links) }}
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-send me-1"></i> Gửi yêu cầu nhập kho
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tab-pane fade{% if excel_active %} show active{% endif %}" id="supplierIntakeExcel{{ s.id }}" role="tabpanel">
+          <div id="supplierIntakeUpload{{ s.id }}" class="{% if excel_active %}d-none{% endif %}">
+            <form method="post" action="{{ url_for('supplier_intake_import_preview', sid=s.id) }}" enctype="multipart/form-data">
+              <input type="hidden" name="_q" value="{{ ctx.get('q', '') }}">
+              <input type="hidden" name="_page" value="{{ ctx.get('page', 1) }}">
+              <input type="hidden" name="_per_page" value="{{ ctx.get('per_page', 10) }}">
+              <input type="hidden" name="_sort" value="{{ ctx.get('sort', 'created_at') }}">
+              <input type="hidden" name="_order" value="{{ ctx.get('order', 'desc') }}">
+              <div class="modal-body pt-3">
+                <p class="small-muted mb-3">
+                  Tải <strong>file mẫu nhập NCC</strong> (có cột <em>Số lượng nhập</em>). Điền SL theo <em>đơn vị nhập</em> — hệ thống tự quy đổi tồn kho.
+                </p>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  <a href="{{ url_for('supplier_intake_import_template', sid=s.id) }}" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-file-earmark-excel me-1"></i> File mẫu .xlsx
+                  </a>
+                  <a href="{{ url_for('supplier_intake_import_template', sid=s.id, format='csv') }}" class="btn btn-outline-secondary btn-sm">File mẫu .csv</a>
+                </div>
+                <div class="import-format-hint small-muted mb-3">
+                  <strong>Bắt buộc:</strong> SKU, Tên sản phẩm.<br>
+                  <strong>Số lượng nhập:</strong> cột riêng sau <em>Giá nhập</em> (file mẫu NCC). Nếu file cũ chỉ có <em>Tồn kho</em> thì dùng cột đó làm SL nhập.<br>
+                  Mỗi dòng cần <em>Số lượng nhập</em> &gt; 0 hoặc <em>Giá nhập</em> &gt; 0.<br>
+                  SP mới được tạo trong danh mục; SP đã có chỉ nhập kho (tick bên dưới để cập nhật thông tin SP).
+                </div>
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label-custom">Số chứng từ / HĐ</label>
+                    <input type="text" name="ref_code" class="form-control form-control-sm" placeholder="VD: HD-2024-001">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label-custom">Ghi chú phiếu nhập</label>
+                    <input type="text" name="intake_note" class="form-control form-control-sm" placeholder="Tùy chọn">
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label-custom">Chọn file <span class="text-danger">*</span></label>
+                  <input type="file" name="import_file" class="form-control" accept=".xlsx,.xlsm,.csv" required>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="update_existing" value="1" id="supplierIntakeUpdate{{ s.id }}">
+                  <label class="form-check-label" for="supplierIntakeUpdate{{ s.id }}">
+                    Cập nhật thông tin sản phẩm nếu SKU đã tồn tại
+                  </label>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                <button type="submit" class="btn btn-primary">
+                  <i class="bi bi-eye me-1"></i> Xem trước
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {% if preview_rows %}
+          <div id="supplierIntakePreview{{ s.id }}" class="{% if not excel_active %}d-none{% endif %}">
+            <form method="post" action="{{ url_for('supplier_intake_import_confirm', sid=s.id) }}" id="supplierIntakeConfirm{{ s.id }}">
+              <input type="hidden" name="_q" value="{{ ctx.get('q', '') }}">
+              <input type="hidden" name="_page" value="{{ ctx.get('page', 1) }}">
+              <input type="hidden" name="_per_page" value="{{ ctx.get('per_page', 10) }}">
+              <input type="hidden" name="_sort" value="{{ ctx.get('sort', 'created_at') }}">
+              <input type="hidden" name="_order" value="{{ ctx.get('order', 'desc') }}">
+              <div class="modal-body pt-3">
+                <p class="small-muted mb-2">
+                  File: <strong>{{ intake_import_payload.filename }}</strong>
+                  · Bỏ tick dòng không muốn nhập.
+                </p>
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label-custom">Số chứng từ / HĐ</label>
+                    <input type="text" name="ref_code" class="form-control form-control-sm" placeholder="VD: HD-2024-001">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label-custom">Ghi chú phiếu nhập</label>
+                    <input type="text" name="intake_note" class="form-control form-control-sm" placeholder="Tùy chọn">
+                  </div>
+                </div>
+                <div class="import-preview-summary mb-3" id="supplierIntakeSummary{{ s.id }}"></div>
+                <div class="table-responsive import-preview-table-wrap">
+                  <table class="table table-sm import-preview-table mb-0">
+                    <thead>
+                      <tr>
+                        <th class="text-center" style="width:40px">
+                          <input type="checkbox" class="form-check-input" id="supplierIntakeSelectAll{{ s.id }}" checked>
+                        </th>
+                        <th>Dòng</th>
+                        <th>SKU</th>
+                        <th>Tên sản phẩm</th>
+                        <th class="text-end">Số lượng nhập</th>
+                        <th class="text-end">Giá nhập</th>
+                        <th>Trạng thái</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="supplierIntakePreviewBody{{ s.id }}">
+                      {% for row in preview_rows %}
+                      {% set d = row.data %}
+                      <tr class="import-preview-row {% if not row.importable %}import-preview-row-muted{% endif %}"
+                          data-importable="{{ '1' if row.importable else '0' }}">
+                        <td class="text-center">
+                          {% if row.importable %}
+                          <input type="checkbox" class="form-check-input import-row-check" name="import_row_id"
+                                 value="{{ row.row_id }}" checked>
+                          {% else %}
+                          <span class="text-muted">—</span>
+                          {% endif %}
+                        </td>
+                        <td>{{ row.line_no }}</td>
+                        <td class="fw-semibold">{{ d.sku }}</td>
+                        <td>{{ d.name }}</td>
+                        <td class="text-end fw-semibold">{{ d.intake_qty|default(0, true) }}</td>
+                        <td class="text-end text-nowrap">{{ d.cost_price|money }}</td>
+                        <td>
+                          <span class="import-action-badge action-{{ row.action }}">{{ row.action_label }}</span>
+                          {% if row.note %}<div class="import-row-note">{{ row.note }}</div>{% endif %}
+                        </td>
+                        <td class="text-end">
+                          <button type="button" class="btn btn-sm btn-outline-danger btn-import-row-remove" title="Xóa dòng">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="submit" formaction="{{ url_for('supplier_intake_import_cancel', sid=s.id) }}" formmethod="post"
+                        class="btn btn-light" formnovalidate>Hủy import</button>
+                <button type="button" class="btn btn-outline-secondary" id="supplierIntakeBack{{ s.id }}">Chọn file khác</button>
+                <button type="submit" class="btn btn-primary">
+                  <i class="bi bi-send me-1"></i> Gửi yêu cầu nhập kho
+                </button>
+              </div>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

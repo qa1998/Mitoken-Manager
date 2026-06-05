@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% from 'partials/supplier_detail_tabs.html' import supplier_detail_tabs %}
+{% from 'partials/supplier_intake_import_modal.html' import supplier_intake_import_modal %}
+{% block title %}{{ supplier.name }} — Nhà cung cấp{% endblock %}
+{% block content %}
+
+{% set summary = intake_board.summaries.get(supplier.id, {}) %}
+{% set intakes = intake_board.intakes.get(supplier.id, []) %}
+{% set payments = intake_board.payments.get(supplier.id, []) %}
+{% set total_import = summary.total|default(0) %}
+{% set paid_import = summary.paid|default(0) %}
+{% set remaining_import = summary.remaining|default(0) %}
+{% set paid_pct = ((paid_import / total_import * 100)|round(0)|int) if total_import else 0 %}
+{% set debt_pct = ((remaining_import / total_import * 100)|round(0)|int) if total_import else 0 %}
+{% set unpaid_slips = summary.unpaid_count|default(0) %}
+
+<div class="supplier-entity-page" data-supplier-entity-page data-supplier-id="{{ supplier.id }}">
+  <header class="supplier-entity-header">
+    <div class="supplier-entity-header-main">
+      <a href="{{ back_url }}" class="btn btn-light btn-supplier-entity-back">
+        <i class="bi bi-arrow-left"></i>
+        <span class="d-none d-sm-inline ms-1">Quay lại</span>
+      </a>
+      <div class="supplier-entity-title-wrap">
+        <div class="supplier-entity-title-row">
+          <h1 class="supplier-entity-title">{{ supplier.name }}</h1>
+          {% if supplier.is_active %}
+          <span class="badge bg-success-subtle text-success border border-success-subtle">Đang hoạt động</span>
+          {% else %}
+          <span class="badge bg-secondary-subtle text-secondary border">Ngừng hoạt động</span>
+          {% endif %}
+        </div>
+        <p class="supplier-entity-code mb-0">Mã NCC: <code class="sku-code">{{ supplier.code }}</code></p>
+      </div>
+    </div>
+    <div class="supplier-entity-header-actions">
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#editSupplierModal">
+        <i class="bi bi-pencil me-1"></i>Sửa thông tin NCC
+      </button>
+      <a href="{{ url_for('supplier_catalog_new', sid=supplier.id, _from_detail='1') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-plus-lg me-1"></i>Thêm sản phẩm nhà cung cấp
+      </a>
+    </div>
+  </header>
+
+  <div class="row g-3 supplier-entity-stat-row">
+    <div class="col-6 col-lg-3">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-blue"><i class="bi bi-cart-check"></i></div>
+        <div>
+          <div class="stock-stat-label">Tổng tiền nhập</div>
+          <div class="stock-stat-value">{{ total_import|money }}</div>
+          <div class="stock-stat-sub small-muted">Chưa gồm thuế</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-green"><i class="bi bi-wallet2"></i></div>
+        <div>
+          <div class="stock-stat-label">Đã thanh toán</div>
+          <div class="stock-stat-value text-success">{{ paid_import|money }}</div>
+          <div class="stock-stat-sub small-muted">{{ paid_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-purple"><i class="bi bi-cash-stack"></i></div>
+        <div>
+          <div class="stock-stat-label">Còn nợ</div>
+          <div class="stock-stat-value {% if remaining_import > 0 %}text-danger{% endif %}">{{ remaining_import|money }}</div>
+          <div class="stock-stat-sub small-muted">{{ debt_pct }}%</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="stock-stat-card">
+        <div class="stock-stat-icon stat-orange"><i class="bi bi-receipt"></i></div>
+        <div>
+          <div class="stock-stat-label">Phiếu chưa trả</div>
+          <div class="stock-stat-value">{{ unpaid_slips|int }}</div>
+          <div class="stock-stat-sub small-muted">{{ unpaid_slips|int }} phiếu</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card supplier-entity-tabs-card app-list-fill">
+    {{ supplier_detail_tabs(supplier, summary, intakes, payments, catalog_links, intake_line_map, list_ctx, active_tab) }}
+  </div>
+</div>
+
+{% include 'partials/supplier_catalog_link_drawer.html' %}
+
+<div class="modal fade" id="editSupplierModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('update_supplier', sid=supplier.id) }}" class="supplier-form">
+        <input type="hidden" name="_from_detail" value="1">
+        <div class="modal-header">
+          <h5 class="modal-title">Sửa thông tin — {{ supplier.name }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          {% include 'partials/supplier_form_fields.html' %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{{ supplier_intake_import_modal(
+  supplier,
+  intake_import_payload=intake_import_payload,
+  show_preview=show_intake_preview,
+  supplier_links=catalog_links,
+  list_ctx=list_ctx
+) }}
+
+{% include 'partials/supplier_payment_modal.html' %}
+{% include 'partials/supplier_quick_product_modal.html' %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/product_units.js') }}"></script>
+<script src="{{ url_for('static', filename='js/products.js') }}"></script>
+<script src="{{ url_for('static', filename='js/suppliers.js') }}"></script>
+{% endblock %}

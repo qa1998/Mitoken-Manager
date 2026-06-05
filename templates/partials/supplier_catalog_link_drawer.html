@@ -1,0 +1,50 @@
+{% from 'partials/product_unit_setup.html' import product_unit_setup %}
+<div class="supplier-link-drawer" id="supplierLinkDrawer" data-supplier-link-drawer hidden>
+  <div class="supplier-link-drawer-backdrop" data-supplier-link-drawer-close tabindex="-1" aria-hidden="true"></div>
+  <aside class="supplier-link-drawer-panel" role="dialog" aria-labelledby="supplierLinkDrawerTitle">
+    <header class="supplier-link-drawer-head">
+      <h2 class="supplier-link-drawer-title" id="supplierLinkDrawerTitle">Gắn sản phẩm có sẵn vào nhà cung cấp</h2>
+      <button type="button" class="btn btn-light btn-sm" data-supplier-link-drawer-close aria-label="Đóng">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </header>
+    <form method="post"
+          action="{{ url_for('supplier_catalog_add', sid=supplier.id) }}"
+          class="supplier-catalog-add-form supplier-link-drawer-form"
+          novalidate>
+      <input type="hidden" name="_from_detail" value="1">
+      <input type="hidden" name="product_id" value="" data-supplier-link-product-id>
+      <div class="supplier-link-drawer-search">
+        <div class="input-icon-wrap">
+          <i class="bi bi-search"></i>
+          <input type="text" class="form-control" placeholder="Tìm sản phẩm trong cửa hàng..." data-supplier-link-search autocomplete="off">
+        </div>
+      </div>
+      <div class="supplier-link-drawer-list" data-supplier-link-product-list role="radiogroup" aria-label="Chọn sản phẩm"></div>
+      <div class="supplier-link-drawer-fields">
+        <div class="mb-3">
+          <label class="form-label-custom">Giá nhập (mặc định) <span class="text-danger">*</span></label>
+          <div class="money-input-wrap">
+            <input type="text" name="catalog_cost_price" class="form-control money-input" inputmode="numeric" autocomplete="off" placeholder="0" data-supplier-link-cost>
+            <span class="money-input-suffix">đ</span>
+          </div>
+          <div class="form-text mb-0" data-supplier-catalog-cost-hint>/ đơn vị nhập</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Mã NCC (tùy chọn)</label>
+          <input type="text" name="catalog_supplier_sku" class="form-control" placeholder="Mã trên hóa đơn NCC">
+        </div>
+        <div class="mb-3">
+          <label class="form-label-custom">Ghi chú</label>
+          <textarea name="catalog_note" class="form-control" rows="2" placeholder="Tùy chọn"></textarea>
+        </div>
+      </div>
+      <footer class="supplier-link-drawer-footer">
+        <button type="button" class="btn btn-light" data-supplier-link-drawer-close>Hủy</button>
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-link-45deg me-1"></i>Gắn sản phẩm
+        </button>
+      </footer>
+    </form>
+  </aside>
+</div>

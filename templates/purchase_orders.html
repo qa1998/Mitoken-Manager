@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'partials/list_pagination.html' import list_pagination_footer %}
 {% block title %}Phiếu mua hàng{% endblock %}
 {% block content %}
 
@@ -81,16 +82,6 @@
   <div class="panel-card">
     <div class="table-toolbar">
       <h5 class="section-title mb-0">DANH SÁCH PHIẾU</h5>
-      <form method="get" class="per-page-select">
-        {% for key, val in list_args.items() %}
-        {% if val and key != 'per_page' %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
-        {% endfor %}
-        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="10" {% if per_page == 10 %}selected{% endif %}>10 / trang</option>
-          <option value="25" {% if per_page == 25 %}selected{% endif %}>25 / trang</option>
-          <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / trang</option>
-        </select>
-      </form>
     </div>
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
@@ -140,21 +131,7 @@
         </tbody>
       </table>
     </div>
-    {% if pagination.pages > 1 %}
-    <nav class="mt-3">
-      <ul class="pagination pagination-sm justify-content-center mb-0">
-        {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
-        {% if p %}
-        <li class="page-item {% if p == pagination.page %}active{% endif %}">
-          <a class="page-link" href="{{ url_for('purchase_orders', page=p, **list_args) }}">{{ p }}</a>
-        </li>
-        {% else %}
-        <li class="page-item disabled"><span class="page-link">…</span></li>
-        {% endif %}
-        {% endfor %}
-      </ul>
-    </nav>
-    {% endif %}
+    {{ list_pagination_footer('purchase_orders', pagination, unit='phiếu mua hàng', list_args=list_args, per_page=per_page, per_page_options=[10, 25, 50]) }}
   </div>
 </div>
 

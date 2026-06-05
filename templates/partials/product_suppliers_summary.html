@@ -1,0 +1,29 @@
+{% macro product_suppliers_summary(product, supplier_links) %}
+{% set pu = product_purchase_unit(product) %}
+<section class="product-edit-card product-edit-suppliers-summary" id="productEditSuppliers">
+  <h3 class="product-edit-card-title">Nhà cung cấp</h3>
+  {% if supplier_links %}
+  <p class="mb-2">
+    Có <strong>{{ supplier_links|length }}</strong> nhà cung cấp cung cấp sản phẩm này.
+  </p>
+  <ul class="product-suppliers-summary-list mb-2">
+    {% for link in supplier_links %}
+    <li>
+      <span class="product-suppliers-summary-name">{{ link.supplier.name if link.supplier else '—' }}</span>
+      {% if link.cost_price %}
+      <span class="product-suppliers-summary-price">{{ link.cost_price|money }} / {{ pu }}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="small-muted mb-0">
+    Thêm hoặc sửa giá nhập tại trang <a href="{{ url_for('suppliers') }}">Nhà cung cấp</a> → Sản phẩm cung cấp.
+  </p>
+  {% else %}
+  <p class="text-muted mb-0">Chưa có nhà cung cấp nào cho sản phẩm này.</p>
+  <p class="small-muted mb-0 mt-2">
+    Gắn sản phẩm từ trang <a href="{{ url_for('suppliers') }}">Nhà cung cấp</a>.
+  </p>
+  {% endif %}
+</section>
+{% endmacro %}

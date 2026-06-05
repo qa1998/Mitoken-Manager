@@ -1,0 +1,49 @@
+<div class="row g-3">
+  <div class="col-md-4">
+    <label class="form-label-custom">Tên nhà cung cấp <span class="text-danger">*</span></label>
+    <input type="text" name="name" class="form-control" required value="{{ supplier.name }}" placeholder="VD: Công ty TNHH ABC">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Mã NCC</label>
+    <input type="text" name="code" class="form-control" value="{{ supplier.code }}" placeholder="Mã NCC">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Mã số thuế</label>
+    <input type="text" name="tax_code" class="form-control" value="{{ supplier.tax_code or '' }}">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Người liên hệ</label>
+    <input type="text" name="contact_person" class="form-control" value="{{ supplier.contact_person or '' }}">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Số điện thoại</label>
+    <input type="text" name="phone" class="form-control" value="{{ supplier.phone or '' }}">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Email</label>
+    <input type="email" name="email" class="form-control" value="{{ supplier.email or '' }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label-custom">Địa chỉ</label>
+    <input type="text" name="address" class="form-control" value="{{ supplier.address or '' }}">
+  </div>
+  <div class="col-md-6">
+    <label class="form-label-custom">Số tài khoản</label>
+    <input type="text" name="bank_account" class="form-control" value="{{ supplier.bank_account or '' }}">
+  </div>
+  <div class="col-md-6">
+    <label class="form-label-custom">Ngân hàng</label>
+    <input type="text" name="bank_name" class="form-control" value="{{ supplier.bank_name or '' }}">
+  </div>
+  <div class="col-12">
+    <label class="form-label-custom">Ghi chú</label>
+    <textarea name="note" class="form-control" rows="2" placeholder="Tùy chọn">{{ supplier.note or '' }}</textarea>
+  </div>
+  <div class="col-md-4">
+    <label class="form-label-custom">Trạng thái</label>
+    <select name="is_active" class="form-select">
+      <option value="1" {% if supplier.is_active %}selected{% endif %}>Đang hoạt động</option>
+      <option value="0" {% if not supplier.is_active %}selected{% endif %}>Ngừng hoạt động</option>
+    </select>
+  </div>
+</div>

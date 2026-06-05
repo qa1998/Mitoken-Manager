@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
+{% from 'partials/list_pagination.html' import list_pagination_footer %}
 {% from 'partials/supplier_intake_import_modal.html' import supplier_intake_import_modal %}
-{% from 'partials/supplier_detail_modal.html' import supplier_detail_modal %}
 {% macro sort_th(label, field) %}
 <th>
   <a href="{{ sort_url(field) }}" class="th-sort {% if sort == field %}active {{ order }}{% endif %}">
@@ -120,7 +120,7 @@
     </div>
   </div>
 
-  <div class="panel-card supplier-list-card">
+  <div class="panel-card supplier-list-card app-list-fill">
   <div class="table-toolbar">
     <div class="section-header section-header-sm mb-0">
       <div class="page-header-icon page-header-icon-sm"><i class="bi bi-list-ul"></i></div>
@@ -142,7 +142,7 @@
     </div>
   </div>
 
-  <div class="customer-table-wrap">
+  <div class="customer-table-wrap app-list-scroll">
     <table class="table customer-table">
       <thead>
         <tr>
@@ -160,7 +160,7 @@
       <tbody>
         {% for s in suppliers %}
         {% set inbound = inbound_stats.get(s.id, {}) %}
-        <tr class="list-row-clickable" data-list-detail-modal="#detailModal{{ s.id }}">
+        <tr class="list-row-clickable" data-list-detail-href="{{ url_for('supplier_detail', sid=s.id) }}">
           <td><code class="sku-code">{{ s.code }}</code></td>
           <td class="col-name">{{ s.name }}</td>
           <td>{{ s.tax_code or '—' }}</td>
@@ -173,11 +173,9 @@
           <td>
             {% set pc = product_counts.get(s.id, 0) %}
             {% if pc %}
-            <button type="button" class="badge bg-light text-dark border border-0 supplier-sp-count-badge"
-                    data-bs-toggle="modal" data-bs-target="#detailModal{{ s.id }}"
-                    data-supplier-catalog-tab="{{ s.id }}" title="Xem sản phẩm cung cấp">
+            <a href="{{ url_for('supplier_detail', sid=s.id, tab='catalog') }}" class="badge bg-light text-dark border text-decoration-none supplier-sp-count-badge" title="Xem sản phẩm cung cấp">
               {{ pc }} SP
-            </button>
+            </a>
             {% else %}
             <span class="text-muted">—</span>
             {% endif %}
@@ -202,7 +200,7 @@
                 <i class="bi bi-three-dots-vertical"></i>
               </button>
               <ul class="dropdown-menu dropdown-menu-end shadow-sm">
-                <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#detailModal{{ s.id }}"><i class="bi bi-eye me-2"></i>Chi tiết</button></li>
+                <li><a class="dropdown-item" href="{{ url_for('supplier_detail', sid=s.id) }}"><i class="bi bi-eye me-2"></i>Chi tiết</a></li>
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#productsModal{{ s.id }}"><i class="bi bi-box-seam me-2"></i>Nhập sản phẩm</button></li>
                 <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editModal{{ s.id }}"><i class="bi bi-pencil me-2"></i>Cập nhật</button></li>
                 <li><hr class="dropdown-divider"></li>
@@ -231,50 +229,7 @@
     </table>
   </div>
 
-  <div class="table-footer">
-    {% if pagination.total > 0 %}
-    {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
-    {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
-    <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} kết quả</span>
-    {% else %}
-    <span>Chưa có dữ liệu</span>
-    {% endif %}
-    <div class="table-footer-right">
-      {% if pagination.pages > 1 %}
-      <nav>
-        <ul class="pagination pagination-custom mb-0">
-          <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('suppliers', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
-          </li>
-          {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-          {% if p %}
-          <li class="page-item {% if p == pagination.page %}active{% endif %}">
-            <a class="page-link" href="{{ url_for('suppliers', page=p, **list_args) }}">{{ p }}</a>
-          </li>
-          {% else %}
-          <li class="page-item disabled"><span class="page-link">…</span></li>
-          {% endif %}
-          {% endfor %}
-          <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('suppliers', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
-          </li>
-        </ul>
-      </nav>
-      {% endif %}
-      <form method="get" class="per-page-select per-page-footer">
-        <input type="hidden" name="q" value="{{ q }}">
-        <input type="hidden" name="sort" value="{{ sort }}">
-        <input type="hidden" name="order" value="{{ order }}">
-        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-          <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
-          <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-          <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
-        </select>
-        <span>/ trang</span>
-      </form>
-    </div>
-  </div>
+  {{ list_pagination_footer('suppliers', pagination, unit='nhà cung cấp', list_args=list_args, per_page=per_page) }}
 </div>
 </div>
 
@@ -338,13 +293,6 @@
   list_ctx={'q': q, 'page': pagination.page, 'per_page': per_page, 'sort': sort, 'order': order}
 ) }}
 
-{{ supplier_detail_modal(s, intake_board, intake_line_map, {
-  'q': q,
-  'page': pagination.page,
-  'per_page': per_page,
-  'sort': sort,
-  'order': order,
-}, supplier_products.get(s.id, [])) }}
 {% endfor %}
 
 {% include 'partials/supplier_quick_product_modal.html' %}

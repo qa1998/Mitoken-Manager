@@ -11,11 +11,6 @@
         <option value="{{ p.id }}">{{ p.name }}</option>
         {% endfor %}
       </select>
-      {% if inline %}
-      <button type="button" class="btn btn-link btn-sm px-0 mt-2 taxonomy-manage-link category-create-link d-block text-start">
-        <i class="bi bi-folder2 me-1"></i>Quản lý danh mục &amp; thương hiệu
-      </button>
-      {% endif %}
     </div>
     <div class="{% if inline %}col-md-4{% else %}col-12{% endif %}">
       <label class="form-label-custom small mb-1">Danh mục con</label>

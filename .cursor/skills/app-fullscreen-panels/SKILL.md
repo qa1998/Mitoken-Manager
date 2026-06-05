@@ -243,8 +243,13 @@ CSS: `.btn-preview-back`, `.preview-page-head`.
 
 1. `main.content-fill`
 2. Stack: `.app-page-stack` hoặc `.quote-page`, `.supplier-page`, `.customer-entity-page`, `.contracts-page`, …
-3. Card list (ưu tiên class): `.supplier-list-card`, `.customer-list-card`, `.contracts-list-card`, `.quote-table-card`, …
+3. Card list (ưu tiên class): `.product-list-layout` (Sản phẩm 2 cột), `.supplier-list-card`, `.customer-list-card`, `.contracts-list-card`, `.quote-table-card`, …
 4. Gắn `app-list-fill` + `app-list-scroll` trên wrap bảng
+
+### Sản phẩm (sidebar + bảng)
+
+- Wrapper kéo cao: `product-list-layout app-list-fill` (con trực tiếp của `.product-page-v2`).
+- **Không** chỉ gắn `app-list-fill` lên `.product-list-card-v2` lồng sâu — layout cha không giãn tới đáy viewport.
 
 ### HTML list (rút gọn)
 

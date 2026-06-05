@@ -55,7 +55,7 @@
         </div>
 
         <div class="tab-pane fade{% if excel_active %} show active{% endif %}" id="supplierIntakeExcel{{ s.id }}" role="tabpanel">
-          <div id="supplierIntakeUpload{{ s.id }}" class="{% if excel_active %}d-none{% endif %}">
+          <div id="supplierIntakeUpload{{ s.id }}" class="supplier-intake-step {% if excel_active %}d-none{% endif %}">
             <form method="post" action="{{ url_for('supplier_intake_import_preview', sid=s.id) }}" enctype="multipart/form-data">
               <input type="hidden" name="_q" value="{{ ctx.get('q', '') }}">
               <input type="hidden" name="_page" value="{{ ctx.get('page', 1) }}">
@@ -109,7 +109,7 @@
           </div>
 
           {% if preview_rows %}
-          <div id="supplierIntakePreview{{ s.id }}" class="{% if not excel_active %}d-none{% endif %}">
+          <div id="supplierIntakePreview{{ s.id }}" class="supplier-intake-step supplier-intake-preview-step {% if not excel_active %}d-none{% endif %}">
             <form method="post" action="{{ url_for('supplier_intake_import_confirm', sid=s.id) }}" id="supplierIntakeConfirm{{ s.id }}">
               <input type="hidden" name="_q" value="{{ ctx.get('q', '') }}">
               <input type="hidden" name="_page" value="{{ ctx.get('page', 1) }}">

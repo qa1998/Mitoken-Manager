@@ -226,7 +226,7 @@ function getAppPageStack(content) {
   var stack = content.querySelector(':scope > .app-page-stack');
   if (stack) return stack;
   var pageRoot = content.querySelector(
-    ':scope > .quote-page, :scope > .order-page, :scope > .stock-page, :scope > .debt-page, :scope > .product-page-v2, :scope > .product-page, :scope > .supplier-page, :scope > .customer-entity-page, :scope > .contracts-page'
+    ':scope > .quote-page, :scope > .order-page, :scope > .stock-page, :scope > .debt-page, :scope > .product-page-v2, :scope > .product-page, :scope > .supplier-page, :scope > .supplier-entity-page, :scope > .customer-entity-page, :scope > .contracts-page'
   );
   if (pageRoot) return pageRoot;
   if (content.querySelector(':scope > .company-page, :scope > [data-app-no-fill-list]')) return null;
@@ -245,7 +245,7 @@ function getAppPageStack(content) {
 
 function findAppListFillCard(stack) {
   var named = stack.querySelector(
-    '.debt-list-card, .quote-table-card, .order-table-card, .stock-table-card, .product-list-card-v2, .supplier-list-card, .customer-list-card, .contracts-list-card'
+    '.product-list-layout, .debt-list-card, .quote-table-card, .order-table-card, .stock-table-card, .product-list-card-v2, .supplier-list-card, .supplier-entity-tabs-card, .customer-list-card, .contracts-list-card'
   );
   if (named) return named;
   var found = null;
@@ -257,7 +257,9 @@ function findAppListFillCard(stack) {
 }
 
 function markAppListScrollTargets(card) {
-  card.querySelectorAll('.customer-table-wrap, .table-responsive, .order-list-table-wrap, .quote-list-table-wrap').forEach(function (el) {
+  card.querySelectorAll(
+    '.customer-table-wrap, .table-responsive, .order-list-table-wrap, .quote-list-table-wrap, .supplier-intake-table-wrap, .supplier-catalog-table-wrap, .supplier-payments-table-wrap'
+  ).forEach(function (el) {
     el.classList.add('app-list-scroll');
   });
 }

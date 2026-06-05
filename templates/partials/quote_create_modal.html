@@ -20,8 +20,9 @@
                   <div class="quote-meta-input-row">
                     <div class="input-icon-wrap flex-grow-1">
                       <i class="bi bi-person"></i>
-                      <select name="customer_id" class="form-select" id="quote-customer-select">
-                        <option value="" selected>Khách vãng lai (không cần thông tin)</option>
+                      <select name="customer_id" class="form-select" id="quote-customer-select"
+                              data-walkin-id="{{ walkin_customer_id }}">
+                        <option value="" selected>Khách vãng lai</option>
                         {% for c in customers %}
                         <option value="{{ c.id }}">{{ c.name }}</option>
                         {% endfor %}
@@ -30,6 +31,12 @@
                     <a href="{{ url_for('customers', from='quotes') }}" target="_blank" class="btn btn-outline-primary btn-sm text-nowrap flex-shrink-0 quote-add-customer-btn" id="quote-add-customer-link">
                       <i class="bi bi-plus-lg"></i> Thêm KH
                     </a>
+                  </div>
+                  <div class="quote-walkin-name-wrap mt-2" id="quote-walkin-name-wrap">
+                    <label class="form-label-custom small mb-1">Tên khách (tùy chọn)</label>
+                    <input type="text" name="walkin_display_name" class="form-control quote-preview-input"
+                           id="quote-walkin-name-input" maxlength="120"
+                           placeholder="VD: Anh Tuấn — cửa hàng ABC">
                   </div>
                 </div>
                 <div class="quote-meta-field">

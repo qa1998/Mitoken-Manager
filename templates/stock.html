@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/product_thumb.html' import product_thumb %}
+{% from 'partials/list_pagination.html' import list_pagination_footer %}
 {% block content %}
 
 <div class="stock-page">
@@ -275,49 +276,7 @@
     {% set active_pagination = pagination %}
     {% endif %}
 
-    <div class="table-footer">
-      {% if active_pagination.total > 0 %}
-      {% set start = (active_pagination.page - 1) * active_pagination.per_page + 1 %}
-      {% set end = [active_pagination.page * active_pagination.per_page, active_pagination.total]|min %}
-      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ active_pagination.total }} {% if filters.tab == 'history' %}giao dịch{% else %}sản phẩm{% endif %}</span>
-      {% else %}
-      <span>Chưa có dữ liệu</span>
-      {% endif %}
-      <div class="table-footer-right">
-        {% if active_pagination.pages > 1 %}
-        <nav>
-          <ul class="pagination pagination-custom mb-0">
-            <li class="page-item {% if not active_pagination.has_prev %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('stock', page=active_pagination.prev_num, **list_args) if active_pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
-            </li>
-            {% for pg in active_pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-            {% if pg %}
-            <li class="page-item {% if pg == active_pagination.page %}active{% endif %}">
-              <a class="page-link" href="{{ url_for('stock', page=pg, **list_args) }}">{{ pg }}</a>
-            </li>
-            {% else %}
-            <li class="page-item disabled"><span class="page-link">…</span></li>
-            {% endif %}
-            {% endfor %}
-            <li class="page-item {% if not active_pagination.has_next %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('stock', page=active_pagination.next_num, **list_args) if active_pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
-            </li>
-          </ul>
-        </nav>
-        {% endif %}
-        <form method="get" class="per-page-select per-page-footer">
-          {% for key, val in list_args.items() %}
-          {% if val %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
-          {% endfor %}
-          <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-            <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
-            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-          </select>
-          <span>/ trang</span>
-        </form>
-      </div>
-    </div>
+    {{ list_pagination_footer('stock', active_pagination, unit=('giao dịch' if filters.tab == 'history' else 'sản phẩm'), list_args=list_args, per_page=per_page, per_page_options=[10, 25, 50]) }}
   </div>
 </div>
 

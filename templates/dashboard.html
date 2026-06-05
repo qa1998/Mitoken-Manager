@@ -2,71 +2,307 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 
-<h3 class="mb-4">Dashboard</h3>
-
-<div class="row g-3 mb-4">
-  {% for label, key in [
-    ('Khách hàng', 'customers'),
-    ('Sản phẩm', 'products'),
-    ('Báo giá', 'quotes'),
-    ('Đơn hàng', 'orders'),
-    ('Công nợ', 'debt'),
-    ('Tồn thấp', 'low_stock'),
-  ] %}
-  <div class="col-md-2 col-6">
-    <div class="card p-3 h-100">
-      <div class="small-muted">{{ label }}</div>
-      <div class="stat fs-4 fw-semibold">
-        {% if key == 'debt' %}{{ stats[key]|money }}{% else %}{{ stats[key] }}{% endif %}
+<div class="dashboard-page">
+  <div class="panel-card dashboard-header-card mb-3">
+    <div class="section-header mb-0">
+      <div class="page-header-icon"><i class="bi bi-speedometer2"></i></div>
+      <div class="flex-grow-1">
+        <h2 class="section-title mb-0">Dashboard</h2>
+        <p class="small-muted mb-0">Tổng quan vận hành — {{ dash.today.strftime('%d/%m/%Y') }}</p>
       </div>
     </div>
   </div>
-  {% endfor %}
-</div>
 
-<div class="row g-3 mb-4">
-  <div class="col-md-6">
-    <div class="card p-3 h-100">
-      <h5 class="mb-3">Báo giá mới</h5>
-      <table class="table table-sm mb-0">
-        <thead>
-          <tr><th>Mã</th><th>Khách</th><th class="text-end">Tổng</th></tr>
-        </thead>
-        <tbody>
-          {% for q in latest_quotes %}
-          <tr>
-            <td><a href="{{ url_for('quote_preview', qid=q.id) }}">{{ q.quote_code }}</a></td>
-            <td>{{ quote_customer_label(q) }}</td>
-            <td class="text-end">{{ q.total|money }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="3" class="text-muted">Chưa có báo giá</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  {% if dash.quick_actions %}
+  <div class="dashboard-quick-actions mb-3">
+    {% for a in dash.quick_actions %}
+    <a href="{{ a.href }}" class="btn btn-sm btn-outline-primary dashboard-quick-btn">
+      <i class="bi {{ a.icon }} me-1"></i>{{ a.label }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if dash.show.today_sales or dash.show.today_warehouse %}
+  <div class="mb-2">
+    <h6 class="dashboard-section-label">Hôm nay</h6>
+  </div>
+  <div class="row g-3 mb-4 dashboard-today-row">
+    {% if dash.show.today_sales %}
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('orders') }}" class="dashboard-stat-link text-decoration-none">
+        <div class="stock-stat-card">
+          <div class="stock-stat-icon stat-blue"><i class="bi bi-cart-check"></i></div>
+          <div>
+            <div class="stock-stat-label">Đơn mới</div>
+            <div class="stock-stat-value">{{ dash.today_block.orders_count }}</div>
+            <div class="stock-stat-hint">{{ dash.today_block.orders_total|money }}</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('debt') }}" class="dashboard-stat-link text-decoration-none">
+        <div class="stock-stat-card">
+          <div class="stock-stat-icon stat-green"><i class="bi bi-cash-coin"></i></div>
+          <div>
+            <div class="stock-stat-label">Thu từ khách</div>
+            <div class="stock-stat-value text-success">{{ dash.today_block.collected|money }}</div>
+            <div class="stock-stat-hint">{{ dash.today_block.payment_count }} lần thu</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('quotes') }}" class="dashboard-stat-link text-decoration-none">
+        <div class="stock-stat-card">
+          <div class="stock-stat-icon stat-orange"><i class="bi bi-file-earmark-plus"></i></div>
+          <div>
+            <div class="stock-stat-label">Báo giá tạo mới</div>
+            <div class="stock-stat-value">{{ dash.today_block.quotes_count }}</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+    {% if dash.show.today_warehouse %}
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('suppliers') }}" class="dashboard-stat-link text-decoration-none">
+        <div class="stock-stat-card">
+          <div class="stock-stat-icon stat-purple"><i class="bi bi-wallet2"></i></div>
+          <div>
+            <div class="stock-stat-label">Trả NCC hôm nay</div>
+            <div class="stock-stat-value">{{ dash.today_block.supplier_paid|money }}</div>
+            <div class="stock-stat-hint">{{ dash.today_block.supplier_payment_count }} phiếu chi</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if dash.kpi_links %}
+  <div class="mb-2">
+    <h6 class="dashboard-section-label">Tổng quan</h6>
+  </div>
+  <div class="row g-3 mb-4">
+    {% for k in dash.kpi_links %}
+    <div class="col-6 col-md-4 col-lg-3 col-xl-2">
+      <a href="{{ k.href }}" class="dashboard-stat-link text-decoration-none">
+        <div class="stock-stat-card{% if k.warn %} dashboard-stat-warn{% endif %}">
+          <div>
+            <div class="stock-stat-label">{{ k.label }}</div>
+            <div class="stock-stat-value{% if k.warn %} text-warning{% endif %}">
+              {% if k.money %}{{ k.value|money }}{% else %}{{ k.value }}{% endif %}
+            </div>
+            {% if k.hint %}<div class="stock-stat-hint">{{ k.hint }}</div>{% endif %}
+          </div>
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    {% if dash.show.debt_alerts and dash.debt_alerts %}
+    <div class="col-lg-6">
+      <div class="panel-card dashboard-panel h-100">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h5 class="section-title mb-0"><i class="bi bi-exclamation-circle text-danger me-2"></i>Công nợ cần chú ý</h5>
+          <a href="{{ url_for('debt') }}" class="btn btn-sm btn-outline-primary">Xem tất cả</a>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead>
+              <tr>
+                <th>Khách hàng</th>
+                <th class="text-end">Còn nợ</th>
+                <th>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dash.debt_alerts %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('debt', customer_id=row.customer.id) }}">{{ row.customer.name }}</a>
+                  <div class="small-muted">{{ row.unpaid_count }} đơn</div>
+                </td>
+                <td class="text-end money fw-semibold">{{ row.remaining|money }}</td>
+                <td>
+                  <span class="badge {% if row.status_key == 'overdue' %}bg-danger-subtle text-danger{% else %}bg-warning-subtle text-warning{% endif %} border">
+                    {{ row.status }}
+                  </span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    {% elif dash.show.debt_alerts %}
+    <div class="col-lg-6">
+      <div class="panel-card dashboard-panel h-100">
+        <h5 class="section-title mb-2"><i class="bi bi-check-circle text-success me-2"></i>Công nợ khách hàng</h5>
+        <p class="small-muted mb-3">Không có khách đang nợ hoặc quá hạn.</p>
+        <a href="{{ url_for('debt') }}" class="btn btn-sm btn-outline-primary">Mở công nợ</a>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if dash.show.pending_intake %}
+    <div class="col-lg-6">
+      <div class="panel-card dashboard-panel h-100">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h5 class="section-title mb-0">
+            <i class="bi bi-inbox text-warning me-2"></i>Yêu cầu nhập kho
+            {% if dash.overview.pending_intake %}
+            <span class="badge bg-warning-subtle text-warning border ms-1">{{ dash.overview.pending_intake }}</span>
+            {% endif %}
+          </h5>
+          <a href="{{ url_for('stock_intake_requests') }}" class="btn btn-sm btn-outline-primary">Duyệt nhập</a>
+        </div>
+        {% if dash.pending_intakes %}
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead>
+              <tr>
+                <th>Phiếu</th>
+                <th>NCC</th>
+                <th class="text-end">Tổng tiền</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dash.pending_intakes %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('stock_intake_request_detail', iid=row.intake.id) }}">
+                    <code class="sku-code">{{ row.intake.intake_code or row.intake.id }}</code>
+                  </a>
+                </td>
+                <td>{{ row.supplier.name if row.supplier else '—' }}</td>
+                <td class="text-end money">{{ row.intake.total_amount|money }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="small-muted mb-0">Không có phiếu chờ duyệt nhập kho.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if dash.show.low_stock and dash.low_stock_products %}
+  <div class="panel-card dashboard-panel mb-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h5 class="section-title mb-0"><i class="bi bi-box-seam text-warning me-2"></i>Sản phẩm sắp hết / hết hàng</h5>
+      <a href="{{ url_for('stock', tab='inventory', status='low') }}" class="btn btn-sm btn-outline-primary">Tồn kho</a>
+    </div>
+    <div class="row g-2">
+      {% for p in dash.low_stock_products %}
+      {% set sk, sl = product_inventory_level(p) %}
+      <div class="col-md-6 col-lg-4">
+        <a href="{{ url_for('product_detail', pid=p.id) }}" class="dashboard-product-alert text-decoration-none">
+          <span class="fw-semibold">{{ p.name }}</span>
+          <span class="small-muted d-block">SKU: {{ p.sku }} · Tồn: {{ format_qty_display(p.stock) }} {{ product_base_unit(p) }}</span>
+          <span class="badge {% if sk == 'out' %}bg-danger-subtle text-danger{% else %}bg-warning-subtle text-warning{% endif %} border mt-1">{{ sl }}</span>
+        </a>
+      </div>
+      {% endfor %}
     </div>
   </div>
-  <div class="col-md-6">
-    <div class="card p-3 h-100">
-      <h5 class="mb-3">Đơn hàng mới</h5>
-      <table class="table table-sm mb-0">
-        <thead>
-          <tr><th>Mã</th><th>Khách</th><th>Trạng thái</th></tr>
-        </thead>
-        <tbody>
-          {% for o in latest_orders %}
-          <tr>
-            <td><a href="{{ url_for('order_preview', oid=o.id) }}">{{ o.order_code }}</a></td>
-            <td>{{ o.customer.name if o.customer else '—' }}</td>
-            <td><span class="badge badge-soft">{{ o.status }}</span></td>
-          </tr>
-          {% else %}
-          <tr><td colspan="3" class="text-muted">Chưa có đơn hàng</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    {% if dash.show.latest_quotes %}
+    <div class="col-lg-6">
+      <div class="panel-card dashboard-panel h-100">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h5 class="section-title mb-0">Báo giá gần đây</h5>
+          <a href="{{ url_for('quotes') }}" class="btn btn-sm btn-light">Tất cả</a>
+        </div>
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr><th>Mã</th><th>Khách</th><th>Trạng thái</th><th class="text-end">Tổng</th></tr>
+          </thead>
+          <tbody>
+            {% for q in dash.latest_quotes %}
+            <tr>
+              <td><a href="{{ url_for('quote_preview', qid=q.id) }}">{{ q.quote_code }}</a></td>
+              <td>{{ quote_customer_label(q) }}</td>
+              <td><span class="badge badge-soft">{{ quote_display_status(q) }}</span></td>
+              <td class="text-end">{{ q.total|money }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">Chưa có báo giá</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
+    {% endif %}
+
+    {% if dash.show.latest_orders %}
+    <div class="col-lg-6">
+      <div class="panel-card dashboard-panel h-100">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h5 class="section-title mb-0">Đơn hàng gần đây</h5>
+          <a href="{{ url_for('orders') }}" class="btn btn-sm btn-light">Tất cả</a>
+        </div>
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr><th>Mã</th><th>Khách</th><th>Trạng thái</th><th class="text-end">Tổng</th></tr>
+          </thead>
+          <tbody>
+            {% for o in dash.latest_orders %}
+            <tr>
+              <td><a href="{{ url_for('order_preview', oid=o.id) }}">{{ o.order_code }}</a></td>
+              <td>{{ o.customer.name if o.customer else '—' }}</td>
+              <td><span class="badge badge-soft">{{ effective_order_status(o) }}</span></td>
+              <td class="text-end">{{ o.total|money }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">Chưa có đơn hàng</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
   </div>
+
+  {% if dash.show.payments_today and dash.payments_today %}
+  <div class="panel-card dashboard-panel mb-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h5 class="section-title mb-0"><i class="bi bi-receipt me-2"></i>Thu tiền hôm nay</h5>
+      <a href="{{ url_for('debt') }}" class="btn btn-sm btn-light">Công nợ</a>
+    </div>
+    <table class="table table-sm mb-0">
+      <thead>
+        <tr><th>Khách</th><th>Đơn</th><th class="text-end">Số tiền</th><th>PT</th></tr>
+      </thead>
+      <tbody>
+        {% for p in dash.payments_today %}
+        <tr>
+          <td>{{ p.order.customer.name if p.order and p.order.customer else '—' }}</td>
+          <td>
+            {% if p.order %}
+            <a href="{{ url_for('order_preview', oid=p.order.id) }}">{{ p.order.order_code }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-end money text-success fw-semibold">{{ p.amount|money }}</td>
+          <td class="small-muted">{{ p.method or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </div>
 
 {% if is_admin %}

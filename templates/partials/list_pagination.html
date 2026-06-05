@@ -1,0 +1,64 @@
+{% macro list_pagination_footer(endpoint, pagination, unit='kết quả', list_args=none, per_page=10, show_per_page=true, per_page_options=[10, 25, 50, 100], page_param='page', show_summary=true, extra_class='') %}
+{% set args = list_args or {} %}
+<div class="table-footer list-pagination-footer {{ extra_class }}">
+  {% if show_summary %}
+  <div class="list-pagination-summary">
+    {% if pagination.total > 0 %}
+    {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+    {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
+    Hiển thị <span class="list-pagination-range">{{ start }}-{{ end }}</span> / <span class="list-pagination-total">{{ pagination.total }}</span> {{ unit }}
+    {% else %}
+    Chưa có dữ liệu
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="list-pagination-summary list-pagination-summary-empty" aria-hidden="true"></div>
+  {% endif %}
+  <div class="table-footer-right list-pagination-controls">
+    {% if show_per_page %}
+    <form method="get" class="list-pagination-per-page">
+      {% for key, val in args.items() %}
+      {% if val and key != page_param and key != 'per_page' %}
+      <input type="hidden" name="{{ key }}" value="{{ val }}">
+      {% endif %}
+      {% endfor %}
+      <select name="per_page" class="list-pagination-per-page-select" aria-label="Số mục mỗi trang" onchange="this.form.submit()">
+        {% for opt in per_page_options %}
+        <option value="{{ opt }}" {% if per_page == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+      <span class="list-pagination-per-page-suffix">/ trang</span>
+    </form>
+    {% endif %}
+    {% if pagination.pages > 1 %}
+    <nav class="list-pagination-nav" aria-label="Phân trang">
+      {% if pagination.has_prev %}
+      <a class="list-pagination-btn list-pagination-prev" href="{{ pagination_page_url(endpoint, pagination.prev_num, args, page_param) }}">
+        <span class="list-pagination-prev-icon" aria-hidden="true">←</span><span class="list-pagination-prev-text">Trước</span>
+      </a>
+      {% else %}
+      <span class="list-pagination-btn list-pagination-prev is-disabled" aria-disabled="true">
+        <span class="list-pagination-prev-icon" aria-hidden="true">←</span><span class="list-pagination-prev-text">Trước</span>
+      </span>
+      {% endif %}
+      {% for pg in pagination_neighbor_pages(pagination) %}
+      {% if pg == pagination.page %}
+      <span class="list-pagination-btn list-pagination-page is-active" aria-current="page">{{ pg }}</span>
+      {% else %}
+      <a class="list-pagination-btn list-pagination-page" href="{{ pagination_page_url(endpoint, pg, args, page_param) }}">{{ pg }}</a>
+      {% endif %}
+      {% endfor %}
+      {% if pagination.has_next %}
+      <a class="list-pagination-btn list-pagination-next" href="{{ pagination_page_url(endpoint, pagination.next_num, args, page_param) }}">
+        <span class="list-pagination-next-text">Sau</span><span class="list-pagination-next-icon" aria-hidden="true">→</span>
+      </a>
+      {% else %}
+      <span class="list-pagination-btn list-pagination-next is-disabled" aria-disabled="true">
+        <span class="list-pagination-next-text">Sau</span><span class="list-pagination-next-icon" aria-hidden="true">→</span>
+      </span>
+      {% endif %}
+    </nav>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

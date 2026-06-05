@@ -2,7 +2,7 @@
 {% set imgs = product_image_urls(product) %}
 <div class="product-thumb{% if size %} product-thumb-{{ size }}{% endif %}">
   {% if imgs %}
-  <img src="{{ imgs[0] }}" alt="{{ product.name }}">
+  <img src="{{ imgs[0] }}" alt="{{ product.name }}"{% if imgs[0].startswith('http') %} referrerpolicy="no-referrer" loading="lazy"{% endif %}>
   {% if imgs|length > 1 %}
   <span class="product-thumb-more">+{{ imgs|length - 1 }}</span>
   {% endif %}

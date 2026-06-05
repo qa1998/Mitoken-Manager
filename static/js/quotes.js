@@ -72,6 +72,39 @@
     return product[field] || product.retail_price || 0;
   }
 
+  /** Giá bảng giá theo đơn vị dòng (mét / cuộn / lô) — giá trong catalog theo sale_unit_mode mặc định. */
+  function getProductPriceForUnit(product, listType, unitMode) {
+    var price = getProductPrice(product, listType);
+    if (!product || !quoteHasConversion(product)) return price;
+    var factor = parseFloat(product.conversion_factor) || 1;
+    if (factor <= 0) return price;
+    var defMode = quoteDefaultUnitMode(product);
+    var mode = unitMode || defMode;
+    if (mode === defMode) return price;
+    var perBase = defMode === 'purchase' ? Math.round(price / factor) : price;
+    if (mode === 'base') return perBase;
+    if (mode === 'purchase') return Math.round(perBase * factor);
+    if (mode === 'lot') {
+      var lf = parseFloat(product.lot_factor) || 1;
+      if (lf <= 0) return price;
+      var perPurchase = defMode === 'base' ? Math.round(perBase * factor) : price;
+      return Math.round(perPurchase * lf);
+    }
+    return price;
+  }
+
+  function applyRowPriceFromUnit(row, product, options) {
+    if (!row || !product) return;
+    options = options || {};
+    var form = resolveQuoteForm(row);
+    var priceInput = row.querySelector('input[name="price"]');
+    if (!priceInput || options.keepPrice) return;
+    var mode = getRowUnitMode(row);
+    var price = getProductPriceForUnit(product, getPriceListType(form), mode);
+    priceInput.value = formatMoneyInputValue(String(price));
+    updateRowAmount(row);
+  }
+
   function stockAmountClass(status) {
     if (status === 'out') return 'is-out';
     if (status === 'low') return 'is-low';
@@ -209,7 +242,8 @@
           dockProductPickerMenu(picker.querySelector('.quote-product-picker-menu'));
           unbindProductPickerScrollListeners();
           syncAllProductMenus();
-          recalcQuoteTotals(form);
+          recalcQuoteTotals(form, true);
+          scheduleQuotePreview({ immediate: true });
         });
       }
       list.appendChild(btn);
@@ -327,32 +361,27 @@
     }
     var html =
       '<div class="quote-line-unit-picker" data-quote-unit-picker>' +
-      '<input type="hidden" name="qty_unit_mode" value="' + mode + '" data-quote-qty-unit-mode>';
-    html += '<div class="btn-group btn-group-sm flex-wrap" role="group">';
+      '<input type="hidden" name="qty_unit_mode" value="' + mode + '" data-quote-qty-unit-mode>' +
+      '<select class="form-select form-select-sm quote-unit-mode-select" data-quote-unit-mode-select>';
     opts.forEach(function (opt) {
       html +=
-        '<button type="button" class="btn btn-outline-secondary btn-sm quote-unit-mode-btn' +
-        (opt.mode === mode ? ' active' : '') +
-        '" data-unit-mode="' +
-        opt.mode +
-        '">' +
-        opt.label +
-        '</button>';
+        '<option value="' + opt.mode + '"' + (opt.mode === mode ? ' selected' : '') + '>' + opt.label + '</option>';
     });
-    html += '</div></div>';
+    html += '</select></div>';
     cell.innerHTML = html;
-    cell.querySelectorAll('.quote-unit-mode-btn').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
+    var sel = cell.querySelector('[data-quote-unit-mode-select]');
+    var hidden = cell.querySelector('[data-quote-qty-unit-mode]');
+    if (sel) {
+      sel.addEventListener('change', function (e) {
         e.stopPropagation();
-        var m = btn.getAttribute('data-unit-mode');
-        cell.querySelector('[data-quote-qty-unit-mode]').value = m;
-        cell.querySelectorAll('.quote-unit-mode-btn').forEach(function (b) {
-          b.classList.toggle('active', b === btn);
-        });
+        hidden.value = sel.value;
         updateRowStock(row, product);
+        applyRowPriceFromUnit(row, product);
+        var form = resolveQuoteForm(row);
+        recalcQuoteTotals(form, true);
+        scheduleQuotePreview({ immediate: true });
       });
-    });
+    }
   }
 
   function getRowUnitMode(row) {
@@ -398,8 +427,7 @@
     renderQuoteUnitCell(row, product, options.qty_unit_mode);
     var priceInput = row.querySelector('input[name="price"]');
     if (!options.keepPrice) {
-      var price = getProductPrice(product, getPriceListType(form));
-      priceInput.value = formatMoneyInputValue(String(price));
+      applyRowPriceFromUnit(row, product, { keepPrice: false });
     }
     updateRowStock(row, product);
     updateRowAmount(row);
@@ -509,7 +537,7 @@
       })
       .then(function (data) {
         var rows = (data && data.customers) || [];
-        select.innerHTML = '<option value="">Khách vãng lai (không cần thông tin)</option>';
+        select.innerHTML = '<option value="">Khách vãng lai</option>';
         rows.forEach(function (c) {
           var opt = document.createElement('option');
           opt.value = String(c.id);
@@ -563,7 +591,7 @@
         btn.setAttribute('aria-pressed', 'true');
       }
       applyQuotePreviewWidth(getStoredPreviewWidth());
-      scheduleQuotePreview();
+      scheduleQuotePreview({ immediate: true });
     } else {
       panel.classList.add('is-hidden');
       if (resizer) resizer.classList.add('is-hidden');
@@ -672,10 +700,15 @@
     });
   }
 
-  function scheduleQuotePreview() {
+  function scheduleQuotePreview(opts) {
     if (!isPreviewOpen()) return;
     clearTimeout(previewTimer);
-    previewTimer = setTimeout(refreshQuotePreview, 350);
+    var immediate = opts && opts.immediate;
+    if (immediate) {
+      refreshQuotePreview();
+      return;
+    }
+    previewTimer = setTimeout(refreshQuotePreview, 280);
   }
 
   function refreshQuotePreview() {
@@ -715,6 +748,20 @@
       });
   }
 
+  function bindQuotePreviewAutoRefresh(form) {
+    if (!form || form.dataset.quotePreviewAuto === '1') return;
+    form.dataset.quotePreviewAuto = '1';
+    form.addEventListener('change', function () {
+      scheduleQuotePreview({ immediate: true });
+    });
+    form.addEventListener('input', function (e) {
+      var t = e.target;
+      if (!t) return;
+      if (t.classList && t.classList.contains('quote-product-search')) return;
+      scheduleQuotePreview();
+    });
+  }
+
   function initQuotePreviewPanel() {
     var btn = document.getElementById('btn-toggle-quote-preview');
     initQuotePreviewResize();
@@ -722,16 +769,13 @@
     setPreviewOpen(openByDefault);
     if (btn) {
       btn.addEventListener('click', function () {
-        setPreviewOpen(!isPreviewOpen());
+        var willOpen = !isPreviewOpen();
+        setPreviewOpen(willOpen);
+        if (willOpen) scheduleQuotePreview({ immediate: true });
       });
     }
     var form = document.getElementById('create-quote-form');
-    if (form) {
-      form.querySelectorAll('.quote-preview-input, #quote-customer-select').forEach(function (el) {
-        el.addEventListener('input', scheduleQuotePreview);
-        el.addEventListener('change', scheduleQuotePreview);
-      });
-    }
+    bindQuotePreviewAutoRefresh(form);
   }
 
   function applyPriceListToAllRows(form) {
@@ -742,8 +786,7 @@
       if (!productId) return;
       var product = findProduct(productId);
       if (!product) return;
-      var price = getProductPrice(product, getPriceListType(form));
-      row.querySelector('input[name="price"]').value = formatMoneyInputValue(String(price));
+      applyRowPriceFromUnit(row, product);
       updateRowAmount(row);
     });
     recalcQuoteTotals(form);
@@ -858,6 +901,37 @@
     return row;
   }
 
+  function isWalkinCustomerSelected() {
+    var select = document.getElementById('quote-customer-select');
+    if (!select) return true;
+    var walkinId = select.getAttribute('data-walkin-id') || '';
+    var val = select.value || '';
+    return !val || val === walkinId;
+  }
+
+  function syncQuoteWalkinNameField() {
+    var wrap = document.getElementById('quote-walkin-name-wrap');
+    var input = document.getElementById('quote-walkin-name-input');
+    if (!wrap) return;
+    var show = isWalkinCustomerSelected();
+    wrap.classList.toggle('d-none', !show);
+    if (!show && input) input.value = '';
+  }
+
+  function initQuoteWalkinCustomerField() {
+    var select = document.getElementById('quote-customer-select');
+    if (!select) return;
+    select.addEventListener('change', function () {
+      syncQuoteWalkinNameField();
+      scheduleQuotePreview({ immediate: true });
+    });
+    var nameInput = document.getElementById('quote-walkin-name-input');
+    if (nameInput) {
+      nameInput.addEventListener('input', scheduleQuotePreview);
+    }
+    syncQuoteWalkinNameField();
+  }
+
   function resetCreateQuoteForm(form) {
     if (!form) form = document.getElementById('create-quote-form');
     var tbody = getFormTbody(form);
@@ -875,6 +949,9 @@
     if (noteCollapse && window.bootstrap) {
       bootstrap.Collapse.getOrCreateInstance(noteCollapse, { toggle: false }).hide();
     }
+    var walkinName = document.getElementById('quote-walkin-name-input');
+    if (walkinName) walkinName.value = '';
+    syncQuoteWalkinNameField();
   }
 
   function normalizeRowsBeforeSubmit(form) {
@@ -986,6 +1063,8 @@
     });
 
     var createModal = document.getElementById('createQuoteModal');
+    initQuoteWalkinCustomerField();
+
     if (createModal) {
       initQuotePreviewPanel();
       createModal.addEventListener('shown.bs.modal', function () {
@@ -996,7 +1075,7 @@
           window.initMoneyInputs(createModal);
         }
         refreshQuoteCustomerOptions(getPickCustomerId()).finally(function () {
-          if (isPreviewOpen()) scheduleQuotePreview();
+          if (isPreviewOpen()) scheduleQuotePreview({ immediate: true });
         });
       });
       createModal.addEventListener('hidden.bs.modal', function () {

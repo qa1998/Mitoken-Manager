@@ -1,12 +1,12 @@
-<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+<div class="modal fade taxonomy-manage-modal" id="categoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title fw-bold">Danh mục &amp; thương hiệu</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
-        <ul class="nav nav-tabs taxonomy-manage-tabs mb-3" role="tablist">
+      <div class="modal-body taxonomy-manage-modal-body">
+        <ul class="nav nav-tabs taxonomy-manage-tabs mb-3 flex-shrink-0" role="tablist">
           <li class="nav-item" role="presentation">
             <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabCategoryTree" type="button">Danh mục</button>
           </li>
@@ -15,9 +15,9 @@
           </li>
         </ul>
 
-        <div class="tab-content">
-          <div class="tab-pane fade show active" id="tabCategoryTree">
-            <div class="d-flex flex-wrap gap-2 mb-3">
+        <div class="tab-content taxonomy-manage-tab-content">
+          <div class="tab-pane fade show active taxonomy-manage-pane" id="tabCategoryTree">
+            <div class="d-flex flex-wrap gap-2 mb-3 taxonomy-manage-pane-toolbar">
               <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#importCategoryModal">
                 <i class="bi bi-upload me-1"></i> Import Excel
               </button>
@@ -25,7 +25,7 @@
                 <i class="bi bi-download me-1"></i> Export Excel
               </a>
             </div>
-            <div class="row g-3 mb-4">
+            <div class="row g-3 mb-3 taxonomy-manage-pane-forms">
               <div class="col-md-6">
                 <form method="post" action="{{ url_for('create_category') }}">
                   <input type="hidden" name="_keep_modal" value="1">
@@ -54,8 +54,8 @@
               </div>
             </div>
 
-            <label class="form-label-custom">Cây danh mục (kiểu Shopee)</label>
-            <div class="category-tree-manage">
+            <label class="form-label-custom taxonomy-manage-list-label mb-2">Cây danh mục (kiểu Shopee)</label>
+            <div class="category-tree-manage taxonomy-manage-list-scroll app-list-scroll">
               {% for node in category_tree %}
               {% set parent = node.category %}
               <div class="category-tree-parent">
@@ -97,8 +97,8 @@
             </div>
           </div>
 
-          <div class="tab-pane fade" id="tabBrands">
-            <form method="post" action="{{ url_for('create_brand') }}" class="mb-4">
+          <div class="tab-pane fade taxonomy-manage-pane" id="tabBrands">
+            <form method="post" action="{{ url_for('create_brand') }}" class="mb-3 taxonomy-manage-pane-form">
               <input type="hidden" name="_keep_modal" value="1">
               <label class="form-label-custom">Thêm thương hiệu</label>
               <div class="row g-2 align-items-end">
@@ -123,8 +123,8 @@
                 </div>
               </div>
             </form>
-            <label class="form-label-custom">Danh sách thương hiệu</label>
-            <div class="brand-manage-list">
+            <label class="form-label-custom taxonomy-manage-list-label mb-2">Danh sách thương hiệu</label>
+            <div class="brand-manage-list taxonomy-manage-list-scroll app-list-scroll">
               {% for b in brands_list %}
               <div class="category-manage-item">
                 <div class="category-manage-info">

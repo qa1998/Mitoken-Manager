@@ -1,30 +1,4 @@
 (function () {
-  function initProductEditTabs() {
-    var page = document.querySelector('.product-edit-page');
-    if (!page) return;
-    var tabs = page.querySelectorAll('[data-product-edit-tab]');
-    var targets = {
-      info: document.getElementById('productEditSectionInfo'),
-      price: document.getElementById('productEditPrices'),
-      stock: document.getElementById('productEditStock'),
-      suppliers: document.getElementById('productEditSuppliers'),
-      history: document.getElementById('productEditHistory'),
-    };
-    tabs.forEach(function (tab) {
-      tab.addEventListener('click', function (e) {
-        e.preventDefault();
-        var key = tab.getAttribute('data-product-edit-tab');
-        tabs.forEach(function (t) {
-          t.classList.toggle('active', t === tab);
-        });
-        var el = targets[key];
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      });
-    });
-  }
-
   function syncProductEditSidebar() {
     var page = document.querySelector('.product-edit-page');
     if (!page) return;
@@ -58,9 +32,6 @@
           convBox.classList.add('d-none');
         }
       }
-      page.querySelectorAll('.product-supplier-unit-label').forEach(function (el) {
-        el.textContent = convOn && purchase !== base ? purchase : base;
-      });
       var saleInput = page.querySelector('[data-sale-unit-mode-input]');
       var saleLabel = page.querySelector('[data-edit-sale-unit-label]');
       if (saleLabel && saleInput) {
@@ -103,7 +74,6 @@
   document.addEventListener('DOMContentLoaded', function () {
     if (!document.querySelector('.product-edit-page')) return;
     initTaxonomyPickers();
-    initProductEditTabs();
     syncProductEditSidebar();
     if (typeof window.initMoneyInputs === 'function') {
       window.initMoneyInputs(document.querySelector('.product-edit-page'));

@@ -1,4 +1,5 @@
-{% macro product_price_setup(product=none) %}
+{% macro product_price_setup(product=none, cost_reference_only=false) %}
+{% set ref = product_supplier_reference_cost(product) if (product and cost_reference_only) else none %}
 <div class="product-price-setup-card"{% if product %} data-product-price-setup
      data-cost-base="{{ product.cost_price or 0 }}"
      data-conversion-factor="{{ product_conversion_factor(product) }}"
@@ -6,9 +7,25 @@
      data-sale-mode="{{ product_cost_sale_unit_mode(product) }}"{% endif %}>
   <div class="product-price-setup-head">
     <h6 class="product-price-setup-title"><i class="bi bi-tags me-2"></i>Thiết lập giá bán</h6>
+    {% if not cost_reference_only %}
     <p class="product-price-setup-sub mb-0">Thiết lập theo thứ tự từ giá nhập đến giá bán lẻ</p>
+    {% endif %}
   </div>
+  {% if cost_reference_only and ref %}
+  <div class="product-price-reference mb-3">
+    <div class="product-price-reference-label">Giá nhập (tham chiếu từ NCC)</div>
+    <div class="product-price-reference-value">{{ ref.amount|money }}
+      {% if product and product_has_unit_conversion(product) %}
+      <span class="text-muted fw-normal">/ {{ product_cost_unit_label(product) }}</span>
+      {% endif %}
+    </div>
+    <div class="product-price-reference-hint small-muted">
+      Từ {{ ref.count }} nhà cung cấp{% if ref.supplier_name %} — thấp nhất: {{ ref.supplier_name }}{% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="row g-3 product-price-setup-grid">
+    {% if not cost_reference_only %}
     <div class="col-md-6 col-xl-3">
       <label class="form-label-custom">
         Giá nhập
@@ -39,7 +56,8 @@
         {% endif %}
       </div>
     </div>
-    <div class="col-md-6 col-xl-3">
+    {% endif %}
+    <div class="col-md-6{% if cost_reference_only %} col-12{% else %} col-xl-3{% endif %}">
       <label class="form-label-custom">Giá công trình</label>
       <div class="money-input-wrap">
         <input type="text"
@@ -51,9 +69,11 @@
                placeholder="0">
         <span class="money-input-suffix">đ</span>
       </div>
+      {% if not cost_reference_only %}
       <div class="product-price-field-hint">Áp dụng cho đơn dự án / số lượng lớn</div>
+      {% endif %}
     </div>
-    <div class="col-md-6 col-xl-3">
+    <div class="col-md-6{% if cost_reference_only %} col-12{% else %} col-xl-3{% endif %}">
       <label class="form-label-custom">Giá sỉ</label>
       <div class="money-input-wrap">
         <input type="text"
@@ -65,9 +85,11 @@
                placeholder="0">
         <span class="money-input-suffix">đ</span>
       </div>
+      {% if not cost_reference_only %}
       <div class="product-price-field-hint">Áp dụng cho đại lý hoặc khách quen</div>
+      {% endif %}
     </div>
-    <div class="col-md-6 col-xl-3">
+    <div class="col-md-6{% if cost_reference_only %} col-12{% else %} col-xl-3{% endif %}">
       <label class="form-label-custom">Giá lẻ</label>
       <div class="money-input-wrap">
         <input type="text"
@@ -79,7 +101,9 @@
                placeholder="0">
         <span class="money-input-suffix">đ</span>
       </div>
+      {% if not cost_reference_only %}
       <div class="product-price-field-hint">Giá bán thông thường</div>
+      {% endif %}
     </div>
   </div>
 </div>

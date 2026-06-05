@@ -1,0 +1,49 @@
+<div class="modal fade supplier-payment-modal" id="supplierPaymentModal{{ supplier.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="#" enctype="multipart/form-data" class="supplier-payment-form" data-supplier-id="{{ supplier.id }}">
+        <input type="hidden" name="_from_detail" value="1">
+        <div class="modal-header">
+          <h5 class="modal-title">Ghi nhận thanh toán NCC</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted mb-3">
+            Phiếu: <strong class="supplier-payment-intake-label">—</strong>
+            · Còn nợ: <strong class="text-danger supplier-payment-balance-label">—</strong>
+          </p>
+          <div class="mb-3">
+            <label class="form-label-custom">Số tiền thanh toán <span class="text-danger">*</span></label>
+            <input type="number" name="amount" class="form-control supplier-payment-amount" min="1" required placeholder="0">
+            <div class="form-text">Có thể thanh toán từng phần — không vượt quá số còn nợ.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Ngày thanh toán</label>
+            <input type="date" name="payment_date" class="form-control" value="{{ today_iso }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Phương thức</label>
+            <select name="method" class="form-select">
+              <option>Chuyển khoản</option>
+              <option>Tiền mặt</option>
+              <option>Thẻ</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label-custom">Ghi chú</label>
+            <input type="text" name="note" class="form-control" placeholder="Tùy chọn">
+          </div>
+          <div class="mb-0">
+            <label class="form-label-custom">Ảnh bill / chứng từ thanh toán <span class="text-danger">*</span></label>
+            <input type="file" name="payment_receipt" class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required capture="environment">
+            <div class="form-text">Bắt buộc chụp hoặc upload bill — JPG, PNG, WEBP, tối đa 10MB.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Xác nhận thanh toán</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

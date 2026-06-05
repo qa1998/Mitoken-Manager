@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from 'partials/customer_form_fields.html' import customer_form_fields %}
 {% from 'partials/customer_hub_modal.html' import customer_hub_modal %}
+{% from 'partials/list_pagination.html' import list_pagination_footer %}
 {% macro sort_th(label, field) %}
 <th>
   <a href="{{ sort_url(field) }}" class="th-sort {% if sort == field %}active {{ order }}{% endif %}">
@@ -136,50 +137,7 @@
       </table>
     </div>
 
-    <div class="table-footer">
-      {% if pagination.total > 0 %}
-      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
-      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
-      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} kết quả</span>
-      {% else %}
-      <span>Chưa có dữ liệu</span>
-      {% endif %}
-      <div class="table-footer-right">
-        {% if pagination.pages > 1 %}
-        <nav>
-          <ul class="pagination pagination-custom mb-0">
-            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('customers', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
-            </li>
-            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-            {% if p %}
-            <li class="page-item {% if p == pagination.page %}active{% endif %}">
-              <a class="page-link" href="{{ url_for('customers', page=p, **list_args) }}">{{ p }}</a>
-            </li>
-            {% else %}
-            <li class="page-item disabled"><span class="page-link">…</span></li>
-            {% endif %}
-            {% endfor %}
-            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('customers', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
-            </li>
-          </ul>
-        </nav>
-        {% endif %}
-        <form method="get" class="per-page-select per-page-footer">
-          <input type="hidden" name="q" value="{{ q }}">
-          <input type="hidden" name="sort" value="{{ sort }}">
-          <input type="hidden" name="order" value="{{ order }}">
-          <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-            <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
-            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-            <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
-          </select>
-          <span>/ trang</span>
-        </form>
-      </div>
-    </div>
+    {{ list_pagination_footer('customers', pagination, unit='khách hàng', list_args=list_args, per_page=per_page) }}
   </div>
 </div>
 

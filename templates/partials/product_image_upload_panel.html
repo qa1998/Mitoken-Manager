@@ -1,11 +1,32 @@
 {% macro product_image_upload_panel(product=none, editable=false) %}
-{% set imgs = product_image_urls(product) if product else [] %}
 {% set paths = product_image_paths(product) if product else [] %}
+{% set external_url = product_external_image_url(product) if product else '' %}
 {% set existing_count = paths|length %}
 {% set slots_left = max_product_images - existing_count %}
-{% set show_actions = editable and imgs|length > 0 %}
+{% set show_actions = editable and paths|length > 0 %}
 <div class="product-images-panel" data-max-images="{{ max_product_images }}" data-existing-count="{{ existing_count }}">
-  <label class="form-label-custom mb-1">Ảnh sản phẩm</label>
+  <label class="form-label-custom mb-2">Hình ảnh sản phẩm</label>
+  <div class="product-image-url-field mb-3">
+    <label class="form-label-custom" for="productImageUrl{% if product %}{{ product.id }}{% else %}New{% endif %}">URL hình ảnh</label>
+    <div class="input-icon-wrap">
+      <i class="bi bi-link-45deg"></i>
+      <input type="url"
+             name="image_url"
+             id="productImageUrl{% if product %}{{ product.id }}{% else %}New{% endif %}"
+             class="form-control product-image-url-input"
+             value="{{ external_url }}"
+             placeholder="https://example.com/images/san-pham.jpg"
+             inputmode="url"
+             autocomplete="off">
+    </div>
+    <p class="product-image-url-hint small-muted mb-2">
+      Có URL sẽ ưu tiên hiển thị ảnh online; để trống thì dùng ảnh upload bên dưới.
+    </p>
+    <div class="product-image-url-preview{% if not external_url %} d-none{% endif %}" data-image-url-preview>
+      <img src="{{ external_url }}" alt="Xem trước ảnh URL"{% if external_url %} referrerpolicy="no-referrer"{% endif %}>
+    </div>
+  </div>
+  <label class="form-label-custom mb-1">Ảnh upload (máy tính)</label>
   <div class="product-images-counter small-muted mb-2">
     {{ existing_count }}/{{ max_product_images }} ảnh{% if slots_left > 0 %} — còn thêm được {{ slots_left }} ảnh{% else %} — đã đủ tối đa{% endif %}
   </div>
@@ -13,11 +34,11 @@
     <div class="product-images-left-col">
       <div class="product-images-strip">
         <div class="product-images-strip-scroll">
-          {% if editable and imgs %}
-          {% for url in imgs %}
+          {% if editable and paths %}
+          {% for path in paths %}
           <div class="product-image-thumb-wrap{% if loop.first %} is-selected{% endif %}" data-existing="1" data-index="{{ loop.index0 }}">
             <button type="button" class="product-image-thumb" aria-label="Ảnh {{ loop.index }}">
-              <img src="{{ url }}" alt="">
+              <img src="{{ url_for('static', filename=path) }}" alt="">
             </button>
             <input type="checkbox" name="remove_image_idx" value="{{ loop.index0 }}" class="product-image-remove-check visually-hidden" tabindex="-1" aria-label="Đánh dấu xóa ảnh {{ loop.index }}">
           </div>
@@ -26,7 +47,7 @@
           <div class="product-images-new-strip"></div>
           <button type="button" class="product-image-slot-placeholder{% if slots_left <= 0 and existing_count >= max_product_images %} d-none{% endif %}" aria-label="Thêm ảnh">
             <span class="product-image-slot-placeholder-inner">
-              <span class="product-image-slot-placeholder-plus">+</span><span class="product-image-slot-placeholder-num">{{ slots_left if (editable and imgs) else max_product_images }}</span>
+              <span class="product-image-slot-placeholder-plus">+</span><span class="product-image-slot-placeholder-num">{{ slots_left if (editable and paths) else max_product_images }}</span>
             </span>
           </button>
         </div>

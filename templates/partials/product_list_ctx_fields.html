@@ -1,0 +1,10 @@
+{% macro product_list_ctx_hidden_fields(filters, page=1, per_page=10) %}
+<input type="hidden" name="_q" value="{{ filters.q|default('') }}">
+<input type="hidden" name="_page" value="{{ page|default(1) }}">
+<input type="hidden" name="_per_page" value="{{ per_page|default(10) }}">
+{% if filters.category_parent_id %}<input type="hidden" name="_category_parent_id" value="{{ filters.category_parent_id }}">{% endif %}
+{% if filters.category_id %}<input type="hidden" name="_category_id" value="{{ filters.category_id }}">{% endif %}
+{% if filters.brand_id %}<input type="hidden" name="_brand_id" value="{{ filters.brand_id }}">{% endif %}
+{% if filters.status %}<input type="hidden" name="_status" value="{{ filters.status }}">{% endif %}
+{% if filters.sort and filters.sort != 'newest' %}<input type="hidden" name="_sort" value="{{ filters.sort }}">{% endif %}
+{% endmacro %}

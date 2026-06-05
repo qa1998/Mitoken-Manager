@@ -1,0 +1,13 @@
+{% macro supplier_pay_badge(intake) %}
+{% set key = supplier_intake_payment_status_key(intake) %}
+{% set label = supplier_intake_payment_status(intake) %}
+{% if key == 'paid' %}
+<span class="supplier-pay-badge paid">{{ label }}</span>
+{% elif key == 'partial' %}
+<span class="supplier-pay-badge partial">{{ label }}</span>
+{% elif key == 'unpaid' %}
+<span class="supplier-pay-badge unpaid">{{ label }}</span>
+{% else %}
+<span class="text-muted">{{ label }}</span>
+{% endif %}
+{% endmacro %}

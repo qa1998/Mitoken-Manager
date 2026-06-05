@@ -3,7 +3,7 @@
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
 {% from 'partials/product_unit_setup.html' import product_unit_setup %}
-{% from 'partials/product_suppliers_panel.html' import product_suppliers_panel %}
+{% from 'partials/product_suppliers_summary.html' import product_suppliers_summary %}
 {% block title %}Chỉnh sửa — {{ p.name }}{% endblock %}
 {% block content %}
 
@@ -20,30 +20,22 @@
 
     <header class="product-edit-header">
       <div class="product-edit-header-left">
-        <a href="{{ url_for('product_detail', pid=p.id) }}" class="btn btn-light btn-product-edit-back" title="Quay lại">
+        <a href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}" class="btn btn-light btn-product-edit-back" title="Quay lại">
           <i class="bi bi-arrow-left"></i>
           <span class="d-none d-sm-inline ms-1">Quay lại</span>
         </a>
         <h1 class="product-edit-title">Chỉnh sửa sản phẩm</h1>
       </div>
       <div class="product-edit-header-actions">
-        <a href="{{ url_for('product_detail', pid=p.id) }}" class="btn btn-light">Hủy</a>
+        <a href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}" class="btn btn-light">Hủy</a>
         <button type="submit" class="btn btn-primary">
           <i class="bi bi-floppy me-1"></i>Lưu thay đổi
         </button>
       </div>
     </header>
 
-    <nav class="product-edit-tabs" aria-label="Phần chỉnh sửa">
-      <button type="button" class="product-edit-tab active" data-product-edit-tab="info">Thông tin</button>
-      <button type="button" class="product-edit-tab" data-product-edit-tab="price">Giá bán</button>
-      <button type="button" class="product-edit-tab" data-product-edit-tab="stock">Kho hàng</button>
-      <button type="button" class="product-edit-tab" data-product-edit-tab="suppliers">Nhà cung cấp</button>
-      <button type="button" class="product-edit-tab" data-product-edit-tab="history">Lịch sử</button>
-    </nav>
-
     <div class="product-edit-body">
-      <div class="row g-4 product-edit-main-row" id="productEditSectionInfo">
+      <div class="row g-4 product-edit-main-row">
         <div class="col-lg-8">
           <section class="product-edit-card">
             <h3 class="product-edit-card-title">Thông tin sản phẩm</h3>
@@ -166,10 +158,10 @@
           </section>
 
           <section class="product-edit-card" id="productEditPrices">
-            {{ product_price_setup(p) }}
+            {{ product_price_setup(p, cost_reference_only=true) }}
           </section>
 
-          {{ product_suppliers_panel(p, supplier_links, all_suppliers) }}
+          {{ product_suppliers_summary(p, supplier_links) }}
         </div>
       </div>
 

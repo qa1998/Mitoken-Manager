@@ -117,6 +117,7 @@ class Product(db.Model):
     low_stock = db.Column(db.Float, default=5)
     image_path = db.Column(db.String(255), default='')
     image_paths = db.Column(db.Text, default='')
+    image_url = db.Column(db.String(512), default='')
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -149,6 +150,7 @@ class Quote(db.Model):
     vat_amount = db.Column(db.Integer, default=0)
     total = db.Column(db.Integer, default=0)
     note = db.Column(db.Text, default='')
+    walkin_display_name = db.Column(db.String(255), default='')
     valid_until = db.Column(db.Date, nullable=True)
     sale_contract_path = db.Column(db.String(512), default='')
     handover_doc_path = db.Column(db.String(512), default='')
@@ -542,7 +544,6 @@ WAREHOUSE_ENDPOINTS = frozenset({
     'supplier_catalog_add',
     'supplier_catalog_new',
     'supplier_catalog_remove',
-    'supplier_catalog_set_primary',
     'supplier_quick_create_product',
     'supplier_intake_import_template',
     'supplier_intake_import_preview',
@@ -998,6 +999,8 @@ def ensure_product_columns():
             conn.execute(text('ALTER TABLE product ADD COLUMN image_path VARCHAR(255) DEFAULT ""'))
         if 'image_paths' not in cols:
             conn.execute(text('ALTER TABLE product ADD COLUMN image_paths TEXT DEFAULT ""'))
+        if 'image_url' not in cols:
+            conn.execute(text('ALTER TABLE product ADD COLUMN image_url VARCHAR(512) DEFAULT ""'))
         if 'is_active' not in cols:
             conn.execute(text('ALTER TABLE product ADD COLUMN is_active BOOLEAN DEFAULT 1'))
         if 'base_unit' not in cols:
@@ -1437,7 +1440,21 @@ def product_image_paths(product):
         paths = [product.image_path]
     return paths[:MAX_PRODUCT_IMAGES]
 
+def is_external_image_url(url):
+    u = (url or '').strip()
+    return u.startswith('http://') or u.startswith('https://')
+
+def product_external_image_url(product):
+    if not product:
+        return ''
+    return (getattr(product, 'image_url', None) or '').strip() if is_external_image_url(
+        getattr(product, 'image_url', None) or ''
+    ) else ''
+
 def product_image_urls(product):
+    ext = product_external_image_url(product)
+    if ext:
+        return [ext]
     return [url_for('static', filename=path) for path in product_image_paths(product)]
 
 def sync_product_images(product, paths):
@@ -1446,6 +1463,9 @@ def sync_product_images(product, paths):
     product.image_path = clean[0] if clean else ''
 
 def product_image_url(product):
+    ext = product_external_image_url(product)
+    if ext:
+        return ext
     paths = product_image_paths(product)
     if paths:
         return url_for('static', filename=paths[0])
@@ -1493,8 +1513,10 @@ def quote_product_catalog(products):
 
 app.jinja_env.globals['product_image_url'] = product_image_url
 app.jinja_env.globals['product_image_urls'] = product_image_urls
+app.jinja_env.globals['product_external_image_url'] = product_external_image_url
 app.jinja_env.globals['product_image_paths'] = product_image_paths
 app.jinja_env.globals['max_product_images'] = MAX_PRODUCT_IMAGES
+app.jinja_env.globals['child_categories'] = child_categories
 
 def delete_product_image_file(image_path):
     if not image_path:
@@ -1854,6 +1876,8 @@ def ensure_quote_columns():
             conn.execute(text("ALTER TABLE quote ADD COLUMN handover_place TEXT DEFAULT ''"))
         if 'handover_condition_note' not in cols:
             conn.execute(text("ALTER TABLE quote ADD COLUMN handover_condition_note TEXT DEFAULT ''"))
+        if 'walkin_display_name' not in cols:
+            conn.execute(text("ALTER TABLE quote ADD COLUMN walkin_display_name VARCHAR(255) DEFAULT ''"))
 
 def quote_status_key(status):
     return QUOTE_STATUS_KEYS.get(status or '', 'new')
@@ -2426,6 +2450,32 @@ class SimplePagination:
                 yield num
                 last = num
 
+
+def pagination_neighbor_pages(pagination):
+    """Chỉ trang trước, trang hiện tại và trang sau — không dùng ellipsis."""
+    if not pagination:
+        return []
+    page = getattr(pagination, 'page', None)
+    if page is None:
+        return []
+    nums = []
+    if getattr(pagination, 'has_prev', False):
+        nums.append(pagination.prev_num)
+    nums.append(page)
+    if getattr(pagination, 'has_next', False):
+        nums.append(pagination.next_num)
+    return nums
+
+
+def pagination_page_url(endpoint, page_num, list_args=None, page_param='page'):
+    args = {k: v for k, v in (list_args or {}).items() if v and k != page_param}
+    args[page_param] = page_num
+    return url_for(endpoint, **args)
+
+
+app.jinja_env.globals['pagination_neighbor_pages'] = pagination_neighbor_pages
+app.jinja_env.globals['pagination_page_url'] = pagination_page_url
+
 def debt_redirect(**extra):
     args = {k: v for k, v in request.args.items() if v}
     args.update({k: v for k, v in extra.items() if v is not None and v != ''})
@@ -2583,10 +2633,18 @@ def apply_quote_line_items(quote, line_items):
     quote.subtotal = subtotal
 
 def build_quote_preview_from_form():
-    customer_id = request.form.get('customer_id', type=int)
+    customer_id = resolve_quote_customer_id(request.form.get('customer_id'))
     customer = Customer.query.get(customer_id) if customer_id else None
     if not customer:
         customer = SimpleNamespace(name=WALKIN_CUSTOMER_NAME, phone='', address='')
+    if is_walkin_customer(customer):
+        walkin_name = quote_walkin_display_name_from_form()
+        if walkin_name:
+            customer = SimpleNamespace(
+                name=walkin_name,
+                phone=getattr(customer, 'phone', '') or '',
+                address=getattr(customer, 'address', '') or '',
+            )
 
     vat_rate = parse_int(request.form.get('vat_rate'), 0)
     discount = parse_int(request.form.get('discount'), 0)
@@ -2669,6 +2727,7 @@ def create_quote_from_form():
         raise ValueError(f'Sản phẩm đã ngừng bán không thể thêm vào báo giá: {names}{extra}')
     if not line_items:
         raise ValueError('Vui lòng thêm ít nhất một sản phẩm đang bán vào báo giá')
+    walkin = Customer.query.get(customer_id)
     quote = Quote(
         quote_code=next_code('BG', Quote, 'quote_code'),
         customer_id=customer_id,
@@ -2677,6 +2736,7 @@ def create_quote_from_form():
         discount=discount,
         note=request.form.get('note', ''),
         valid_until=valid_until,
+        walkin_display_name=quote_walkin_display_name_from_form() if is_walkin_customer(walkin) else '',
     )
     db.session.add(quote)
     db.session.flush()
@@ -2830,6 +2890,51 @@ def product_primary_supplier_link(product):
         if link.is_primary:
             return link
     return links[0]
+
+def product_supplier_reference_cost(product):
+    """Giá nhập tham chiếu từ NCC (giá thấp nhất trên các link). None nếu chưa có NCC."""
+    links = product_supplier_links(product)
+    if not links:
+        return None
+    cheapest = min(links, key=lambda link: (link.cost_price or 0, link.supplier_id))
+    return {
+        'amount': cheapest.cost_price or 0,
+        'supplier_name': cheapest.supplier.name if cheapest.supplier else '',
+        'count': len(links),
+    }
+
+def sync_product_cost_from_supplier_purchase_price(product, purchase_cost):
+    """Lưu Product.cost_price theo đơn vị tồn từ giá nhập / đơn vị nhập của NCC."""
+    purchase_cost = int(purchase_cost or 0)
+    if purchase_cost <= 0:
+        return
+    product.cost_price = base_unit_cost_from_purchase_cost(product, purchase_cost)
+
+def product_import_cost_display(product):
+    """Giá nhập hiển thị: ưu tiên giá NCC (đơn vị nhập); không có NCC thì từ cost_price SP."""
+    ref = product_supplier_reference_cost(product)
+    if ref and ref['amount']:
+        unit = product_purchase_unit(product) if product_has_unit_conversion(product) else product_base_unit(product)
+        base_hint = None
+        if product_has_unit_conversion(product):
+            base_hint = base_unit_cost_from_purchase_cost(product, ref['amount'])
+        return {
+            'amount': ref['amount'],
+            'unit': unit,
+            'source': 'supplier',
+            'supplier_name': ref.get('supplier_name') or '',
+            'base_hint': base_hint,
+        }
+    return {
+        'amount': product_cost_display_amount(product),
+        'unit': product_cost_unit_label(product),
+        'source': 'product',
+        'supplier_name': '',
+        'base_hint': int(product.cost_price or 0) if product_has_unit_conversion(product) else None,
+    }
+
+app.jinja_env.globals['product_supplier_reference_cost'] = product_supplier_reference_cost
+app.jinja_env.globals['product_import_cost_display'] = product_import_cost_display
 
 def product_supplier_summary(links):
     if not links:
@@ -3381,6 +3486,7 @@ def product_options_item(p):
         'id': p.id,
         'sku': p.sku,
         'name': p.name,
+        'image_url': product_image_url(p) or '',
         'stock': p.stock or 0,
         'cost_price': p.cost_price or 0,
         'purchase_cost_price': purchase_unit_cost_from_base_cost(p, p.cost_price or 0),
@@ -3530,19 +3636,44 @@ def validate_supplier_form():
             return False, f'Mã NCC "{code}" đã tồn tại'
     return True, ''
 
+def _supplier_redirect_list_params():
+    src = request.form if request.method == 'POST' else request.args
+    return {
+        'q': src.get('_q', ''),
+        'page': src.get('_page', 1, type=int) or 1,
+        'per_page': src.get('_per_page', 10, type=int) or 10,
+        'sort': src.get('_sort', 'created_at'),
+        'order': src.get('_order', 'desc'),
+    }
+
+def _supplier_redirect_from_detail():
+    src = request.form if request.method == 'POST' else request.args
+    return src.get('_from_detail') == '1' or request.args.get('_from_detail') == '1'
+
 def suppliers_redirect_after_save(message=None, category='success', **extra):
     if message:
         flash(message, category)
-    src = request.form if request.method == 'POST' else request.args
-    return redirect(url_for(
-        'suppliers',
-        q=src.get('_q', ''),
-        page=src.get('_page', 1, type=int) or 1,
-        per_page=src.get('_per_page', 10, type=int) or 10,
-        sort=src.get('_sort', 'created_at'),
-        order=src.get('_order', 'desc'),
-        **extra,
-    ))
+    open_detail_sid = extra.pop('open_detail_sid', None)
+    if open_detail_sid:
+        tab = extra.pop('detail_tab', None)
+        kwargs = {'tab': tab} if tab else {}
+        return redirect(url_for('supplier_detail', sid=open_detail_sid, **kwargs))
+    open_intake_sid = extra.pop('open_intake_sid', None)
+    if open_intake_sid:
+        kwargs = {'intake': '1'}
+        if extra.pop('open_quick_product', None):
+            kwargs['quick_product'] = '1'
+        if extra.pop('intake_import_preview', None) == '1':
+            kwargs['intake_import_preview'] = '1'
+        return redirect(url_for('supplier_detail', sid=open_intake_sid, **kwargs))
+    if _supplier_redirect_from_detail():
+        sid = parse_int((request.view_args or {}).get('sid'), 0)
+        if sid:
+            tab = (request.form.get('tab') or request.args.get('tab') or '').strip()
+            kwargs = {'tab': tab} if tab else {}
+            return redirect(url_for('supplier_detail', sid=sid, **kwargs))
+    list_params = _supplier_redirect_list_params()
+    return redirect(url_for('suppliers', **list_params, **extra))
 
 def supplier_stats():
     total = Supplier.query.count()
@@ -3860,12 +3991,21 @@ def product_stats():
     return {
         'total': q.count(),
         'selling': q.filter(Product.is_active.is_(True), Product.stock_qty > 0).count(),
-        'low_stock': q.filter(
-            Product.stock_qty > 0,
-            Product.stock_qty <= func.coalesce(Product.low_stock, 5),
-        ).count(),
         'out_stock': q.filter(Product.stock_qty <= 0).count(),
+        'stopped': q.filter(or_(Product.is_active.is_(False), Product.is_active == 0)).count(),
     }
+
+def top_product_category_tabs(limit=7):
+    """Danh mục cha có nhiều SP nhất — dùng tab nhanh trên danh sách."""
+    tabs = []
+    for parent in parent_categories():
+        child_ids = [c.id for c in Category.query.filter_by(parent_id=parent.id)]
+        ids = [parent.id] + child_ids
+        count = Product.query.filter(Product.category_id.in_(ids)).count() if ids else 0
+        if count > 0:
+            tabs.append({'id': parent.id, 'name': parent.name, 'count': count})
+    tabs.sort(key=lambda row: (-row['count'], row['name']))
+    return tabs[:limit]
 
 def stock_filters_from_request():
     return {
@@ -5187,25 +5327,207 @@ def switch_company():
     back = request.form.get('_back') or request.referrer or url_for('dashboard')
     return redirect(back)
 
-@app.route('/')
-def dashboard():
-    stats = {
+def dashboard_day_bounds():
+    today = date.today()
+    start = datetime.combine(today, datetime.min.time())
+    end = datetime.combine(today, datetime.max.time())
+    return start, end, today
+
+def dashboard_nav_allowed(user, nav_key):
+    if not user:
+        return False
+    if user.role == 'admin':
+        return True
+    return nav_key in ROLE_NAV_KEYS.get(user.role, set())
+
+def total_supplier_payable():
+    ensure_supplier_intake_schema()
+    row = db.session.query(
+        func.coalesce(func.sum(SupplierIntake.total_amount), 0),
+        func.coalesce(func.sum(SupplierIntake.paid_amount), 0),
+    ).first()
+    if not row:
+        return 0
+    return max(0, int(row[0] or 0) - int(row[1] or 0))
+
+def open_quotes_count():
+    return Quote.query.filter(Quote.status.in_(['Mới tạo', 'Nháp'])).count()
+
+def dashboard_debt_alert_rows(limit=6):
+    rows = []
+    for cid, agg in customer_debt_aggregates().items():
+        remaining = agg.get('remaining', 0)
+        if remaining <= 0:
+            continue
+        customer = db.session.get(Customer, cid)
+        if not customer:
+            continue
+        status = customer_debt_status_from_agg(agg)
+        rows.append({
+            'customer': customer,
+            'remaining': remaining,
+            'unpaid_count': agg.get('unpaid_count', 0),
+            'status': status,
+            'status_key': customer_debt_status_key(status),
+        })
+    rows.sort(key=lambda r: (-1 if r['status'] == 'Quá hạn' else 0, -r['remaining']))
+    return rows[:limit]
+
+def dashboard_low_stock_products(limit=8):
+    return (
+        Product.query.filter(
+            Product.is_active.is_(True),
+            Product.stock_qty <= func.coalesce(Product.low_stock, 5),
+        )
+        .order_by(Product.stock_qty.asc(), Product.name.asc())
+        .limit(limit)
+        .all()
+    )
+
+def build_dashboard_context(user):
+    ensure_payment_columns()
+    ensure_supplier_intake_schema()
+    start, end, today = dashboard_day_bounds()
+    can = lambda key: dashboard_nav_allowed(user, key)
+
+    orders_today = Order.query.filter(
+        Order.created_at >= start,
+        Order.created_at <= end,
+    ).all()
+    payments_today = Payment.query.filter(Payment.payment_date == today).all()
+    supplier_paid_today = SupplierPayment.query.filter(
+        SupplierPayment.payment_date == today,
+    ).all()
+
+    today_block = {
+        'orders_count': len(orders_today),
+        'orders_total': sum(o.total or 0 for o in orders_today),
+        'collected': sum(p.amount or 0 for p in payments_today),
+        'payment_count': len(payments_today),
+        'quotes_count': Quote.query.filter(
+            Quote.created_at >= start,
+            Quote.created_at <= end,
+        ).count(),
+        'supplier_paid': sum(p.amount or 0 for p in supplier_paid_today),
+        'supplier_payment_count': len(supplier_paid_today),
+    }
+
+    stk = stock_stats()
+    overview = {
         'customers': Customer.query.count(),
         'products': Product.query.count(),
         'quotes': Quote.query.count(),
+        'quotes_open': open_quotes_count(),
         'orders': Order.query.count(),
         'debt': total_outstanding_debt(),
-        'low_stock': Product.query.filter(Product.stock_qty <= Product.low_stock).count(),
+        'supplier_debt': total_supplier_payable(),
+        'low_stock': stk['low_stock'],
+        'out_stock': stk['out_stock'],
+        'pending_intake': pending_supplier_intake_count(),
+        'suppliers': Supplier.query.filter_by(is_active=True).count(),
     }
-    latest_quotes = Quote.query.order_by(Quote.created_at.desc()).limit(5).all()
-    latest_orders = Order.query.order_by(Order.created_at.desc()).limit(5).all()
+
+    quick_actions = []
+    action_defs = [
+        ('quotes', 'quotes', 'Báo giá', 'bi-file-earmark-text'),
+        ('orders', 'orders', 'Đơn hàng', 'bi-cart3'),
+        ('customers', 'customers', 'Khách hàng', 'bi-people'),
+        ('debt', 'debt', 'Công nợ KH', 'bi-wallet2'),
+        ('products', 'products', 'Sản phẩm', 'bi-box-seam'),
+        ('stock', 'stock', 'Tồn kho', 'bi-boxes'),
+        ('suppliers', 'suppliers', 'Nhà cung cấp', 'bi-truck'),
+        ('stock_intake_requests', 'stock_intake_requests', 'Yêu cầu nhập kho', 'bi-inbox'),
+        ('contracts', 'contracts', 'Hợp đồng', 'bi-file-earmark-ruled'),
+    ]
+    for key, endpoint, label, icon in action_defs:
+        if can(key):
+            quick_actions.append({
+                'key': key,
+                'href': url_for(endpoint),
+                'label': label,
+                'icon': icon,
+            })
+
+    kpi_links = []
+    if can('customers'):
+        kpi_links.append({'key': 'customers', 'href': url_for('customers'), 'label': 'Khách hàng', 'value': overview['customers'], 'money': False})
+    if can('products'):
+        kpi_links.append({'key': 'products', 'href': url_for('products'), 'label': 'Sản phẩm', 'value': overview['products'], 'money': False})
+    if can('quotes'):
+        kpi_links.append({'key': 'quotes', 'href': url_for('quotes'), 'label': 'Báo giá mở', 'value': overview['quotes_open'], 'money': False, 'hint': f'{overview["quotes"]} tổng'})
+    if can('orders'):
+        kpi_links.append({'key': 'orders', 'href': url_for('orders'), 'label': 'Đơn hàng', 'value': overview['orders'], 'money': False})
+    if can('debt'):
+        kpi_links.append({'key': 'debt', 'href': url_for('debt'), 'label': 'Nợ phải thu', 'value': overview['debt'], 'money': True})
+    if can('supplier_debt') or can('suppliers'):
+        kpi_links.append({
+            'key': 'supplier_debt',
+            'href': url_for('suppliers'),
+            'label': 'Nợ phải trả NCC',
+            'value': overview['supplier_debt'],
+            'money': True,
+        })
+    if can('stock'):
+        kpi_links.append({'key': 'stock', 'href': url_for('stock', tab='inventory', status='low'), 'label': 'Tồn thấp', 'value': overview['low_stock'], 'money': False, 'hint': f'{overview["out_stock"]} hết'})
+    if can('stock_intake_requests'):
+        kpi_links.append({
+            'key': 'stock_intake_requests',
+            'href': url_for('stock_intake_requests'),
+            'label': 'Chờ nhập kho',
+            'value': overview['pending_intake'],
+            'money': False,
+            'warn': overview['pending_intake'] > 0,
+        })
+
+    pending_intakes = []
+    if can('stock_intake_requests'):
+        ensure_supplier_intake_schema()
+        for intake in (
+            SupplierIntake.query.filter_by(status=SUPPLIER_INTAKE_STATUS_PENDING)
+            .order_by(SupplierIntake.created_at.desc())
+            .limit(8)
+            .all()
+        ):
+            pending_intakes.append({
+                'intake': intake,
+                'supplier': intake.supplier,
+                'balance': supplier_intake_balance(intake),
+            })
+
+    return {
+        'today': today,
+        'today_iso': today.isoformat(),
+        'today_block': today_block,
+        'overview': overview,
+        'kpi_links': kpi_links,
+        'quick_actions': quick_actions,
+        'debt_alerts': dashboard_debt_alert_rows() if can('debt') else [],
+        'low_stock_products': dashboard_low_stock_products() if can('stock') or can('products') else [],
+        'pending_intakes': pending_intakes,
+        'latest_quotes': Quote.query.order_by(Quote.created_at.desc()).limit(5).all() if can('quotes') else [],
+        'latest_orders': Order.query.order_by(Order.created_at.desc()).limit(5).all() if can('orders') else [],
+        'payments_today': sorted(payments_today, key=lambda p: p.id, reverse=True)[:8] if can('debt') else [],
+        'show': {
+            'today_sales': can('orders') or can('quotes') or can('debt'),
+            'today_warehouse': can('stock_intake_requests') or can('suppliers'),
+            'debt_alerts': can('debt'),
+            'low_stock': can('stock') or can('products'),
+            'pending_intake': can('stock_intake_requests'),
+            'latest_quotes': can('quotes'),
+            'latest_orders': can('orders'),
+            'payments_today': can('debt'),
+        },
+    }
+
+@app.route('/')
+def dashboard():
     user = get_current_user()
+    ctx = build_dashboard_context(user)
     return render_template(
         'dashboard.html',
-        stats=stats,
-        latest_quotes=latest_quotes,
-        latest_orders=latest_orders,
+        dash=ctx,
         is_admin=user and user.role == 'admin',
+        user_role=user.role if user else '',
     )
 
 @app.route('/dashboard/clear-data', methods=['POST'])
@@ -5277,13 +5599,21 @@ def is_walkin_customer(customer):
         return True
     return getattr(customer, 'customer_type', '') == WALKIN_CUSTOMER_TYPE
 
+def quote_walkin_display_name_from_form():
+    return (request.form.get('walkin_display_name') or '').strip()
+
 def quote_customer_label(quote_or_customer):
     if hasattr(quote_or_customer, 'customer'):
         customer = quote_or_customer.customer
+        quote = quote_or_customer
     else:
         customer = quote_or_customer
+        quote = None
     if is_walkin_customer(customer):
-        return WALKIN_CUSTOMER_NAME
+        custom = ''
+        if quote is not None:
+            custom = (getattr(quote, 'walkin_display_name', None) or '').strip()
+        return custom or WALKIN_CUSTOMER_NAME
     return customer.name if customer else WALKIN_CUSTOMER_NAME
 
 def customers_for_select():
@@ -5581,6 +5911,21 @@ def suppliers():
     intake_preview_sid = None
     if intake_import_payload and request.args.get('intake_import_preview') == '1':
         intake_preview_sid = intake_import_payload.get('supplier_id')
+    open_detail_sid = request.args.get('open_detail_sid', type=int)
+    if open_detail_sid:
+        tab = request.args.get('detail_tab') or ''
+        kwargs = {'tab': tab} if tab in ('intakes', 'catalog', 'payments') else {}
+        if request.args.get('intake') == '1':
+            kwargs['intake'] = '1'
+        return redirect(url_for('supplier_detail', sid=open_detail_sid, **kwargs))
+    open_intake_sid = request.args.get('open_intake_sid', type=int) or request.args.get('intake_sid', type=int)
+    if open_intake_sid:
+        kwargs = {'intake': '1'}
+        if request.args.get('intake_import_preview') == '1':
+            kwargs['intake_import_preview'] = '1'
+        if request.args.get('open_quick_product') == '1':
+            kwargs['quick_product'] = '1'
+        return redirect(url_for('supplier_detail', sid=open_intake_sid, **kwargs))
     return render_template(
         'suppliers.html',
         pagination=pagination,
@@ -5602,6 +5947,42 @@ def suppliers():
         intake_import_payload=intake_import_payload,
         intake_preview_sid=intake_preview_sid,
         pending_stock_intake_count=pending_supplier_intake_count(),
+    )
+
+@app.route('/suppliers/<int:sid>')
+def supplier_detail(sid):
+    ensure_stock_movement_columns()
+    ensure_supplier_intake_schema()
+    ensure_supplier_intake_line_columns()
+    ensure_product_columns()
+    ensure_product_supplier_schema()
+    supplier = Supplier.query.get_or_404(sid)
+    intake_board = build_supplier_intake_board([sid])
+    intakes = intake_board['intakes'].get(sid, [])
+    intake_line_map = supplier_intake_lines_map([i.id for i in intakes])
+    catalog_links = supplier_products_map([sid]).get(sid, [])
+    tab = (request.args.get('tab') or 'intakes').strip()
+    if tab not in ('intakes', 'catalog', 'payments'):
+        tab = 'intakes'
+    intake_import_payload = get_supplier_intake_import_session()
+    show_intake_preview = (
+        intake_import_payload
+        and intake_import_payload.get('supplier_id') == sid
+        and request.args.get('intake_import_preview') == '1'
+    )
+    list_ctx = {'from_detail': True}
+    return render_template(
+        'supplier_detail.html',
+        supplier=supplier,
+        catalog_links=catalog_links,
+        intake_board=intake_board,
+        intake_line_map=intake_line_map,
+        list_ctx=list_ctx,
+        active_tab=tab,
+        back_url=app_back_url('suppliers'),
+        today_iso=date.today().isoformat(),
+        intake_import_payload=intake_import_payload,
+        show_intake_preview=show_intake_preview,
     )
 
 @app.route('/suppliers/options.json')
@@ -5703,6 +6084,10 @@ def supplier_products_intake(sid):
     )
 
 def _supplier_catalog_redirect(sid, message=None, category='success'):
+    if _supplier_redirect_from_detail():
+        if message:
+            flash(message, category)
+        return redirect(url_for('supplier_detail', sid=sid, tab='catalog'))
     return suppliers_redirect_after_save(message, category, open_detail_sid=sid, detail_tab='catalog')
 
 def _supplier_catalog_list_ctx_from_request():
@@ -5716,6 +6101,8 @@ def _supplier_catalog_list_ctx_from_request():
     }
 
 def _supplier_catalog_cancel_url(sid, list_ctx):
+    if list_ctx.get('from_detail') or request.args.get('_from_detail') == '1':
+        return url_for('supplier_detail', sid=sid, tab='catalog')
     return url_for(
         'suppliers',
         open_detail_sid=sid,
@@ -5736,7 +6123,6 @@ def supplier_catalog_create_product_from_form(supplier):
     name = request.form.get('name', '').strip()
     cost = parse_int(request.form.get('cost_price'), 0)
     supplier_sku = (request.form.get('catalog_supplier_sku') or '').strip()
-    is_primary = request.form.get('catalog_is_primary') == '1'
     if not sku or not name:
         return None, 'Vui lòng nhập SKU và tên sản phẩm.'
     if cost <= 0:
@@ -5749,16 +6135,7 @@ def supplier_catalog_create_product_from_form(supplier):
         apply_product_unit_from_form(existing)
         if ProductSupplier.query.filter_by(product_id=existing.id, supplier_id=supplier.id).first():
             return None, f'SKU {sku} đã có trong danh mục NCC này.'
-        link = upsert_product_supplier_link(existing, supplier, cost, supplier_sku, '')
-        db.session.flush()
-        if is_primary:
-            ProductSupplier.query.filter(
-                ProductSupplier.product_id == existing.id,
-                ProductSupplier.id != link.id,
-            ).update({'is_primary': False}, synchronize_session=False)
-            link.is_primary = True
-        elif not ProductSupplier.query.filter_by(product_id=existing.id, is_primary=True).first():
-            link.is_primary = True
+        upsert_product_supplier_link(existing, supplier, cost, supplier_sku, '')
         if cost > 0:
             existing.cost_price = base_unit_cost_from_purchase_cost(existing, cost)
         db.session.commit()
@@ -5769,15 +6146,7 @@ def supplier_catalog_create_product_from_form(supplier):
         p.cost_price = base_unit_cost_from_purchase_cost(p, cost)
     db.session.add(p)
     db.session.flush()
-    link = upsert_product_supplier_link(p, supplier, cost, supplier_sku, '')
-    if is_primary:
-        ProductSupplier.query.filter(
-            ProductSupplier.product_id == p.id,
-            ProductSupplier.id != link.id,
-        ).update({'is_primary': False}, synchronize_session=False)
-        link.is_primary = True
-    else:
-        link.is_primary = True
+    upsert_product_supplier_link(p, supplier, cost, supplier_sku, '')
     db.session.commit()
     return p, f'Đã thêm {sku} — {name} vào sản phẩm cung cấp của {supplier.name}.'
 
@@ -5788,7 +6157,6 @@ def _supplier_catalog_new_form_data(source=None):
         'name': (src.get('name') or '').strip(),
         'cost_price': src.get('cost_price', ''),
         'catalog_supplier_sku': (src.get('catalog_supplier_sku') or '').strip(),
-        'catalog_is_primary': src.get('catalog_is_primary') == '1',
         'unit_conversion_enabled': src.get('unit_conversion_enabled') == '1',
         'base_unit': (src.get('base_unit') or 'kg').strip(),
         'purchase_unit': (src.get('purchase_unit') or 'Thùng').strip(),
@@ -5799,17 +6167,19 @@ def _supplier_catalog_new_form_data(source=None):
         'sale_unit_mode': (src.get('sale_unit_mode') or 'purchase').strip(),
     }
 
+@app.route('/suppliers/<int:sid>/catalog/new', methods=['GET', 'POST'])
 def supplier_catalog_new(sid):
     ensure_product_columns()
     supplier = Supplier.query.get_or_404(sid)
     list_ctx = _supplier_catalog_list_ctx_from_request()
+    if request.args.get('_from_detail') == '1' or request.form.get('_from_detail') == '1':
+        list_ctx['from_detail'] = True
     cancel_url = _supplier_catalog_cancel_url(sid, list_ctx)
     default_form = {
         'sku': '',
         'name': '',
         'cost_price': '',
         'catalog_supplier_sku': '',
-        'catalog_is_primary': False,
         'unit_conversion_enabled': True,
         'base_unit': 'kg',
         'purchase_unit': 'Thùng',
@@ -5845,22 +6215,30 @@ def supplier_catalog_link_payload(link):
     pu = product_purchase_unit(product) if product else ''
     bu = product_base_unit(product) if product else ''
     has_conv = product_has_unit_conversion(product) if product else False
+    conv_text = ''
+    if has_conv and product:
+        conv_text = (
+            f'1 {pu} = {format_qty_display(product_conversion_factor(product))} {bu}'
+        )
     return {
         'product_id': link.product_id,
         'supplier_id': link.supplier_id,
         'cost_price': link.cost_price or 0,
         'cost_display': money_plain(link.cost_price or 0),
         'supplier_sku': link.supplier_sku or '',
-        'is_primary': bool(link.is_primary),
+        'note': link.note or '',
         'product': {
             'id': product.id,
             'sku': product.sku,
             'name': product.name,
+            'image_url': product_image_url(product) or '',
             'detail_url': url_for('product_detail', pid=product.id),
+            'edit_url': url_for('product_edit', pid=product.id),
         } if product else None,
         'purchase_unit': pu,
         'base_unit': bu,
         'has_conversion': has_conv,
+        'conversion_text': conv_text,
         'base_cost_hint': (
             money_plain(base_unit_cost_from_purchase_cost(product, link.cost_price or 0))
             if has_conv and product else ''
@@ -5887,35 +6265,23 @@ def supplier_catalog_add(sid):
     cost = parse_int(request.form.get('catalog_cost_price'), 0)
     supplier_sku = (request.form.get('catalog_supplier_sku') or '').strip()
     note = (request.form.get('catalog_note') or '').strip()
-    is_primary = request.form.get('catalog_is_primary') == '1'
     existing_link = ProductSupplier.query.filter_by(product_id=product_id, supplier_id=sid).first()
     try:
         if existing_link:
             link = existing_link
             if cost:
                 link.cost_price = cost
+                sync_product_cost_from_supplier_purchase_price(product, cost)
             if supplier_sku:
                 link.supplier_sku = supplier_sku
             if note:
                 link.note = note
-            if is_primary:
-                ProductSupplier.query.filter(
-                    ProductSupplier.product_id == product.id,
-                    ProductSupplier.id != link.id,
-                ).update({'is_primary': False}, synchronize_session=False)
-                link.is_primary = True
             updated = True
         else:
             link = upsert_product_supplier_link(product, supplier, cost, supplier_sku, note)
             db.session.flush()
-            if is_primary:
-                ProductSupplier.query.filter(
-                    ProductSupplier.product_id == product.id,
-                    ProductSupplier.id != link.id,
-                ).update({'is_primary': False}, synchronize_session=False)
-                link.is_primary = True
-            elif not ProductSupplier.query.filter_by(product_id=product.id, is_primary=True).first():
-                link.is_primary = True
+            if cost:
+                sync_product_cost_from_supplier_purchase_price(product, cost)
             updated = False
         db.session.commit()
     except Exception as e:
@@ -5946,30 +6312,11 @@ def supplier_catalog_remove(sid, pid):
     link = ProductSupplier.query.filter_by(supplier_id=sid, product_id=pid).first()
     if not link:
         return _supplier_catalog_redirect(sid, 'Liên kết sản phẩm không tồn tại.', 'warning')
-    product_id = link.product_id
-    was_primary = link.is_primary
     product = link.product
     db.session.delete(link)
-    if was_primary:
-        remaining = ProductSupplier.query.filter_by(product_id=product_id).all()
-        if remaining:
-            cheapest = min(remaining, key=lambda row: (row.cost_price or 0, row.supplier_id))
-            cheapest.is_primary = True
     db.session.commit()
     label = f'{product.sku}' if product else 'Sản phẩm'
     return _supplier_catalog_redirect(sid, f'Đã gỡ {label} khỏi danh mục NCC.')
-
-@app.route('/suppliers/<int:sid>/catalog/<int:pid>/primary', methods=['POST'])
-def supplier_catalog_set_primary(sid, pid):
-    ensure_product_supplier_schema()
-    Supplier.query.get_or_404(sid)
-    link = ProductSupplier.query.filter_by(supplier_id=sid, product_id=pid).first()
-    if not link:
-        return _supplier_catalog_redirect(sid, 'Liên kết sản phẩm không tồn tại.', 'warning')
-    ProductSupplier.query.filter_by(product_id=pid).update({'is_primary': False}, synchronize_session=False)
-    link.is_primary = True
-    db.session.commit()
-    return _supplier_catalog_redirect(sid, 'Đã đặt nhà cung cấp mặc định cho sản phẩm.')
 
 @app.route('/suppliers/<int:sid>/products/import/template')
 def supplier_intake_import_template(sid):
@@ -6142,12 +6489,18 @@ def view_supplier_payment_receipt(pid):
 def update_supplier(sid):
     ensure_stock_movement_columns()
     s = Supplier.query.get_or_404(sid)
+    from_detail = request.form.get('_from_detail') == '1'
     ok, msg = validate_supplier_form()
     if not ok:
         flash(msg, 'warning')
+        if from_detail:
+            return redirect(url_for('supplier_detail', sid=sid))
         return suppliers_redirect_after_save('')
     apply_supplier_form(s)
     db.session.commit()
+    if from_detail:
+        flash('Đã cập nhật nhà cung cấp', 'success')
+        return redirect(url_for('supplier_detail', sid=sid))
     return suppliers_redirect_after_save('Đã cập nhật nhà cung cấp')
 
 @app.route('/suppliers/<int:sid>/delete', methods=['POST'])
@@ -6357,9 +6710,81 @@ def product_filters_from_request():
         'category_parent_id': request.args.get('category_parent_id', type=int),
         'category_id': request.args.get('category_id', type=int),
         'brand_id': request.args.get('brand_id', type=int),
+        'supplier_id': request.args.get('supplier_id', type=int),
         'status': request.args.get('status', '').strip(),
+        'sort': request.args.get('sort', 'newest').strip() or 'newest',
         'q': request.args.get('q', '').strip(),
     }
+
+
+def product_list_url_args(per_page, filters, page=1, exclude=()):
+    """Tham số query cho url_for('products', **args)."""
+    skip = set(exclude or ())
+    args = {'per_page': per_page}
+    if page and page > 1 and 'page' not in skip:
+        args['page'] = page
+    for key in ('q', 'category_parent_id', 'category_id', 'brand_id', 'status', 'sort'):
+        if key in skip:
+            continue
+        val = (filters or {}).get(key)
+        if not val:
+            continue
+        if key == 'sort' and val == 'newest':
+            continue
+        args[key] = val
+    return args
+
+
+def products_list_url(per_page, filters, page=1, exclude=()):
+    return url_for('products', **product_list_url_args(per_page, filters, page, exclude))
+
+
+def products_filter_url(per_page, filters, exclude=()):
+    """URL danh sách sản phẩm, bỏ một hoặc vài tham số lọc (dùng cho chip xóa từng bộ lọc)."""
+    return products_list_url(per_page, filters, page=1, exclude=exclude)
+
+
+def product_list_ctx_from_request():
+    """Ngữ cảnh danh sách từ query string (khi mở chi tiết / sửa từ list)."""
+    filters = product_filters_from_request()
+    per_page = request.args.get('per_page', 10, type=int)
+    per_page = per_page if per_page in (10, 25, 50, 100) else 10
+    page = request.args.get('page', 1, type=int) or 1
+    return {'filters': filters, 'per_page': per_page, 'page': page}
+
+
+def product_list_ctx_from_form():
+    """Ngữ cảnh danh sách từ form POST (sau thao tác trên list / detail)."""
+    filters = {
+        'q': request.form.get('_q', '').strip(),
+        'category_parent_id': request.form.get('_category_parent_id', type=int),
+        'category_id': request.form.get('_category_id', type=int),
+        'brand_id': request.form.get('_brand_id', type=int),
+        'status': request.form.get('_status', '').strip(),
+        'sort': request.form.get('_sort', 'newest').strip() or 'newest',
+    }
+    per_page = request.form.get('_per_page', 10, type=int) or 10
+    if per_page not in (10, 25, 50, 100):
+        per_page = 10
+    page = request.form.get('_page', 1, type=int) or 1
+    return {'filters': filters, 'per_page': per_page, 'page': page}
+
+
+def product_detail_url_kwargs(list_ctx):
+    """Query params giữ trang / bộ lọc khi link sang chi tiết hoặc sửa."""
+    if not list_ctx:
+        return {}
+    return product_list_url_args(
+        list_ctx.get('per_page', 10),
+        list_ctx.get('filters') or {},
+        list_ctx.get('page', 1),
+    )
+
+
+app.jinja_env.globals['products_filter_url'] = products_filter_url
+app.jinja_env.globals['products_list_url'] = products_list_url
+app.jinja_env.globals['product_detail_url_kwargs'] = product_detail_url_kwargs
+
 
 def apply_product_filters(query, filters):
     q = filters.get('q', '')
@@ -6384,9 +6809,16 @@ def apply_product_filters(query, filters):
         query = query.filter(Product.brand_id == filters['brand_id'])
     elif filters.get('brand'):
         query = query.filter(Product.brand == filters['brand'])
+    if filters.get('supplier_id'):
+        pid_rows = db.session.query(ProductSupplier.product_id).filter(
+            ProductSupplier.supplier_id == filters['supplier_id'],
+        )
+        query = query.filter(Product.id.in_(pid_rows))
     st = filters.get('status', '')
     if st == 'selling':
         query = query.filter(Product.is_active.is_(True))
+    elif st == 'in_stock':
+        query = query.filter(Product.is_active.is_(True), Product.stock_qty > 0)
     elif st == 'low':
         query = query.filter(
             Product.stock_qty > 0,
@@ -6398,25 +6830,35 @@ def apply_product_filters(query, filters):
         query = query.filter(or_(Product.is_active.is_(False), Product.is_active == 0))
     return query
 
+def product_list_order(query, sort_key):
+    sort_key = (sort_key or 'newest').strip()
+    if sort_key == 'name_asc':
+        return query.order_by(Product.name.asc(), Product.id.asc())
+    if sort_key == 'name_desc':
+        return query.order_by(Product.name.desc(), Product.id.desc())
+    if sort_key == 'stock_asc':
+        return query.order_by(Product.stock_qty.asc(), Product.name.asc())
+    if sort_key == 'stock_desc':
+        return query.order_by(Product.stock_qty.desc(), Product.name.asc())
+    return query.order_by(Product.created_at.desc(), Product.id.desc())
+
 def products_redirect_after_save(message=None, category='success'):
     if message:
         flash(message, category)
+    list_ctx = product_list_ctx_from_form()
+    nav = product_detail_url_kwargs(list_ctx)
     if request.form.get('_from_edit') == '1':
         pid = request.form.get('_pid', type=int)
         if pid:
-            return redirect(url_for('product_edit', pid=pid))
+            return redirect(url_for('product_edit', pid=pid, **nav))
     if request.form.get('_from_detail') == '1':
         pid = request.form.get('_pid', type=int)
         if pid:
-            return redirect(url_for('product_detail', pid=pid))
-    return redirect(url_for(
-        'products',
-        q=request.form.get('_q', ''),
-        page=request.form.get('_page', 1, type=int) or 1,
-        per_page=request.form.get('_per_page', 10, type=int) or 10,
-        category=request.form.get('_category', ''),
-        brand=request.form.get('_brand', ''),
-        status=request.form.get('_status', ''),
+            return redirect(url_for('product_detail', pid=pid, **nav))
+    return redirect(products_list_url(
+        list_ctx['per_page'],
+        list_ctx['filters'],
+        list_ctx['page'],
     ))
 
 PRICE_TYPE_LABELS = {
@@ -6456,14 +6898,21 @@ def apply_product_price_from_form(product, note='', fields=None):
             changed.append(field)
     return changed
 
+def apply_product_image_url_from_form(product):
+    raw = (request.form.get('image_url') or '').strip()
+    product.image_url = raw if is_external_image_url(raw) else ''
+
+
 def apply_product_form(product):
     product.name = request.form.get('name', '').strip()
     assign_product_taxonomy_from_form(product)
     product.model = request.form.get('model', '')
     product.variant = request.form.get('variant', '')
+    apply_product_image_url_from_form(product)
     apply_product_unit_from_form(product)
     product.warranty = request.form.get('warranty', '')
-    product.cost_price = parse_product_cost_from_form(product)
+    if 'cost_price' in request.form:
+        product.cost_price = parse_product_cost_from_form(product)
     product.retail_price = parse_int(request.form.get('retail_price'))
     product.dealer_price = parse_int(request.form.get('dealer_price'))
     product.project_price = parse_int(request.form.get('project_price'))
@@ -6487,6 +6936,15 @@ def brand_product_counts():
         ).count()
     return counts
 
+def parent_category_product_count(parent_id):
+    child_ids = [c.id for c in Category.query.filter_by(parent_id=parent_id)]
+    ids = [parent_id] + child_ids
+    if not ids:
+        return 0
+    return Product.query.filter(Product.category_id.in_(ids)).count()
+
+app.jinja_env.globals['parent_category_product_count'] = parent_category_product_count
+
 PRODUCT_IMPORT_FIELDS = [
     ('sku', 'SKU'),
     ('name', 'Tên sản phẩm'),
@@ -6495,6 +6953,7 @@ PRODUCT_IMPORT_FIELDS = [
     ('brand', 'Thương hiệu'),
     ('model', 'Model'),
     ('variant', 'Biến thể'),
+    ('image_url', 'URL hình ảnh'),
     ('unit', 'Đơn vị tồn kho'),
     ('purchase_unit', 'Đơn vị nhập'),
     ('conversion_factor', 'Hệ số quy đổi'),
@@ -6510,9 +6969,32 @@ PRODUCT_IMPORT_FIELDS = [
 
 PRODUCT_IMPORT_SAMPLE_ROW = [
     'SP-CLE-17', 'Cờ lê 17', 'Dụng cụ', 'Cờ lê', 'Stanley',
-    '', '17mm', 'Chiếc', 'Hộp', 20,
+    '', '17mm', 'https://example.com/images/co-le-17.jpg', 'Chiếc', 'Hộp', 20,
     '12 tháng', 85000, 120000, 110000, 115000, 0, 10, 'Đang bán',
 ]
+
+PRODUCT_IMPORT_COL_WIDTHS = {
+    'sku': 14,
+    'name': 30,
+    'category_parent': 16,
+    'category_child': 18,
+    'brand': 14,
+    'model': 12,
+    'variant': 14,
+    'image_url': 44,
+    'unit': 12,
+    'purchase_unit': 14,
+    'conversion_factor': 14,
+    'warranty': 12,
+    'cost_price': 12,
+    'retail_price': 12,
+    'dealer_price': 12,
+    'project_price': 12,
+    'stock': 10,
+    'low_stock': 12,
+    'status': 12,
+    'intake_qty': 14,
+}
 
 PRODUCT_IMPORT_HEADER_ALIASES = {
     'sku': {'sku', 'mã sku', 'ma sku', 'mã vạch', 'ma vach'},
@@ -6523,6 +7005,10 @@ PRODUCT_IMPORT_HEADER_ALIASES = {
     'brand': {'thương hiệu', 'thuong hieu', 'brand', 'hãng'},
     'model': {'model', 'mẫu'},
     'variant': {'biến thể', 'bien the', 'variant'},
+    'image_url': {
+        'url hình ảnh', 'url hinh anh', 'image url', 'image_url', 'ảnh url', 'anh url',
+        'link ảnh', 'link anh', 'hình ảnh url', 'hinh anh url', 'url ảnh', 'url anh',
+    },
     'unit': {
         'đơn vị', 'don vi', 'unit', 'dvt',
         'đơn vị tồn kho', 'don vi ton kho', 'base unit', 'base_unit',
@@ -6579,30 +7065,91 @@ def parse_import_active_status(value):
 def ensure_category_name(name):
     ensure_category_from_path(name)
 
-def read_product_import_sheet(file_storage):
+def _import_row_cells(row):
+    return ['' if c is None else c for c in row]
+
+
+def _row_looks_like_import_header(row):
+    """Bỏ qua dòng tiêu đề lặp lại giữa các sheet."""
+    col_map = build_product_import_header_map(row)
+    if 'sku' not in col_map or 'name' not in col_map:
+        return False
+    sku_idx = col_map['sku']
+    name_idx = col_map['name']
+    sku_cell = normalize_import_header(row[sku_idx] if sku_idx < len(row) else '')
+    name_cell = normalize_import_header(row[name_idx] if name_idx < len(row) else '')
+    if sku_cell in PRODUCT_IMPORT_HEADER_ALIASES['sku']:
+        return True
+    if name_cell in PRODUCT_IMPORT_HEADER_ALIASES['name']:
+        return True
+    return False
+
+
+def _find_import_header_in_sheet(sheet_rows):
+    for idx, row in enumerate(sheet_rows):
+        col_map = build_product_import_header_map(row)
+        if 'sku' in col_map and 'name' in col_map:
+            return idx, row
+    return None, None
+
+
+def merge_product_import_workbook_sheets(wb):
+    """Gộp mọi sheet Excel có cùng định dạng cột (SKU + Tên sản phẩm)."""
+    merged = []
+    sheets_meta = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        sheet_rows = [_import_row_cells(r) for r in ws.iter_rows(values_only=True)]
+        if not sheet_rows:
+            continue
+        header_idx, header_row = _find_import_header_in_sheet(sheet_rows)
+        if header_idx is None:
+            continue
+        if not merged:
+            merged.append(header_row)
+        data_count = 0
+        for row in sheet_rows[header_idx + 1:]:
+            if not any(str(c).strip() for c in row):
+                continue
+            if _row_looks_like_import_header(row):
+                continue
+            merged.append(row)
+            data_count += 1
+        if data_count > 0 or header_idx is not None:
+            sheets_meta.append({'name': sheet_name, 'rows': data_count})
+    return merged, sheets_meta
+
+
+def read_product_import_sheet(file_storage, with_meta=False):
     filename = secure_filename(file_storage.filename or '')
     ext = Path(filename).suffix.lower()
+    sheets_meta = []
     if ext == '.csv':
         raw = file_storage.read()
         if raw[:3] == b'\xef\xbb\xbf':
             raw = raw[3:]
         text = raw.decode('utf-8-sig', errors='replace')
         reader = csv.reader(io.StringIO(text))
-        return [list(row) for row in reader]
-    if ext in ('.xlsx', '.xlsm'):
+        rows = [list(row) for row in reader]
+    elif ext in ('.xlsx', '.xlsm'):
         try:
             from openpyxl import load_workbook
         except ImportError:
             raise ValueError('Thiếu thư viện openpyxl. Dùng file .csv hoặc cài: pip install openpyxl')
         file_storage.seek(0)
         wb = load_workbook(file_storage, read_only=True, data_only=True)
-        ws = wb.active
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            rows.append(['' if c is None else c for c in row])
+        rows, sheets_meta = merge_product_import_workbook_sheets(wb)
         wb.close()
-        return rows
-    raise ValueError('Chỉ hỗ trợ file Excel (.xlsx) hoặc CSV (.csv)')
+        if not rows:
+            raise ValueError(
+                'Không tìm thấy sheet nào có cột SKU và Tên sản phẩm. '
+                'Mỗi tab cần cùng định dạng như file mẫu.'
+            )
+    else:
+        raise ValueError('Chỉ hỗ trợ file Excel (.xlsx) hoặc CSV (.csv)')
+    if with_meta:
+        return rows, {'sheets': sheets_meta, 'sheet_count': len(sheets_meta)}
+    return rows
 
 def product_category_parts(product):
     """Tách danh mục cha / con để export Excel."""
@@ -6652,6 +7199,7 @@ def product_row_from_import(row, col_map):
         'brand': cell('brand'),
         'model': cell('model'),
         'variant': cell('variant'),
+        'image_url': cell('image_url'),
         'unit': cell('unit', 'cái') or 'cái',
         'purchase_unit': cell('purchase_unit') or cell('unit', 'cái') or 'cái',
         'conversion_factor': parse_qty(cell('conversion_factor'), 1.0),
@@ -6673,6 +7221,10 @@ def product_row_from_import(row, col_map):
     elif path and not raw['category_parent'] and not raw['category_child']:
         raw['category_parent'] = path
     return raw
+
+def _apply_import_image_url(product, data):
+    raw = (data.get('image_url') or '').strip()
+    product.image_url = raw if is_external_image_url(raw) else ''
 
 def _apply_import_unit_fields(product, data):
     base = (data.get('unit') or data.get('base_unit') or 'cái').strip() or 'cái'
@@ -6698,6 +7250,7 @@ def product_to_export_row(product):
         product_brand_name(product),
         product.model or '',
         product.variant or '',
+        (getattr(product, 'image_url', None) or '').strip(),
         product_base_unit(product),
         product_purchase_unit(product) if product_has_unit_conversion(product) else product_base_unit(product),
         product_conversion_factor(product) if product_has_unit_conversion(product) else '',
@@ -6714,16 +7267,14 @@ def product_to_export_row(product):
 def product_import_field_labels():
     return [label for _, label in PRODUCT_IMPORT_FIELDS]
 
-def build_products_xlsx_bytes(rows):
-    from openpyxl import Workbook
+def product_import_column_widths(field_items=None):
+    items = field_items or PRODUCT_IMPORT_FIELDS
+    return [PRODUCT_IMPORT_COL_WIDTHS.get(key, 12) for key, _ in items]
+
+
+def _style_product_import_worksheet(ws, field_items):
     from openpyxl.styles import Font, PatternFill, Alignment
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'San pham'
-    headers = product_import_field_labels()
-    ws.append(headers)
-    for row in rows:
-        ws.append(row)
+    from openpyxl.utils import get_column_letter
     header_fill = PatternFill('solid', fgColor='E8F0FE')
     header_font = Font(bold=True)
     for cell in ws[1]:
@@ -6731,10 +7282,20 @@ def build_products_xlsx_bytes(rows):
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center')
     ws.freeze_panes = 'A2'
-    from openpyxl.utils import get_column_letter
-    widths = [14, 28, 16, 18, 14, 12, 14, 10, 12, 14, 12, 12, 12, 12, 12, 8, 10, 12]
-    for idx, width in enumerate(widths, start=1):
+    for idx, width in enumerate(product_import_column_widths(field_items), start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
+
+
+def build_products_xlsx_bytes(rows):
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'San pham'
+    headers = product_import_field_labels()
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    _style_product_import_worksheet(ws, PRODUCT_IMPORT_FIELDS)
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -6747,6 +7308,23 @@ def build_products_csv_text(rows):
     for row in rows:
         writer.writerow(row)
     return '\ufeff' + buf.getvalue()
+
+
+def sync_product_import_template_files(rows=None):
+    """Ghi bản sao file mẫu vào static/templates/ (csv + xlsx nếu có openpyxl)."""
+    rows = rows or [PRODUCT_IMPORT_SAMPLE_ROW]
+    template_dir = BASE_DIR / 'static' / 'templates'
+    try:
+        template_dir.mkdir(parents=True, exist_ok=True)
+        csv_text = build_products_csv_text(rows)
+        (template_dir / 'mau-import-san-pham.csv').write_text(csv_text, encoding='utf-8')
+        try:
+            xlsx_buf = build_products_xlsx_bytes(rows)
+            (template_dir / 'mau-import-san-pham.xlsx').write_bytes(xlsx_buf.getvalue())
+        except ImportError:
+            pass
+    except OSError:
+        pass
 
 def build_product_import_preview(rows, update_existing=False):
     if not rows:
@@ -6827,13 +7405,13 @@ def supplier_intake_import_field_labels():
 
 def supplier_intake_sample_row():
     row = list(PRODUCT_IMPORT_SAMPLE_ROW)
-    row.insert(12, 2)
+    cost_idx = next(i for i, (k, _) in enumerate(PRODUCT_IMPORT_FIELDS) if k == 'cost_price')
+    row.insert(cost_idx + 1, 2)
     return row
 
 def build_supplier_intake_xlsx_bytes(rows):
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    from openpyxl.utils import get_column_letter
+    field_items = supplier_intake_import_fields()
     wb = Workbook()
     ws = wb.active
     ws.title = 'Nhap NCC'
@@ -6841,16 +7419,7 @@ def build_supplier_intake_xlsx_bytes(rows):
     ws.append(headers)
     for row in rows:
         ws.append(row)
-    header_fill = PatternFill('solid', fgColor='E8F0FE')
-    header_font = Font(bold=True)
-    for cell in ws[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
-    ws.freeze_panes = 'A2'
-    widths = [14, 28, 16, 18, 14, 12, 14, 10, 12, 14, 12, 12, 14, 12, 12, 12, 8, 10, 12]
-    for idx, width in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(idx)].width = width
+    _style_product_import_worksheet(ws, field_items)
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -6972,6 +7541,7 @@ def ensure_product_for_supplier_intake_row(data, update_existing=False):
             existing.low_stock = data['low_stock']
             existing.is_active = data['is_active']
             _apply_import_taxonomy(existing, data)
+            _apply_import_image_url(existing, data)
         return existing
     p = Product(
         sku=sku,
@@ -6989,6 +7559,7 @@ def ensure_product_for_supplier_intake_row(data, update_existing=False):
     )
     _apply_import_unit_fields(p, data)
     _apply_import_taxonomy(p, data)
+    _apply_import_image_url(p, data)
     db.session.add(p)
     db.session.flush()
     return p
@@ -7056,6 +7627,7 @@ def import_product_data_list(items, update_existing=False):
             existing.low_stock = data['low_stock']
             existing.is_active = data['is_active']
             _apply_import_taxonomy(existing, data)
+            _apply_import_image_url(existing, data)
             updated += 1
             continue
         p = Product(
@@ -7068,6 +7640,7 @@ def import_product_data_list(items, update_existing=False):
         )
         _apply_import_unit_fields(p, data)
         _apply_import_taxonomy(p, data)
+        _apply_import_image_url(p, data)
         db.session.add(p)
         created += 1
     if created == 0 and updated == 0:
@@ -7331,7 +7904,7 @@ def get_product_import_session():
         clear_product_import_session()
         return None
 
-def save_product_import_session(filename, update_existing, preview_rows):
+def save_product_import_session(filename, update_existing, preview_rows, import_meta=None):
     IMPORT_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
     clear_product_import_session()
     preview_id = uuid.uuid4().hex
@@ -7340,6 +7913,8 @@ def save_product_import_session(filename, update_existing, preview_rows):
         'update_existing': update_existing,
         'rows': preview_rows,
     }
+    if import_meta:
+        payload['import_meta'] = import_meta
     _import_preview_path(preview_id).write_text(
         json.dumps(payload, ensure_ascii=False),
         encoding='utf-8',
@@ -7354,7 +7929,7 @@ def import_products_from_rows(rows, update_existing=False):
         raise ValueError('Không có dòng hợp lệ để import')
     return import_product_data_list(importable, update_existing)
 
-def redirect_after_category_manage(category_import_preview=False):
+def redirect_after_category_manage(category_import_preview=False, modal_tab=None):
     """Quay lại trang sản phẩm và mở lại modal quản lý danh mục."""
     ref = request.referrer or url_for('products')
     parts = urlparse(ref)
@@ -7362,6 +7937,8 @@ def redirect_after_category_manage(category_import_preview=False):
     qs['category_modal'] = '1'
     if category_import_preview:
         qs['category_import_preview'] = '1'
+    if modal_tab in ('categories', 'brands'):
+        qs['category_modal_tab'] = modal_tab
     return redirect(urlunparse(parts._replace(query=urlencode(qs))))
 
 CATEGORY_IMPORT_FIELDS = [
@@ -7668,7 +8245,7 @@ def create_category():
         label = 'danh mục con' if parent_id else 'danh mục cha'
         flash(f'Đã tạo {label}', 'success')
     if keep_modal:
-        return redirect_after_category_manage()
+        return redirect_after_category_manage(modal_tab='categories')
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/categories/<int:cid>/delete', methods=['POST'])
@@ -7680,7 +8257,7 @@ def delete_category(cid):
     if children:
         flash(f'Không thể xóa "{name}" vì còn {children} danh mục con', 'danger')
         if request.form.get('_keep_modal') == '1':
-            return redirect_after_category_manage()
+            return redirect_after_category_manage(modal_tab='categories')
         return redirect(request.referrer or url_for('products'))
     path = category_display_path(cat.id)
     affected = Product.query.filter(
@@ -7694,7 +8271,7 @@ def delete_category(cid):
     else:
         flash(f'Đã xóa danh mục "{name}"', 'success')
     if request.form.get('_keep_modal') == '1':
-        return redirect_after_category_manage()
+        return redirect_after_category_manage(modal_tab='categories')
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/brands', methods=['POST'])
@@ -7712,7 +8289,7 @@ def create_brand():
         db.session.commit()
         flash('Đã tạo thương hiệu', 'success')
     if keep_modal:
-        return redirect_after_category_manage()
+        return redirect_after_category_manage(modal_tab='brands')
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/brands/<int:bid>/delete', methods=['POST'])
@@ -7730,7 +8307,7 @@ def delete_brand(bid):
     else:
         flash(f'Đã xóa thương hiệu "{name}"', 'success')
     if request.form.get('_keep_modal') == '1':
-        return redirect_after_category_manage()
+        return redirect_after_category_manage(modal_tab='brands')
     return redirect(request.referrer or url_for('products'))
 
 @app.route('/categories/export')
@@ -7866,6 +8443,7 @@ def products():
         p.model = request.form.get('model', '')
         p.variant = request.form.get('variant', '')
         p.low_stock = parse_qty(request.form.get('low_stock'), 5)
+        apply_product_image_url_from_form(p)
         db.session.add(p)
         db.session.flush()
         if not save_product_images(p, request.files.getlist('images')):
@@ -7879,10 +8457,15 @@ def products():
     per_page = per_page if per_page in (10, 25, 50, 100) else 10
     page = request.args.get('page', 1, type=int)
     query = apply_product_filters(Product.query, filters)
-    pagination = query.order_by(Product.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    query = product_list_order(query, filters.get('sort'))
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     categories = Category.query.order_by(Category.name).all()
     list_args = {k: v for k, v in filters.items() if v}
     list_args['per_page'] = per_page
+    if pagination.page > 1:
+        list_args['page'] = pagination.page
+    product_list_ctx = {'filters': filters, 'per_page': per_page, 'page': pagination.page}
+    product_list_nav = product_detail_url_kwargs(product_list_ctx)
     export_args = {k: v for k, v in list_args.items() if k != 'page'}
     price_histories = {}
     if pagination.items:
@@ -7902,6 +8485,7 @@ def products():
         filters=filters,
         per_page=per_page,
         list_args=list_args,
+        product_list_nav=product_list_nav,
         export_args=export_args,
         brands=product_brand_options(),
         taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
@@ -7914,6 +8498,8 @@ def products():
         show_import_preview=bool(request.args.get('import_preview')),
         category_import_preview_payload=get_category_import_session(),
         show_category_import_preview=bool(request.args.get('category_import_preview')),
+        stats=product_stats(),
+        quick_category_tabs=top_product_category_tabs(),
     )
 
 @app.route('/products/<int:pid>/edit')
@@ -7935,6 +8521,8 @@ def product_edit(pid):
         .limit(50)
         .all()
     )
+    list_ctx = product_list_ctx_from_request()
+    product_list_nav = product_detail_url_kwargs(list_ctx)
     return render_template(
         'product_edit.html',
         p=p,
@@ -7945,6 +8533,10 @@ def product_edit(pid):
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
         all_suppliers=active_suppliers(),
+        product_list_nav=product_list_nav,
+        products_back_url=products_list_url(
+            list_ctx['per_page'], list_ctx['filters'], list_ctx['page'],
+        ),
         taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
     )
 
@@ -7954,6 +8546,8 @@ def product_detail(pid):
     ensure_product_image_column()
     ensure_product_supplier_schema()
     p = Product.query.get_or_404(pid)
+    list_ctx = product_list_ctx_from_request()
+    product_list_nav = product_detail_url_kwargs(list_ctx)
     price_histories = {
         p.id: PriceHistory.query.filter_by(product_id=p.id)
         .order_by(PriceHistory.created_at.desc())
@@ -7971,9 +8565,13 @@ def product_detail(pid):
         stock_in_methods=STOCK_IN_METHODS,
         stock_out_methods=STOCK_OUT_METHODS,
         all_suppliers=active_suppliers(),
-        filters={},
-        pagination=type('Pg', (), {'page': 1})(),
-        per_page=10,
+        filters=list_ctx['filters'],
+        pagination=type('Pg', (), {'page': list_ctx['page']})(),
+        per_page=list_ctx['per_page'],
+        product_list_nav=product_list_nav,
+        products_back_url=products_list_url(
+            list_ctx['per_page'], list_ctx['filters'], list_ctx['page'],
+        ),
         from_detail=True,
         taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
     )
@@ -7993,7 +8591,8 @@ def update_product(pid):
         return products_redirect_after_save()
     p.sku = sku
     apply_product_form(p)
-    apply_product_suppliers_from_form(p)
+    if request.form.getlist('ps_supplier_id'):
+        apply_product_suppliers_from_form(p)
     remove_indices = request.form.getlist('remove_image_idx')
     if remove_indices:
         remove_product_images(p, remove_indices)
@@ -8045,6 +8644,7 @@ def products_export():
 def products_import_template():
     ensure_category_brand_schema()
     rows = [PRODUCT_IMPORT_SAMPLE_ROW]
+    sync_product_import_template_files(rows)
     fmt = (request.args.get('format') or 'xlsx').lower()
     if fmt == 'csv':
         return Response(
@@ -8076,9 +8676,19 @@ def products_import_preview():
         return redirect(url_for('products'))
     update_existing = request.form.get('update_existing') == '1'
     try:
-        rows = read_product_import_sheet(file_storage)
+        rows, import_meta = read_product_import_sheet(file_storage, with_meta=True)
         preview = build_product_import_preview(rows, update_existing=update_existing)
-        save_product_import_session(file_storage.filename, update_existing, preview)
+        save_product_import_session(
+            file_storage.filename, update_existing, preview, import_meta=import_meta,
+        )
+        sheet_count = import_meta.get('sheet_count') or 0
+        if sheet_count > 1:
+            total = sum(s.get('rows', 0) for s in import_meta.get('sheets', []))
+            flash(
+                f'Đã gộp {sheet_count} sheet Excel ({total} dòng sản phẩm). '
+                'Kiểm tra xem trước rồi xác nhận import.',
+                'info',
+            )
     except ValueError as e:
         flash(str(e), 'danger')
         return redirect(url_for('products'))
@@ -8152,7 +8762,10 @@ def delete_product(pid):
     db.session.commit()
     flash(f'Đã xóa sản phẩm "{name}"', 'success')
     if request.form.get('_from_detail') == '1':
-        return redirect(url_for('products'))
+        list_ctx = product_list_ctx_from_form()
+        return redirect(products_list_url(
+            list_ctx['per_page'], list_ctx['filters'], list_ctx['page'],
+        ))
     return products_redirect_after_save()
 
 @app.route('/customers/<int:cid>/delete', methods=['POST'])
@@ -8314,6 +8927,7 @@ def quotes():
         quote_edit_statuses=QUOTE_FILTER_STATUSES,
         default_valid=(date.today() + timedelta(days=30)).isoformat(),
         quote_customer_id=request.args.get('quote_customer_id', type=int),
+        walkin_customer_id=ensure_walkin_customer().id,
         companies=list_company_profiles(),
         active_company_id=get_company_row().id if get_company_row() else None,
         doc_tab=filters['tab'],
@@ -8757,7 +9371,6 @@ def quote_preview(qid):
     ensure_quote_columns()
     quote = ensure_quote_documents(Quote.query.get_or_404(qid))
     st = quote_display_status(quote)
-    shortage_rows = quote_shortage_lines(quote) if st in ('Mới tạo', 'Đã chốt') else []
     return render_template(
         'quote_preview_page.html',
         quote=quote,
@@ -8765,7 +9378,6 @@ def quote_preview(qid):
         status=st,
         expired=quote_is_expired(quote),
         linked_order=get_quote_order(quote),
-        shortage_rows=shortage_rows,
         companies=list_company_profiles(),
         active_company_id=get_company_row().id if get_company_row() else None,
         doc_tab='list',

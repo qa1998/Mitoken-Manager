@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from 'partials/order_options_menu.html' import order_options_dropdown %}
 {% from 'partials/order_status_cell.html' import order_status_cell %}
+{% from 'partials/list_pagination.html' import list_pagination_footer %}
 {% block content %}
 
 <div class="order-page">
@@ -111,16 +112,6 @@
   <div class="panel-card order-table-card">
     <div class="table-toolbar">
       <h5 class="section-title mb-0">DANH SÁCH ĐƠN HÀNG</h5>
-      <form method="get" class="per-page-select">
-        {% for key, val in list_args.items() %}
-        {% if val and key != 'per_page' %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
-        {% endfor %}
-        <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="10" {% if per_page == 10 %}selected{% endif %}>10 / trang</option>
-          <option value="25" {% if per_page == 25 %}selected{% endif %}>25 / trang</option>
-          <option value="50" {% if per_page == 50 %}selected{% endif %}>50 / trang</option>
-        </select>
-      </form>
     </div>
 
     <div class="table-responsive order-list-table-wrap">
@@ -170,38 +161,7 @@
       </table>
     </div>
 
-    <div class="table-footer">
-      {% if pagination.total > 0 %}
-      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
-      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
-      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} đơn hàng</span>
-      {% else %}
-      <span>Chưa có dữ liệu</span>
-      {% endif %}
-      <div class="table-footer-right">
-        {% if pagination.pages > 1 %}
-        <nav>
-          <ul class="pagination pagination-custom mb-0">
-            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('orders', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
-            </li>
-            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-            {% if p %}
-            <li class="page-item {% if p == pagination.page %}active{% endif %}">
-              <a class="page-link" href="{{ url_for('orders', page=p, **list_args) }}">{{ p }}</a>
-            </li>
-            {% else %}
-            <li class="page-item disabled"><span class="page-link">…</span></li>
-            {% endif %}
-            {% endfor %}
-            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('orders', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
-            </li>
-          </ul>
-        </nav>
-        {% endif %}
-      </div>
-    </div>
+    {{ list_pagination_footer('orders', pagination, unit='đơn hàng', list_args=list_args, per_page=per_page, per_page_options=[10, 25, 50]) }}
   </div>
 </div>
 

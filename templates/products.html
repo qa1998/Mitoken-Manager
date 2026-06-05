@@ -4,47 +4,108 @@
 {% from 'partials/product_image_upload_panel.html' import product_image_upload_panel %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
 {% from 'partials/product_unit_setup.html' import product_unit_setup %}
+{% from 'partials/list_pagination.html' import list_pagination_footer %}
+{% from 'partials/product_list_ctx_fields.html' import product_list_ctx_hidden_fields %}
 {% block title %}Sản phẩm — Business Web{% endblock %}
 {% block content %}
 
 <div class="product-page product-page-v2">
   <nav class="page-breadcrumb" aria-label="breadcrumb">
     <a href="{{ url_for('dashboard') }}">Trang chủ</a>
-    <span class="page-breadcrumb-sep">/</span>
+    <i class="bi bi-chevron-right page-breadcrumb-sep" aria-hidden="true"></i>
     <span class="page-breadcrumb-current">Sản phẩm</span>
   </nav>
 
   <div class="product-page-top">
     <div class="product-page-intro">
       <h1 class="product-page-title">Sản phẩm</h1>
-      <p class="product-page-subtitle">Quản lý danh mục sản phẩm của cửa hàng</p>
+      <p class="product-page-subtitle">Quản lý danh mục và sản phẩm của cửa hàng</p>
     </div>
     <div class="product-page-actions">
-      <button type="button" class="btn btn-light btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#categoryModal">
-        <i class="bi bi-folder2 me-2"></i>Danh mục &amp; thương hiệu
-      </button>
-      <div class="btn-group">
-        <a href="{{ url_for('products_export', **export_args) }}" class="btn btn-light btn-product-toolbar">
-          <i class="bi bi-download me-2"></i>Export Excel
-        </a>
-        <button type="button" class="btn btn-light btn-product-toolbar dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-        <ul class="dropdown-menu dropdown-menu-end">
-          <li><a class="dropdown-item" href="{{ url_for('products_export', format='xlsx', **export_args) }}">Tải .xlsx</a></li>
-          <li><a class="dropdown-item" href="{{ url_for('products_export', format='csv', **export_args) }}">Tải .csv</a></li>
+      <div class="dropdown">
+        <button type="button" class="btn btn-light btn-product-toolbar dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-gear me-2"></i>Công cụ
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+          <li>
+            <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#categoryModal">
+              <i class="bi bi-folder2 me-2"></i>Danh mục &amp; thương hiệu
+            </button>
+          </li>
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <a class="dropdown-item" href="{{ url_for('products_export', format='xlsx', **export_args) }}">
+              <i class="bi bi-download me-2"></i>Export Excel (.xlsx)
+            </a>
+          </li>
+          <li>
+            <a class="dropdown-item" href="{{ url_for('products_export', format='csv', **export_args) }}">
+              <i class="bi bi-download me-2"></i>Export Excel (.csv)
+            </a>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#importProductModal">
+              <i class="bi bi-upload me-2"></i>Import Excel
+            </button>
+          </li>
+          {% if current_user and current_user.role == 'admin' %}
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <form method="post" action="{{ url_for('products_delete_all') }}" class="m-0 product-admin-tool" id="productDeleteAllForm">
+              <button type="submit" class="dropdown-item text-danger">
+                <i class="bi bi-trash me-2"></i>Xóa hết sản phẩm
+              </button>
+            </form>
+          </li>
+          {% endif %}
         </ul>
       </div>
-      <button type="button" class="btn btn-light btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#importProductModal">
-        <i class="bi bi-upload me-2"></i>Import Excel
-      </button>
-      <form method="post" action="{{ url_for('products_delete_all') }}" class="d-inline product-admin-tool"
-            id="productDeleteAllForm">
-        <button type="submit" class="btn btn-outline-danger btn-product-toolbar">
-          <i class="bi bi-trash me-2"></i>Xóa hết
-        </button>
-      </form>
       <button type="button" class="btn btn-primary btn-product-toolbar" data-bs-toggle="modal" data-bs-target="#createProductModal">
         <i class="bi bi-plus-lg me-1"></i> Thêm sản phẩm
       </button>
+    </div>
+  </div>
+
+  <div class="row g-3 product-stat-row">
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('products', per_page=per_page) }}"
+         class="product-stat-card{% if not filters.status and not filters.category_parent_id and not filters.category_id and not filters.brand_id %} product-stat-active{% endif %}">
+        <div class="product-stat-icon stat-blue"><i class="bi bi-box-seam"></i></div>
+        <div>
+          <div class="product-stat-label">Tổng sản phẩm</div>
+          <div class="product-stat-value">{{ stats.total|int }}</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('products', status='in_stock', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-stat-card{% if filters.status == 'in_stock' %} product-stat-active{% endif %}">
+        <div class="product-stat-icon stat-green"><i class="bi bi-check-circle"></i></div>
+        <div>
+          <div class="product-stat-label">Đang bán</div>
+          <div class="product-stat-value">{{ stats.selling|int }}</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('products', status='out', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-stat-card{% if filters.status == 'out' %} product-stat-active{% endif %}">
+        <div class="product-stat-icon stat-orange"><i class="bi bi-exclamation-triangle"></i></div>
+        <div>
+          <div class="product-stat-label">Hết hàng</div>
+          <div class="product-stat-value">{{ stats.out_stock|int }}</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-lg-3">
+      <a href="{{ url_for('products', status='stopped', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-stat-card{% if filters.status == 'stopped' %} product-stat-active{% endif %}">
+        <div class="product-stat-icon stat-red"><i class="bi bi-slash-circle"></i></div>
+        <div>
+          <div class="product-stat-label">Ngừng bán</div>
+          <div class="product-stat-value">{{ stats.stopped|int }}</div>
+        </div>
+      </a>
     </div>
   </div>
 
@@ -54,13 +115,17 @@
       <div class="product-filter-search-row">
         <div class="input-icon-wrap product-search-wrap">
           <i class="bi bi-search"></i>
-          <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm kiếm theo tên sản phẩm, SKU, mã vạch...">
+          <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm theo tên sản phẩm, SKU, mã vạch...">
         </div>
+        <button type="submit" class="btn btn-light btn-product-filter">
+          <i class="bi bi-search me-2"></i>Tìm kiếm
+        </button>
       </div>
-      <div class="product-filter-fields-row">
+      <div class="product-filter-fields-row product-filter-fields-mock">
         <div class="product-filter-field">
-          <label class="product-filter-label">Danh mục cha</label>
-          <select name="category_parent_id" class="form-select product-filter-parent">
+          <label class="product-filter-label" for="productFilterParent">Danh mục cha</label>
+          <select name="category_parent_id" id="productFilterParent"
+                  class="form-select product-filter-parent product-filter-auto{% if filters.category_parent_id %} has-value{% endif %}">
             <option value="">Tất cả</option>
             {% for p in parent_categories %}
             <option value="{{ p.id }}" {% if filters.category_parent_id == p.id %}selected{% endif %}>{{ p.name }}</option>
@@ -68,15 +133,23 @@
           </select>
         </div>
         <div class="product-filter-field">
-          <label class="product-filter-label">Danh mục con</label>
-          <select name="category_id" class="form-select product-filter-child"
-                  data-selected="{{ filters.category_id or '' }}">
+          <label class="product-filter-label" for="productFilterChild">Danh mục con</label>
+          <select name="category_id" id="productFilterChild"
+                  class="form-select product-filter-child product-filter-auto{% if filters.category_id %} has-value{% endif %}"
+                  data-selected="{{ filters.category_id or '' }}"
+                  {% if not filters.category_parent_id %}disabled{% endif %}>
             <option value="">Tất cả</option>
+            {% if filters.category_parent_id %}
+            {% for c in child_categories(filters.category_parent_id) %}
+            <option value="{{ c.id }}" {% if filters.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+            {% endif %}
           </select>
         </div>
         <div class="product-filter-field">
-          <label class="product-filter-label">Thương hiệu</label>
-          <select name="brand_id" class="form-select product-filter-brand">
+          <label class="product-filter-label" for="productFilterBrand">Thương hiệu</label>
+          <select name="brand_id" id="productFilterBrand"
+                  class="form-select product-filter-brand product-filter-auto{% if filters.brand_id %} has-value{% endif %}">
             <option value="">Tất cả</option>
             {% for b in brands_list %}
             <option value="{{ b.id }}" data-category-id="{{ b.category_id or '' }}"
@@ -85,82 +158,156 @@
           </select>
         </div>
         <div class="product-filter-field">
-          <label class="product-filter-label">Trạng thái</label>
-          <select name="status" class="form-select">
+          <label class="product-filter-label" for="productFilterStatus">Trạng thái</label>
+          <select name="status" id="productFilterStatus"
+                  class="form-select product-filter-auto{% if filters.status %} has-value{% endif %}">
             <option value="">Tất cả</option>
-            <option value="selling" {% if filters.status == 'selling' %}selected{% endif %}>Đang bán</option>
+            <option value="in_stock" {% if filters.status == 'in_stock' %}selected{% endif %}>Còn hàng</option>
+            <option value="out" {% if filters.status == 'out' %}selected{% endif %}>Hết hàng</option>
             <option value="stopped" {% if filters.status == 'stopped' %}selected{% endif %}>Ngừng bán</option>
           </select>
         </div>
-        <div class="product-filter-field product-filter-submit-field">
-          <label class="product-filter-label d-none d-md-block">&nbsp;</label>
-          <button type="submit" class="btn btn-light btn-product-filter w-100">
-            <i class="bi bi-funnel me-2"></i>Bộ lọc
-          </button>
+        <div class="product-filter-field">
+          <label class="product-filter-label" for="productFilterSort">Sắp xếp</label>
+          <select name="sort" id="productFilterSort"
+                  class="form-select product-filter-auto{% if filters.sort and filters.sort != 'newest' %} has-value{% endif %}">
+            <option value="newest" {% if filters.sort == 'newest' %}selected{% endif %}>Mới nhất</option>
+            <option value="name_asc" {% if filters.sort == 'name_asc' %}selected{% endif %}>Tên A → Z</option>
+            <option value="name_desc" {% if filters.sort == 'name_desc' %}selected{% endif %}>Tên Z → A</option>
+            <option value="stock_desc" {% if filters.sort == 'stock_desc' %}selected{% endif %}>Tồn kho cao → thấp</option>
+            <option value="stock_asc" {% if filters.sort == 'stock_asc' %}selected{% endif %}>Tồn kho thấp → cao</option>
+          </select>
         </div>
+      </div>
+      {% set has_product_filters = filters.q or filters.category_parent_id or filters.category_id or filters.brand_id or filters.status or (filters.sort and filters.sort != 'newest') %}
+      <div class="product-filter-active-row{% if not has_product_filters %} is-empty{% endif %}">
+        <div class="product-filter-active-left">
+          {% if has_product_filters %}
+          <span class="product-filter-active-badge">Đang lọc</span>
+          <div class="product-filter-chips">
+            {% if filters.q %}
+            <a href="{{ products_filter_url(per_page, filters, exclude=('q',)) }}" class="product-filter-chip" title="Bỏ từ khóa tìm kiếm">
+              <span>Từ khóa: {{ filters.q }}</span><i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+            {% if filters.category_parent_id %}
+            {% for p in parent_categories %}
+            {% if filters.category_parent_id == p.id %}
+            <a href="{{ products_filter_url(per_page, filters, exclude=('category_parent_id', 'category_id')) }}" class="product-filter-chip" title="Bỏ danh mục cha">
+              <span>Danh mục cha: {{ p.name }}</span><i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% if filters.category_id and filters.category_parent_id %}
+            {% for c in child_categories(filters.category_parent_id) %}
+            {% if filters.category_id == c.id %}
+            <a href="{{ products_filter_url(per_page, filters, exclude=('category_id',)) }}" class="product-filter-chip" title="Bỏ danh mục con">
+              <span>Danh mục con: {{ c.name }}</span><i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% if filters.brand_id %}
+            {% for b in brands_list %}
+            {% if filters.brand_id == b.id %}
+            <a href="{{ products_filter_url(per_page, filters, exclude=('brand_id',)) }}" class="product-filter-chip" title="Bỏ thương hiệu">
+              <span>Thương hiệu: {{ b.name }}</span><i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% if filters.status %}
+            <a href="{{ products_filter_url(per_page, filters, exclude=('status',)) }}" class="product-filter-chip" title="Bỏ trạng thái">
+              <span>Trạng thái: {% if filters.status == 'in_stock' %}Còn hàng{% elif filters.status == 'out' %}Hết hàng{% elif filters.status == 'stopped' %}Ngừng bán{% else %}{{ filters.status }}{% endif %}</span><i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+            {% if filters.sort and filters.sort != 'newest' %}
+            <a href="{{ products_filter_url(per_page, filters, exclude=('sort',)) }}" class="product-filter-chip" title="Bỏ sắp xếp">
+              <span>Sắp xếp: {% if filters.sort == 'name_asc' %}Tên A → Z{% elif filters.sort == 'name_desc' %}Tên Z → A{% elif filters.sort == 'stock_desc' %}Tồn kho cao → thấp{% elif filters.sort == 'stock_asc' %}Tồn kho thấp → cao{% else %}{{ filters.sort }}{% endif %}</span><i class="bi bi-x-lg" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+        {% if has_product_filters %}
+        <a href="{{ url_for('products', per_page=per_page) }}" class="btn-product-clear-filters">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Xóa bộ lọc
+        </a>
+        {% endif %}
       </div>
     </form>
   </div>
 
-  <div class="panel-card product-list-card product-list-card-v2">
-    <div class="customer-table-wrap">
+  <div class="product-list-stack app-list-fill">
+    <div class="product-status-tabs" role="tablist">
+      <a href="{{ url_for('products', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-status-tab{% if not filters.status %} is-active{% endif %}">Tất cả <span class="product-status-tab-count">({{ stats.total|int }})</span></a>
+      <a href="{{ url_for('products', status='in_stock', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-status-tab{% if filters.status == 'in_stock' %} is-active{% endif %}">Còn hàng <span class="product-status-tab-count">({{ stats.selling|int }})</span></a>
+      <a href="{{ url_for('products', status='out', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-status-tab{% if filters.status == 'out' %} is-active{% endif %}">Hết hàng <span class="product-status-tab-count">({{ stats.out_stock|int }})</span></a>
+      <a href="{{ url_for('products', status='stopped', per_page=per_page, q=filters.q, brand_id=filters.brand_id or none, category_parent_id=filters.category_parent_id or none, category_id=filters.category_id or none, sort=filters.sort) }}"
+         class="product-status-tab{% if filters.status == 'stopped' %} is-active{% endif %}">Ngừng bán <span class="product-status-tab-count">({{ stats.stopped|int }})</span></a>
+    </div>
+
+    <div class="panel-card product-list-card product-list-card-v2 app-list-fill">
+    <div class="customer-table-wrap app-list-scroll">
       <table class="table product-table-v2">
         <thead>
           <tr>
-            <th>SKU</th>
-            <th>Ảnh</th>
-            <th>Tên sản phẩm</th>
+            <th>Sản phẩm</th>
             <th>Danh mục</th>
             <th>Thương hiệu</th>
-            <th>Đơn vị</th>
             <th>Giá bán</th>
-            <th>Giá nhập</th>
-            <th>Bảo hành</th>
+            <th>Tồn kho</th>
             <th>Trạng thái</th>
             <th class="text-end">Thao tác</th>
           </tr>
         </thead>
         <tbody>
           {% for p in products %}
-          {% set sale_key, sale_label = product_list_status(p) %}
-          <tr class="list-row-clickable" data-list-detail-href="{{ url_for('product_detail', pid=p.id) }}">
-            <td><span class="product-sku-cell">{{ p.sku }}</span></td>
-            <td>{{ product_thumb(p) }}</td>
+          {% set sale_key, sale_label = product_sale_status(p) %}
+          {% set preview_imgs = product_image_urls(p) %}
+          <tr class="list-row-clickable{% if preview_imgs %} has-product-preview{% endif %}"
+              data-list-detail-href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}"
+              {% if preview_imgs %}data-product-preview-images='{{ preview_imgs|tojson }}' data-product-preview-name="{{ p.name|e }}"{% endif %}>
             <td>
-              <div class="product-name-block">
-                <a href="{{ url_for('product_detail', pid=p.id) }}" class="product-name-main product-name-link">{{ p.name }}</a>
-                <div class="product-barcode-sub">Mã vạch: {{ product_barcode(p) }}</div>
+              <div class="product-cell-combined">
+                {{ product_thumb(p) }}
+                <div class="product-name-block">
+                  <a href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}" class="product-name-main product-name-link" onclick="event.stopPropagation()">{{ p.name }}</a>
+                  <div class="product-barcode-sub">SKU: {{ p.sku }}{% if product_barcode(p) and product_barcode(p) != p.sku %} · {{ product_barcode(p) }}{% endif %}</div>
+                </div>
               </div>
             </td>
             <td>
               {% set cat_path = product_category_path(p) %}
               {% if cat_path %}
-              <span class="category-tag {{ category_tag(cat_path) }}">{{ cat_path }}</span>
+              <span class="product-category-badge">{{ cat_path }}</span>
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
             <td>{{ product_brand_name(p) or '—' }}</td>
-            <td class="product-unit-list-cell">
-              {% set udisp = product_list_unit_display(p) %}
-              <div class="product-unit-list-base">{{ udisp.primary }}</div>
-              {% if product_has_unit_conversion(p) %}
-              {% if udisp.secondary %}
-              <div class="product-unit-list-sub">{{ udisp.secondary }}</div>
-              {% endif %}
-              <div class="product-unit-list-conv">{{ udisp.conv }}</div>
-              {% else %}
-              <div class="product-unit-list-sub text-muted">—</div>
-              {% endif %}
-            </td>
-            <td class="money product-price-td">{{ p.retail_price|money }}</td>
-            <td class="money product-cost-list-cell">
-              {{ product_cost_display_amount(p)|money }}
-              {% if product_has_unit_conversion(p) %}
-              <div class="product-cost-list-unit small-muted">/{{ product_cost_unit_label(p) }}</div>
-              {% endif %}
-            </td>
-            <td>{{ p.warranty or '—' }}</td>
             <td>
-              <span class="product-status-pill status-{{ sale_key }}">{{ sale_label }}</span>
+              <div class="product-price-cell">
+                <span class="product-price-value">{{ p.retail_price|money }}</span>
+                <span class="product-price-unit">/ {{ product_unit_label(p) }}</span>
+              </div>
+            </td>
+            <td>
+              {% set stock_base = p.stock %}
+              {% set inv_key, inv_label = product_inventory_level(p) %}
+              <div class="product-stock-cell">
+                <div class="product-stock-qty stock-level-{{ inv_key }}">
+                  {{ format_qty_display(qty_from_base_unit(p, stock_base)) }} {{ product_unit_label(p) }}
+                </div>
+                {% if product_has_unit_conversion(p) %}
+                <div class="product-stock-equiv">{{ format_qty_display(stock_base) }} {{ product_base_unit(p) }}{% if product_stock_equivalent_text(p) %} ({{ product_stock_equivalent_text(p) }}){% endif %}</div>
+                {% endif %}
+              </div>
+            </td>
+            <td>
+              <span class="product-status-badge status-{{ sale_key }}"><span class="product-status-dot" aria-hidden="true"></span>{{ sale_label }}</span>
             </td>
             <td class="text-end table-actions-cell">
               <div class="dropdown">
@@ -169,7 +316,7 @@
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
                   <li>
-                    <a class="dropdown-item" href="{{ url_for('product_detail', pid=p.id) }}">
+                    <a class="dropdown-item" href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}">
                       <i class="bi bi-eye me-2"></i>Chi tiết
                     </a>
                   </li>
@@ -189,19 +336,14 @@
                     </button>
                   </li>
                   <li>
-                    <a class="dropdown-item" href="{{ url_for('product_edit', pid=p.id) }}">
+                    <a class="dropdown-item" href="{{ url_for('product_edit', pid=p.id, **product_list_nav) }}">
                       <i class="bi bi-pencil-square me-2"></i>Sửa sản phẩm
                     </a>
                   </li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
                     <form method="post" action="{{ url_for('delete_product', pid=p.id) }}" class="m-0 product-delete-form" data-name="{{ p.name }}">
-                      <input type="hidden" name="_q" value="{{ filters.q }}">
-                      <input type="hidden" name="_page" value="{{ pagination.page }}">
-                      <input type="hidden" name="_per_page" value="{{ per_page }}">
-                      <input type="hidden" name="_category" value="{{ filters.category }}">
-                      <input type="hidden" name="_brand" value="{{ filters.brand }}">
-                      <input type="hidden" name="_status" value="{{ filters.status }}">
+                      {{ product_list_ctx_hidden_fields(filters, pagination.page, per_page) }}
                       <button type="submit" class="dropdown-item text-danger">
                         <i class="bi bi-trash me-2"></i>Xóa sản phẩm
                       </button>
@@ -209,12 +351,7 @@
                   </li>
                   <li>
                     <form method="post" action="{{ url_for('toggle_product_active', pid=p.id) }}" class="m-0 product-toggle-form">
-                      <input type="hidden" name="_q" value="{{ filters.q }}">
-                      <input type="hidden" name="_page" value="{{ pagination.page }}">
-                      <input type="hidden" name="_per_page" value="{{ per_page }}">
-                      <input type="hidden" name="_category" value="{{ filters.category }}">
-                      <input type="hidden" name="_brand" value="{{ filters.brand }}">
-                      <input type="hidden" name="_status" value="{{ filters.status }}">
+                      {{ product_list_ctx_hidden_fields(filters, pagination.page, per_page) }}
                       <button type="submit" class="dropdown-item text-danger">
                         <i class="bi bi-power me-2"></i>{% if p.is_active %}Ngừng bán{% else %}Bật bán lại{% endif %}
                       </button>
@@ -225,54 +362,13 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="11" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
+          <tr><td colspan="7" class="text-center text-muted py-5">Không có sản phẩm phù hợp</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
 
-    <div class="table-footer">
-      {% if pagination.total > 0 %}
-      {% set start = (pagination.page - 1) * pagination.per_page + 1 %}
-      {% set end = [pagination.page * pagination.per_page, pagination.total]|min %}
-      <span>Hiển thị {{ start }} đến {{ end }} trong tổng số {{ pagination.total }} sản phẩm</span>
-      {% else %}
-      <span>Chưa có dữ liệu</span>
-      {% endif %}
-      <div class="table-footer-right">
-        {% if pagination.pages > 1 %}
-        <nav>
-          <ul class="pagination pagination-custom mb-0">
-            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('products', page=pagination.prev_num, **list_args) if pagination.has_prev else '#' }}"><i class="bi bi-chevron-left"></i></a>
-            </li>
-            {% for pg in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-            {% if pg %}
-            <li class="page-item {% if pg == pagination.page %}active{% endif %}">
-              <a class="page-link" href="{{ url_for('products', page=pg, **list_args) }}">{{ pg }}</a>
-            </li>
-            {% else %}
-            <li class="page-item disabled"><span class="page-link">…</span></li>
-            {% endif %}
-            {% endfor %}
-            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-              <a class="page-link" href="{{ url_for('products', page=pagination.next_num, **list_args) if pagination.has_next else '#' }}"><i class="bi bi-chevron-right"></i></a>
-            </li>
-          </ul>
-        </nav>
-        {% endif %}
-        <form method="get" class="per-page-select per-page-footer">
-          {% for key, val in list_args.items() %}
-          {% if val %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}
-          {% endfor %}
-          <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-            <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
-            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-          </select>
-          <span>/ trang</span>
-        </form>
-      </div>
+    {{ list_pagination_footer('products', pagination, unit='sản phẩm', list_args=list_args, per_page=per_page) }}
     </div>
   </div>
 </div>
@@ -370,6 +466,8 @@
         <div class="modal-body">
           <p class="small-muted mb-3">
             Tải file mẫu, điền dữ liệu (mỗi dòng một sản phẩm), rồi upload để xem trước trước khi import.
+            File <strong>.xlsx</strong> có nhiều tab (sheet) ở dưới — hệ thống sẽ <strong>đọc và gộp tất cả các tab</strong>
+            có cùng dòng tiêu đề (SKU, Tên sản phẩm, …).
           </p>
           <div class="d-flex flex-wrap gap-2 mb-3">
             <a href="{{ url_for('products_import_template') }}" class="btn btn-outline-primary btn-sm">
@@ -384,6 +482,7 @@
             <em>Đơn vị tồn kho</em> = <code>Chiếc</code>,
             <em>Đơn vị nhập</em> = <code>Hộp</code> (hoặc Thùng),
             <em>Hệ số quy đổi</em> = <code>20</code> (1 hộp = 20 chiếc). Cùng cột dùng cho mét/cuộn (VD: Cuộn, 50).<br>
+            <strong>Ảnh:</strong> cột <em>URL hình ảnh</em> (link <code>https://...</code>) — có URL thì hiển thị ảnh online, không có thì dùng ảnh upload trên web.<br>
             Export và import dùng cùng định dạng cột — tải lại file mẫu nếu file cũ thiếu cột.
           </div>
           <div class="mb-3">
@@ -416,6 +515,12 @@
           <div class="modal-body">
             <p class="small-muted mb-2">
               File: <strong>{{ import_preview_payload.filename }}</strong>
+              {% if import_preview_payload.import_meta and import_preview_payload.import_meta.sheet_count > 1 %}
+              · Đã gộp <strong>{{ import_preview_payload.import_meta.sheet_count }}</strong> sheet:
+              {% for sh in import_preview_payload.import_meta.sheets %}
+              <span class="text-nowrap">{{ sh.name }} ({{ sh.rows }})</span>{% if not loop.last %}, {% endif %}
+              {% endfor %}
+              {% endif %}
               · Bỏ tick hoặc <strong>Xóa</strong> dòng không muốn import.
             </p>
             <div class="import-preview-summary mb-3" id="importPreviewSummary"></div>

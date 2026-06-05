@@ -2,18 +2,15 @@
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
 {% from 'partials/product_unit_setup.html' import product_unit_setup %}
+{% from 'partials/product_list_ctx_fields.html' import product_list_ctx_hidden_fields %}
 
 {% macro product_redirect_fields() %}
 {% if from_detail|default(false) %}
 <input type="hidden" name="_from_detail" value="1">
 <input type="hidden" name="_pid" value="{{ p.id }}">
+{{ product_list_ctx_hidden_fields(filters|default({}), pagination.page|default(1), per_page|default(10)) }}
 {% else %}
-<input type="hidden" name="_q" value="{{ filters.q|default('') }}">
-<input type="hidden" name="_page" value="{{ pagination.page|default(1) }}">
-<input type="hidden" name="_per_page" value="{{ per_page|default(10) }}">
-<input type="hidden" name="_category" value="{{ filters.category|default('') }}">
-<input type="hidden" name="_brand" value="{{ filters.brand|default('') }}">
-<input type="hidden" name="_status" value="{{ filters.status|default('') }}">
+{{ product_list_ctx_hidden_fields(filters|default({}), pagination.page|default(1), per_page|default(10)) }}
 {% endif %}
 {% endmacro %}
 

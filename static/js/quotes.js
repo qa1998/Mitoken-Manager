@@ -965,6 +965,24 @@
     });
   }
 
+  function loadQuoteCartItems(items) {
+    var form = document.getElementById('create-quote-form');
+    if (!form) return;
+    var tbody = getFormTbody(form);
+    if (tbody) tbody.innerHTML = '';
+    rowSeq = 0;
+    (items || []).forEach(function (item) {
+      var product = findProduct(item.productId || item.product_id);
+      if (!product) return;
+      addQuoteRow(form, product, { qty: item.qty || 1 });
+    });
+    if (!tbody || !tbody.children.length) addQuoteRow(form);
+    recalcQuoteTotals(form, true);
+    if (typeof window.initMoneyInputs === 'function') {
+      window.initMoneyInputs(form);
+    }
+  }
+
   function loadEditQuoteForm(form) {
     var dataEl = form.querySelector('.quote-edit-items-data');
     var items = [];
@@ -1126,4 +1144,12 @@
       });
     });
   });
+
+  window.QuoteFormApi = {
+    addQuoteRow: addQuoteRow,
+    findProduct: findProduct,
+    loadQuoteCartItems: loadQuoteCartItems,
+    resetCreateQuoteForm: resetCreateQuoteForm,
+    recalcQuoteTotals: recalcQuoteTotals,
+  };
 })();

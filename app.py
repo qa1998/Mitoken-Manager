@@ -8500,6 +8500,13 @@ def products():
         show_category_import_preview=bool(request.args.get('category_import_preview')),
         stats=product_stats(),
         quick_category_tabs=top_product_category_tabs(),
+        can_quotes=role_can_access(get_current_user().role, 'quotes') if get_current_user() else False,
+        quote_catalog=quote_product_catalog(
+            Product.query.filter(Product.is_active.is_(True)).order_by(Product.name).all()
+        ) if get_current_user() and role_can_access(get_current_user().role, 'quotes') else [],
+        customers=customers_for_select() if get_current_user() and role_can_access(get_current_user().role, 'quotes') else [],
+        walkin_customer_id=ensure_walkin_customer().id if get_current_user() and role_can_access(get_current_user().role, 'quotes') else None,
+        default_valid=(date.today() + timedelta(days=30)).isoformat(),
     )
 
 @app.route('/products/<int:pid>/edit')

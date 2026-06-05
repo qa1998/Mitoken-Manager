@@ -1,0 +1,40 @@
+<div class="product-quote-cart-bar" id="productQuoteCartBar" hidden>
+  <div class="product-quote-cart-bar-inner">
+    <button type="button" class="product-quote-cart-bar-main" id="btnOpenQuoteCart" aria-controls="productQuoteCartPanel">
+      <span class="product-quote-cart-bar-icon"><i class="bi bi-file-earmark-text"></i></span>
+      <span class="product-quote-cart-bar-text" id="productQuoteCartBarText">Đã chọn sản phẩm cho báo giá</span>
+    </button>
+    <div class="product-quote-cart-bar-actions">
+      <button type="button" class="btn btn-primary btn-sm" id="btnCreateQuoteFromCart">
+        <i class="bi bi-send me-1"></i>Tạo báo giá
+      </button>
+      <button type="button" class="btn btn-light btn-sm" id="btnClearQuoteCart" title="Bỏ chọn">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="offcanvas offcanvas-end product-quote-cart-panel" tabindex="-1" id="productQuoteCartPanel" aria-labelledby="productQuoteCartPanelLabel">
+  <div class="offcanvas-header border-bottom">
+    <div>
+      <h5 class="offcanvas-title" id="productQuoteCartPanelLabel">Xem trước chọn báo giá</h5>
+      <p class="small-muted mb-0">Chọn nhiều sản phẩm — bấm <strong>Tạo báo giá</strong> khi đã chọn xong</p>
+    </div>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Đóng"></button>
+  </div>
+  <div class="offcanvas-body d-flex flex-column p-0">
+    <div class="product-quote-cart-list" id="productQuoteCartList"></div>
+    <div class="product-quote-cart-empty text-center text-muted py-5 px-3" id="productQuoteCartEmpty" hidden>
+      <i class="bi bi-file-earmark-text d-block mb-2" style="font-size:2rem;opacity:.35"></i>
+      Chưa chọn sản phẩm. Bấm icon trên từng dòng để chọn — có thể chọn nhiều sản phẩm.
+    </div>
+    <div class="product-quote-cart-panel-footer border-top p-3 mt-auto">
+      <p class="small-muted mb-2">Số lượng và thêm dòng khác sẽ nhập trong form tạo báo giá.</p>
+      <button type="button" class="btn btn-primary w-100" id="btnCreateQuoteFromCartPanel">
+        <i class="bi bi-send me-1"></i>Tạo báo giá (<span id="productQuoteDraftCount">0</span>)
+      </button>
+      <button type="button" class="btn btn-link btn-sm text-danger w-100 mt-1" id="btnClearQuoteCartPanel">Bỏ tất cả</button>
+    </div>
+  </div>
+</div>

@@ -1585,16 +1585,18 @@ function initProductListImagePreview() {
   }
 
   rows.forEach(function (tr) {
-    tr.addEventListener('mouseenter', function (e) {
+    var nameTd = tr.querySelector('td.product-col-name');
+    if (!nameTd) return;
+    nameTd.addEventListener('mouseenter', function (e) {
       clearTimeout(hideTimer);
       showPreview(tr, e.clientX, e.clientY);
     });
-    tr.addEventListener('mousemove', function (e) {
+    nameTd.addEventListener('mousemove', function (e) {
       if (activeRow === tr && preview.classList.contains('is-visible')) {
         positionPreview(e.clientX, e.clientY);
       }
     });
-    tr.addEventListener('mouseleave', function () {
+    nameTd.addEventListener('mouseleave', function () {
       hideTimer = setTimeout(hidePreview, 60);
     });
   });

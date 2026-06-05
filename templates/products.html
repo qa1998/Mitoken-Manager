@@ -256,13 +256,13 @@
       <table class="table product-table-v2">
         <thead>
           <tr>
-            <th>Sản phẩm</th>
+            <th class="product-col-name">Sản phẩm</th>
             <th>Danh mục</th>
             <th>Thương hiệu</th>
             <th>Giá bán</th>
             <th>Tồn kho</th>
             <th>Trạng thái</th>
-            <th class="text-end">Thao tác</th>
+            <th class="text-end product-col-actions">Thao tác</th>
           </tr>
         </thead>
         <tbody>
@@ -272,7 +272,7 @@
           <tr class="list-row-clickable{% if preview_imgs %} has-product-preview{% endif %}"
               data-list-detail-href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}"
               {% if preview_imgs %}data-product-preview-images='{{ preview_imgs|tojson }}' data-product-preview-name="{{ p.name|e }}"{% endif %}>
-            <td>
+            <td class="product-col-name">
               <div class="product-cell-combined">
                 {{ product_thumb(p) }}
                 <div class="product-name-block">
@@ -309,12 +309,28 @@
             <td>
               <span class="product-status-badge status-{{ sale_key }}"><span class="product-status-dot" aria-hidden="true"></span>{{ sale_label }}</span>
             </td>
-            <td class="text-end table-actions-cell">
+            <td class="text-end table-actions-cell product-col-actions">
+              <div class="product-row-actions">
+                {% if can_quotes and p.is_active %}
+                <button type="button" class="btn btn-light btn-action-cart js-add-to-quote-cart"
+                        data-product-id="{{ p.id }}" title="Chọn / bỏ chọn cho báo giá" aria-label="Chọn / bỏ chọn cho báo giá"
+                        onclick="event.stopPropagation()">
+                  <i class="bi bi-file-earmark-plus"></i>
+                </button>
+                {% endif %}
               <div class="dropdown">
                 <button class="btn btn-light btn-action-dots" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed","placement":"bottom-end"}' aria-expanded="false">
                   <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
+                  {% if can_quotes and p.is_active %}
+                  <li>
+                    <button type="button" class="dropdown-item js-add-to-quote-cart" data-product-id="{{ p.id }}">
+                      <i class="bi bi-file-earmark-plus me-2"></i>Chọn cho báo giá
+                    </button>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  {% endif %}
                   <li>
                     <a class="dropdown-item" href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}">
                       <i class="bi bi-eye me-2"></i>Chi tiết
@@ -358,6 +374,7 @@
                     </form>
                   </li>
                 </ul>
+              </div>
               </div>
             </td>
           </tr>
@@ -595,7 +612,16 @@
 <script id="taxonomyCatalogData" type="application/json">{{ taxonomy_catalog_json|safe }}</script>
 <script id="brandsCatalogData" type="application/json">{{ brands_catalog_json|safe }}</script>
 
+{% if can_quotes %}
+{% include 'partials/product_quote_cart.html' %}
+{% include 'partials/quote_create_modal.html' %}
+{% endif %}
+
 {% endblock %}
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/products.js') }}"></script>
+{% if can_quotes %}
+<script src="{{ url_for('static', filename='js/quotes.js') }}"></script>
+<script src="{{ url_for('static', filename='js/product_quote_cart.js') }}"></script>
+{% endif %}
 {% endblock %}

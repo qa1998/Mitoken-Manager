@@ -8,6 +8,16 @@ function getTaxonomyCatalog() {
   }
 }
 
+function getBrandsCatalog() {
+  var el = document.getElementById('brandsCatalogData');
+  if (!el) return [];
+  try {
+    return JSON.parse(el.textContent || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
 function fillChildCategorySelect(childSelect, parentId, selectedId, emptyLabel) {
   var catalog = getTaxonomyCatalog();
   var label = emptyLabel || '— Chọn danh mục con —';
@@ -568,16 +578,19 @@ function initProductImageUrlFields(root) {
     input.addEventListener('change', syncPreview);
     syncPreview();
   });
+
+  document.querySelectorAll('.product-page-modal').forEach(function (modal) {
+    modal.addEventListener('show.bs.modal', function () {
+      modal.querySelectorAll('.product-image-url-input').forEach(function (input) {
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    });
+  });
 }
 
-/** Panel upload ảnh: hàng thumbnail + placeholder +N, thao tác dưới ảnh chọn, dropzone. */
-function initProductMultiImages() {
-  var accumulators = new WeakMap();
-  var replaceTargets = new WeakMap();
-
-  function fileKey(f) {
-    return f.name + '|' + f.size + '|' + f.lastModified;
-  }
+function initProductDetailGallery() {
+  var gallery = document.querySelector('.product-detail-gallery');
 
   function setInputFiles(input, files) {
     var dt = new DataTransfer();
@@ -1497,19 +1510,722 @@ function initProductSidebarSearch() {
     var list = targetSel ? document.querySelector(targetSel) : null;
     if (!list) return;
     input.addEventListener('input', function () {
-      var q = (input.value || '').trim().toLowerCase();
+      var q = (input.value || '').trim();
       list.querySelectorAll('.product-sidebar-item').forEach(function (item) {
         var label = item.getAttribute('data-filter-label') || '';
-        item.hidden = q && label.indexOf(q) === -1;
+        var match = window.vnSearchMatch
+          ? vnSearchMatch(label, q)
+          : !q || label.toLowerCase().indexOf(q.toLowerCase()) !== -1;
+        item.hidden = q && !match;
       });
     });
+  });
+}
+
+function initProductVariantSetup() {
+  document.querySelectorAll('[data-product-variant-setup]').forEach(function (wrap) {
+    if (wrap.dataset.variantSetupInit === '1') return;
+    wrap.dataset.variantSetupInit = '1';
+    var form = wrap.closest('form');
+    var hidden = wrap.querySelector('input[name="variant"]');
+    var listEl = wrap.querySelector('[data-variant-name-list]');
+    var addBtn = wrap.querySelector('[data-variant-add-btn]');
+    if (!hidden || !listEl || !addBtn) return;
+
+    function parseInitialLabels() {
+      var raw = (hidden.value || '').trim();
+      if (!raw) return [];
+      if (raw.indexOf(', ') >= 0) {
+        return raw
+          .split(', ')
+          .map(function (s) {
+            return s.trim();
+          })
+          .filter(Boolean);
+      }
+      return [raw];
+    }
+
+    function syncHidden() {
+      var labels = [];
+      listEl.querySelectorAll('[data-variant-name-input]').forEach(function (inp) {
+        var v = (inp.value || '').trim();
+        if (v) labels.push(v);
+      });
+      hidden.value = labels.join(', ');
+      hidden.dispatchEvent(new Event('change', { bubbles: true }));
+      hidden.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function addRow(value, focus) {
+      var row = document.createElement('div');
+      row.className = 'product-variant-name-row';
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'form-control form-control-sm';
+      input.setAttribute('data-variant-name-input', '');
+      input.placeholder = 'VD: Đỏ, Xanh, Size M';
+      input.value = value || '';
+      input.addEventListener('input', syncHidden);
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-sm btn-link text-danger product-variant-name-remove';
+      removeBtn.title = 'Xóa biến thể';
+      removeBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
+      removeBtn.addEventListener('click', function () {
+        row.remove();
+        syncHidden();
+      });
+      row.appendChild(input);
+      row.appendChild(removeBtn);
+      listEl.appendChild(row);
+      if (focus) input.focus();
+      syncHidden();
+    }
+
+    addBtn.addEventListener('click', function () {
+      addRow('', true);
+    });
+
+    parseInitialLabels().forEach(function (label) {
+      addRow(label, false);
+    });
+
+    if (form) form.addEventListener('submit', syncHidden);
+  });
+}
+
+function initVariantRetailPriceFields() {
+  document.querySelectorAll('[data-product-retail-price-col]').forEach(function (col) {
+    var form = col.closest('form');
+    if (!form) return;
+    var variantInput = form.querySelector('input[name="variant"]');
+    var stockCol = form.querySelector('[data-product-variant-stock-col]');
+    var costCol = form.querySelector('[data-product-cost-col]');
+    var projectCol = form.querySelector('[data-project-price-col]');
+    var dealerCol = form.querySelector('[data-dealer-price-col]');
+    var stockSingleWrap = stockCol ? stockCol.querySelector('[data-stock-single-wrap]') : null;
+    var stockSingleInput = stockCol ? stockCol.querySelector('[data-stock-single]') : null;
+    var costSingleWrap = costCol ? costCol.querySelector('[data-cost-single-wrap]') : null;
+    var costSingleInput = costCol ? costCol.querySelector('[data-cost-single]') : null;
+    var projectSingleWrap = projectCol ? projectCol.querySelector('[data-project-single-wrap]') : null;
+    var projectSingleInput = projectCol ? projectCol.querySelector('[data-project-single]') : null;
+    var dealerSingleWrap = dealerCol ? dealerCol.querySelector('[data-dealer-single-wrap]') : null;
+    var dealerSingleInput = dealerCol ? dealerCol.querySelector('[data-dealer-single]') : null;
+    var stockSubmitInput = form.querySelector('[data-variant-stock-submit]');
+    var costSubmitInput = form.querySelector('[data-cost-price-submit]');
+    var projectSubmitInput = form.querySelector('[data-project-price-submit]');
+    var dealerSubmitInput = form.querySelector('[data-dealer-price-submit]');
+    var imageSubmitInput = form.querySelector('[data-variant-image-urls-submit]');
+    var brandSubmitInput = form.querySelector('[data-variant-brand-ids-submit]');
+    var taxonomyPicker = form.querySelector('.taxonomy-picker');
+    var taxonomyBrandCol = taxonomyPicker
+      ? taxonomyPicker.querySelector('.taxonomy-brand-select')
+        ? taxonomyPicker.querySelector('.taxonomy-brand-select').closest('[class*="col-"]')
+        : null
+      : null;
+    var singleWrap = col.querySelector('[data-retail-single-wrap]');
+    var variantsWrap = col.querySelector('[data-retail-variants-wrap]');
+    var singleInput = col.querySelector('[data-retail-price-single]');
+    var variantList = col.querySelector('[data-retail-variant-list]');
+    var submitInput = col.querySelector('[data-retail-price-submit]');
+    if (!submitInput) return;
+
+    var initialPricesRaw = col.getAttribute('data-initial-prices') || '';
+    var initialStocksRaw =
+      (stockCol && stockCol.getAttribute('data-initial-stocks')) ||
+      col.getAttribute('data-initial-stocks') ||
+      '';
+    var initialCostsRaw = col.getAttribute('data-initial-costs') || '';
+    var initialDealersRaw = col.getAttribute('data-initial-dealers') || '';
+    var initialProjectsRaw = col.getAttribute('data-initial-projects') || '';
+    var initialImagesRaw = col.getAttribute('data-initial-images') || '';
+    var initialBrandsRaw = col.getAttribute('data-initial-brands') || '';
+    var defaultBrandId = col.getAttribute('data-default-brand-id') || '';
+
+    function parseLabels() {
+      var raw = (variantInput ? variantInput.value : col.getAttribute('data-initial-variant') || '').trim();
+      if (!raw) return [];
+      if (raw.indexOf(', ') >= 0) {
+        return raw
+          .split(', ')
+          .map(function (s) {
+            return s.trim();
+          })
+          .filter(Boolean);
+      }
+      return [raw];
+    }
+
+    function moneySubmitValue(val) {
+      return String(val || '').replace(/\D/g, '');
+    }
+
+    function parseCsvValues(raw) {
+      if (!raw) return [];
+      if (raw.indexOf(', ') >= 0) {
+        return raw.split(', ').map(function (s) {
+          return s.trim();
+        });
+      }
+      if (raw.indexOf(',') >= 0) {
+        return raw.split(',').map(function (s) {
+          return s.trim();
+        });
+      }
+      return [raw];
+    }
+
+    function alignVariantRowValues(preserved, fallback, count) {
+      var out = [];
+      var i;
+      for (i = 0; i < count; i++) {
+        if (i < preserved.length) out.push(preserved[i]);
+        else if (fallback && i < fallback.length) out.push(fallback[i]);
+        else out.push('');
+      }
+      return out;
+    }
+
+    function parseSubmitImages(raw) {
+      if (!raw) return [];
+      try {
+        var parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return parseCsvValues(raw);
+      }
+    }
+
+    function getFormBrandScopeIds() {
+      if (!taxonomyPicker) return new Set();
+      var parentSel = taxonomyPicker.querySelector('.taxonomy-parent-select');
+      var childSel = taxonomyPicker.querySelector('.taxonomy-child-select');
+      var parentId = parentSel ? parentSel.value : '';
+      var childId = childSel ? childSel.value : '';
+      var scopeIds = new Set();
+      if (childId) scopeIds.add(String(childId));
+      if (parentId) {
+        scopeIds.add(String(parentId));
+        var catalog = getTaxonomyCatalog();
+        (catalog.children[String(parentId)] || []).forEach(function (c) {
+          scopeIds.add(String(c.id));
+        });
+      }
+      return scopeIds;
+    }
+
+    function getFallbackBrandId() {
+      if (!taxonomyPicker) return defaultBrandId || '';
+      var brandSel = taxonomyPicker.querySelector('.taxonomy-brand-select');
+      return (brandSel && brandSel.value) || defaultBrandId || '';
+    }
+
+    function buildVariantBrandSelect(selectedId) {
+      var select = document.createElement('select');
+      select.className = 'form-select form-select-sm';
+      select.setAttribute('data-variant-brand-input', '');
+      var empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '— Chọn thương hiệu —';
+      select.appendChild(empty);
+      var scopeIds = getFormBrandScopeIds();
+      getBrandsCatalog().forEach(function (b) {
+        var opt = document.createElement('option');
+        opt.value = String(b.id);
+        opt.textContent = b.name;
+        if (b.category_id) opt.dataset.categoryId = String(b.category_id);
+        var cid = b.category_id ? String(b.category_id) : '';
+        if (scopeIds.size > 0 && cid && !scopeIds.has(cid)) {
+          opt.hidden = true;
+        }
+        if (selectedId && String(selectedId) === String(b.id)) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', syncCombinedValues);
+      return select;
+    }
+
+    function parseInitialImages() {
+      if (!initialImagesRaw) return [];
+      try {
+        var parsed = JSON.parse(initialImagesRaw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return parseCsvValues(initialImagesRaw);
+      }
+    }
+
+    function formatMoneyVal(val) {
+      var digits = String(val || '').replace(/\D/g, '');
+      if (!digits) return '';
+      return typeof window.formatMoneyInputValue === 'function'
+        ? window.formatMoneyInputValue(digits)
+        : digits;
+    }
+
+    function collectVariantInputValues(selector) {
+      var values = [];
+      if (!variantList) return values;
+      variantList.querySelectorAll(selector).forEach(function (inp) {
+        values.push(inp.value || '');
+      });
+      return values;
+    }
+
+    function updateVariantImagePreview(wrap, url) {
+      if (!wrap) return;
+      var img = wrap.querySelector('img');
+      var ph = wrap.querySelector('.product-variant-image-ph');
+      var u = (url || '').trim();
+      if (u && /^https?:\/\//i.test(u)) {
+        if (!img) {
+          img = document.createElement('img');
+          img.alt = '';
+          img.referrerPolicy = 'no-referrer';
+          wrap.appendChild(img);
+        }
+        img.src = u;
+        if (ph) ph.remove();
+      } else {
+        if (img) img.remove();
+        if (!ph) {
+          ph = document.createElement('span');
+          ph.className = 'product-variant-image-ph';
+          ph.innerHTML = '<i class="bi bi-image"></i>';
+          wrap.appendChild(ph);
+        }
+      }
+    }
+
+    function syncCombinedValues() {
+      var labels = parseLabels();
+      if (labels.length > 1 && variantList) {
+        var priceParts = [];
+        var costParts = [];
+        var dealerParts = [];
+        var projectParts = [];
+        var stockParts = [];
+        var imageParts = [];
+        variantList.querySelectorAll('[data-variant-price-input]').forEach(function (inp) {
+          priceParts.push((inp.value || '').replace(/\D/g, '') || '0');
+        });
+        variantList.querySelectorAll('[data-variant-cost-input]').forEach(function (inp) {
+          costParts.push((inp.value || '').replace(/\D/g, '') || '0');
+        });
+        variantList.querySelectorAll('[data-variant-dealer-input]').forEach(function (inp) {
+          dealerParts.push((inp.value || '').replace(/\D/g, '') || '0');
+        });
+        variantList.querySelectorAll('[data-variant-project-input]').forEach(function (inp) {
+          projectParts.push((inp.value || '').replace(/\D/g, '') || '0');
+        });
+        variantList.querySelectorAll('[data-variant-qty-input]').forEach(function (inp) {
+          stockParts.push(inp.value === '' ? '0' : inp.value);
+        });
+        variantList.querySelectorAll('[data-variant-image-input]').forEach(function (inp) {
+          imageParts.push((inp.value || '').trim());
+        });
+        var brandParts = [];
+        variantList.querySelectorAll('[data-variant-brand-input]').forEach(function (sel) {
+          brandParts.push(sel.value || '');
+        });
+        submitInput.value = priceParts.join(', ');
+        if (costSubmitInput) costSubmitInput.value = costParts.join(', ');
+        if (dealerSubmitInput) dealerSubmitInput.value = dealerParts.join(', ');
+        if (projectSubmitInput) projectSubmitInput.value = projectParts.join(', ');
+        if (stockSubmitInput) stockSubmitInput.value = stockParts.join(', ');
+        if (imageSubmitInput) imageSubmitInput.value = JSON.stringify(imageParts);
+        if (brandSubmitInput) brandSubmitInput.value = brandParts.join(', ');
+        refreshVariantFieldSummaries();
+      } else {
+        if (singleInput) submitInput.value = moneySubmitValue(singleInput.value);
+        if (stockSubmitInput && stockSingleInput) {
+          stockSubmitInput.value = stockSingleInput.value === '' ? '0' : stockSingleInput.value;
+        }
+        if (costSubmitInput && costSingleInput) {
+          costSubmitInput.value = moneySubmitValue(costSingleInput.value);
+        }
+        if (dealerSubmitInput && dealerSingleInput) {
+          dealerSubmitInput.value = moneySubmitValue(dealerSingleInput.value);
+        }
+        if (projectSubmitInput && projectSingleInput) {
+          projectSubmitInput.value = moneySubmitValue(projectSingleInput.value);
+        }
+        if (imageSubmitInput) imageSubmitInput.value = '';
+        if (brandSubmitInput) brandSubmitInput.value = '';
+      }
+    }
+
+    function getVariantExpandedState() {
+      if (!col._variantExpandedLabels) col._variantExpandedLabels = {};
+      return col._variantExpandedLabels;
+    }
+
+    function captureVariantExpandedState() {
+      var state = getVariantExpandedState();
+      if (!variantList) return state;
+      variantList.querySelectorAll('.product-variant-price-field').forEach(function (field) {
+        var key = field.getAttribute('data-variant-label');
+        if (key) state[key] = field.classList.contains('is-expanded');
+      });
+      return state;
+    }
+
+    function variantFieldSummary(cost, retail, stock) {
+      var parts = [];
+      var stockVal = stock === '' || stock == null ? '' : String(stock);
+      if (stockVal && stockVal !== '0') parts.push('Tồn: ' + stockVal);
+      var retailDigits = String(retail || '').replace(/\D/g, '');
+      if (retailDigits && retailDigits !== '0') {
+        parts.push('Lẻ: ' + formatMoneyVal(retailDigits) + ' đ');
+      }
+      var costDigits = String(cost || '').replace(/\D/g, '');
+      if (costDigits && costDigits !== '0' && !retailDigits) {
+        parts.push('Nhập: ' + formatMoneyVal(costDigits) + ' đ');
+      }
+      return parts.length ? parts.join(' · ') : 'Bấm để nhập giá & tồn';
+    }
+
+    function refreshVariantFieldSummaries() {
+      if (!variantList) return;
+      variantList.querySelectorAll('.product-variant-price-field').forEach(function (field) {
+        var summaryEl = field.querySelector('[data-variant-field-summary]');
+        if (!summaryEl) return;
+        var costInp = field.querySelector('[data-variant-cost-input]');
+        var retailInp = field.querySelector('[data-variant-price-input]');
+        var qtyInp = field.querySelector('[data-variant-qty-input]');
+        summaryEl.textContent = variantFieldSummary(
+          costInp ? costInp.value : '',
+          retailInp ? retailInp.value : '',
+          qtyInp ? qtyInp.value : ''
+        );
+      });
+    }
+
+    function setVariantFieldExpanded(field, label, expanded) {
+      field.classList.toggle('is-expanded', expanded);
+      var state = getVariantExpandedState();
+      state[label] = expanded;
+    }
+
+    function updateVariantLabelHeaders(labels) {
+      if (!variantList) return;
+      var fields = variantList.querySelectorAll('.product-variant-price-field');
+      labels.forEach(function (label, i) {
+        if (!fields[i]) return;
+        var labelEl = fields[i].querySelector('.product-variant-price-label');
+        if (labelEl) labelEl.textContent = label;
+        fields[i].setAttribute('data-variant-label', label);
+      });
+      refreshVariantFieldSummaries();
+    }
+
+    function renderVariantInputs() {
+      if (!variantList) return;
+      var labels = parseLabels();
+      var prevLabelCount = parseInt(variantList.dataset.labelCount || '0', 10);
+      var expandedState = captureVariantExpandedState();
+      if (variantList.querySelector('[data-variant-price-input], [data-variant-qty-input]')) {
+        syncCombinedValues();
+      }
+      var preservedPrices = collectVariantInputValues('[data-variant-price-input]');
+      var preservedQtys = collectVariantInputValues('[data-variant-qty-input]');
+      var preservedCosts = collectVariantInputValues('[data-variant-cost-input]');
+      var preservedDealers = collectVariantInputValues('[data-variant-dealer-input]');
+      var preservedProjects = collectVariantInputValues('[data-variant-project-input]');
+      var preservedImages = collectVariantInputValues('[data-variant-image-input]');
+      var preservedBrands = collectVariantInputValues('[data-variant-brand-input]');
+      var prices = alignVariantRowValues(
+        preservedPrices,
+        parseCsvValues(submitInput.value || initialPricesRaw),
+        labels.length
+      );
+      var qtys = alignVariantRowValues(
+        preservedQtys,
+        parseCsvValues((stockSubmitInput && stockSubmitInput.value) || initialStocksRaw),
+        labels.length
+      );
+      var costs = alignVariantRowValues(
+        preservedCosts,
+        parseCsvValues((costSubmitInput && costSubmitInput.value) || initialCostsRaw),
+        labels.length
+      );
+      var dealers = alignVariantRowValues(
+        preservedDealers,
+        parseCsvValues((dealerSubmitInput && dealerSubmitInput.value) || initialDealersRaw),
+        labels.length
+      );
+      var projects = alignVariantRowValues(
+        preservedProjects,
+        parseCsvValues((projectSubmitInput && projectSubmitInput.value) || initialProjectsRaw),
+        labels.length
+      );
+      var images = alignVariantRowValues(
+        preservedImages,
+        parseSubmitImages((imageSubmitInput && imageSubmitInput.value) || initialImagesRaw),
+        labels.length
+      );
+      var brands = alignVariantRowValues(
+        preservedBrands,
+        parseCsvValues((brandSubmitInput && brandSubmitInput.value) || initialBrandsRaw),
+        labels.length
+      );
+      var fallbackBrand = getFallbackBrandId();
+      variantList.innerHTML = '';
+      labels.forEach(function (label, i) {
+        var field = document.createElement('div');
+        field.className = 'product-variant-price-field';
+        field.setAttribute('data-variant-label', label);
+        var expanded;
+        if (Object.prototype.hasOwnProperty.call(expandedState, label)) {
+          expanded = expandedState[label];
+        } else if (labels.length > prevLabelCount) {
+          expanded = i >= prevLabelCount;
+        } else {
+          expanded = i === 0;
+        }
+        if (expanded) field.classList.add('is-expanded');
+
+        var head = document.createElement('button');
+        head.type = 'button';
+        head.className = 'product-variant-field-toggle';
+        var thumbWrap = document.createElement('div');
+        thumbWrap.className = 'product-variant-image-thumb';
+        updateVariantImagePreview(thumbWrap, images[i] || '');
+        var toggleText = document.createElement('div');
+        toggleText.className = 'product-variant-field-toggle-text';
+        var labelEl = document.createElement('div');
+        labelEl.className = 'product-variant-price-label';
+        labelEl.textContent = label;
+        var summaryEl = document.createElement('div');
+        summaryEl.className = 'product-variant-field-summary';
+        summaryEl.setAttribute('data-variant-field-summary', '');
+        summaryEl.textContent = variantFieldSummary(costs[i], prices[i], qtys[i]);
+        toggleText.appendChild(labelEl);
+        toggleText.appendChild(summaryEl);
+        var caret = document.createElement('i');
+        caret.className = 'bi bi-chevron-down product-variant-field-caret';
+        caret.setAttribute('aria-hidden', 'true');
+        head.appendChild(thumbWrap);
+        head.appendChild(toggleText);
+        head.appendChild(caret);
+        head.addEventListener('click', function () {
+          setVariantFieldExpanded(field, label, !field.classList.contains('is-expanded'));
+        });
+
+        var body = document.createElement('div');
+        body.className = 'product-variant-field-body';
+        var brandWrap = document.createElement('div');
+        brandWrap.className = 'product-variant-brand-wrap';
+        var brandLabel = document.createElement('label');
+        brandLabel.className = 'form-label-custom small mb-1';
+        brandLabel.textContent = 'Thương hiệu';
+        var brandOptional = document.createElement('span');
+        brandOptional.className = 'text-muted fw-normal';
+        brandOptional.textContent = ' (tuỳ chọn)';
+        brandLabel.appendChild(brandOptional);
+        brandWrap.appendChild(brandLabel);
+        brandWrap.appendChild(
+          buildVariantBrandSelect(brands[i] || fallbackBrand || '')
+        );
+        var imageWrap = document.createElement('div');
+        imageWrap.className = 'product-variant-image-wrap';
+        var imageLabel = document.createElement('label');
+        imageLabel.className = 'form-label-custom small mb-1';
+        imageLabel.textContent = 'URL hình ảnh';
+        var imageOptional = document.createElement('span');
+        imageOptional.className = 'text-muted fw-normal';
+        imageOptional.textContent = ' (tuỳ chọn)';
+        imageLabel.appendChild(imageOptional);
+        var imageInput = document.createElement('input');
+        imageInput.type = 'text';
+        imageInput.setAttribute('inputmode', 'url');
+        imageInput.className = 'form-control form-control-sm';
+        imageInput.setAttribute('data-variant-image-input', '');
+        imageInput.setAttribute('placeholder', 'https://example.com/image.jpg');
+        imageInput.value = images[i] || '';
+        imageInput.addEventListener('input', function () {
+          updateVariantImagePreview(thumbWrap, imageInput.value);
+          syncCombinedValues();
+        });
+        imageWrap.appendChild(imageLabel);
+        imageWrap.appendChild(imageInput);
+        var row = document.createElement('div');
+        row.className = 'row g-2 product-variant-price-qty-row';
+        function makeMoneyCol(labelText, placeholder, attr, val, colClass) {
+          var colEl = document.createElement('div');
+          colEl.className = colClass || 'col-6 col-md-4';
+          var fieldLabel = document.createElement('label');
+          fieldLabel.className = 'form-label-custom small mb-1';
+          fieldLabel.textContent = labelText;
+          colEl.appendChild(fieldLabel);
+          var wrap = document.createElement('div');
+          wrap.className = 'money-input-wrap money-input-wrap-sm';
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'form-control money-input form-control-sm';
+          input.setAttribute('inputmode', 'numeric');
+          input.setAttribute('autocomplete', 'off');
+          input.setAttribute(attr, '');
+          input.setAttribute('placeholder', placeholder);
+          input.value = formatMoneyVal(val || '');
+          input.addEventListener('input', syncCombinedValues);
+          var suffix = document.createElement('span');
+          suffix.className = 'money-input-suffix';
+          suffix.textContent = 'đ';
+          wrap.appendChild(input);
+          wrap.appendChild(suffix);
+          colEl.appendChild(wrap);
+          return colEl;
+        }
+        row.appendChild(makeMoneyCol('Giá nhập', '0', 'data-variant-cost-input', costs[i]));
+        row.appendChild(makeMoneyCol('Giá lẻ', '0', 'data-variant-price-input', prices[i]));
+        row.appendChild(makeMoneyCol('Giá sỉ', '0', 'data-variant-dealer-input', dealers[i]));
+        row.appendChild(makeMoneyCol('Giá công trình', '0', 'data-variant-project-input', projects[i]));
+        var qtyCol = document.createElement('div');
+        qtyCol.className = 'col-6 col-md-4';
+        var qtyLabel = document.createElement('label');
+        qtyLabel.className = 'form-label-custom small mb-1';
+        qtyLabel.textContent = 'Tồn kho';
+        var qtyInput = document.createElement('input');
+        qtyInput.type = 'number';
+        qtyInput.className = 'form-control form-control-sm';
+        qtyInput.setAttribute('data-variant-qty-input', '');
+        qtyInput.setAttribute('placeholder', '0');
+        qtyInput.min = '0';
+        qtyInput.step = 'any';
+        qtyInput.value = qtys[i] !== undefined && qtys[i] !== '' ? qtys[i] : '0';
+        qtyInput.addEventListener('input', syncCombinedValues);
+        qtyCol.appendChild(qtyLabel);
+        qtyCol.appendChild(qtyInput);
+        row.appendChild(qtyCol);
+        body.appendChild(brandWrap);
+        body.appendChild(imageWrap);
+        body.appendChild(row);
+        field.appendChild(head);
+        field.appendChild(body);
+        variantList.appendChild(field);
+      });
+      refreshVariantFieldSummaries();
+      initialPricesRaw = '';
+      initialStocksRaw = '';
+      initialCostsRaw = '';
+      initialDealersRaw = '';
+      initialProjectsRaw = '';
+      initialImagesRaw = '';
+      initialBrandsRaw = '';
+      col.removeAttribute('data-initial-prices');
+      col.removeAttribute('data-initial-stocks');
+      col.removeAttribute('data-initial-costs');
+      col.removeAttribute('data-initial-dealers');
+      col.removeAttribute('data-initial-projects');
+      col.removeAttribute('data-initial-images');
+      col.removeAttribute('data-initial-brands');
+      if (stockCol) stockCol.removeAttribute('data-initial-stocks');
+      if (typeof window.initMoneyInputs === 'function') {
+        window.initMoneyInputs(variantList);
+      }
+      syncCombinedValues();
+    }
+
+    function refreshVariantBrandOptions() {
+      if (!variantList) return;
+      variantList.querySelectorAll('[data-variant-brand-input]').forEach(function (sel) {
+        var current = sel.value;
+        var parent = sel.parentNode;
+        var next = buildVariantBrandSelect(current);
+        parent.replaceChild(next, sel);
+      });
+    }
+
+    function updateMode() {
+      var labels = parseLabels();
+      var multi = labels.length > 1;
+      if (singleWrap) singleWrap.classList.toggle('d-none', multi);
+      if (variantsWrap) variantsWrap.classList.toggle('d-none', !multi);
+      if (stockSingleWrap) stockSingleWrap.classList.toggle('d-none', multi);
+      if (costSingleWrap) costSingleWrap.classList.toggle('d-none', multi);
+      if (projectSingleWrap) projectSingleWrap.classList.toggle('d-none', multi);
+      if (dealerSingleWrap) dealerSingleWrap.classList.toggle('d-none', multi);
+      if (projectCol) projectCol.classList.toggle('d-none', multi);
+      if (dealerCol) dealerCol.classList.toggle('d-none', multi);
+      if (taxonomyBrandCol) taxonomyBrandCol.classList.toggle('d-none', multi);
+      if (multi) {
+        var prevCount = parseInt(variantList.dataset.labelCount || '0', 10);
+        if (!variantList.children.length || prevCount !== labels.length) {
+          renderVariantInputs();
+        } else {
+          updateVariantLabelHeaders(labels);
+        }
+        variantList.dataset.labelCount = String(labels.length);
+      } else {
+        if (variantList && variantList.children.length) {
+          function firstVariantValue(selector) {
+            var el = variantList.querySelector(selector);
+            return el ? el.value : '';
+          }
+          if (singleInput) singleInput.value = firstVariantValue('[data-variant-price-input]');
+          if (costSingleInput) costSingleInput.value = firstVariantValue('[data-variant-cost-input]');
+          if (dealerSingleInput) dealerSingleInput.value = firstVariantValue('[data-variant-dealer-input]');
+          if (projectSingleInput) projectSingleInput.value = firstVariantValue('[data-variant-project-input]');
+          if (stockSingleInput) stockSingleInput.value = firstVariantValue('[data-variant-qty-input]') || '0';
+          variantList.dataset.labelCount = '0';
+          variantList.innerHTML = '';
+        }
+        syncCombinedValues();
+      }
+    }
+
+    if (variantInput) {
+      variantInput.addEventListener('input', updateMode);
+      variantInput.addEventListener('change', updateMode);
+    }
+    if (taxonomyPicker) {
+      var parentSel = taxonomyPicker.querySelector('.taxonomy-parent-select');
+      var childSel = taxonomyPicker.querySelector('.taxonomy-child-select');
+      if (parentSel) {
+        parentSel.addEventListener('change', function () {
+          if (parseLabels().length > 1) refreshVariantBrandOptions();
+        });
+      }
+      if (childSel) {
+        childSel.addEventListener('change', function () {
+          if (parseLabels().length > 1) refreshVariantBrandOptions();
+        });
+      }
+    }
+    if (singleInput) singleInput.addEventListener('input', syncCombinedValues);
+    if (stockSingleInput) stockSingleInput.addEventListener('input', syncCombinedValues);
+    if (costSingleInput) costSingleInput.addEventListener('input', syncCombinedValues);
+    if (projectSingleInput) projectSingleInput.addEventListener('input', syncCombinedValues);
+    if (dealerSingleInput) dealerSingleInput.addEventListener('input', syncCombinedValues);
+    function presubmitProductFormSync() {
+      var variantSetup = form.querySelector('[data-product-variant-setup]');
+      if (variantSetup) {
+        var variantHidden = form.querySelector('input[name="variant"]');
+        var nameList = variantSetup.querySelector('[data-variant-name-list]');
+        if (variantHidden && nameList) {
+          var names = [];
+          nameList.querySelectorAll('[data-variant-name-input]').forEach(function (inp) {
+            var v = (inp.value || '').trim();
+            if (v) names.push(v);
+          });
+          variantHidden.value = names.join(', ');
+        }
+      }
+      updateMode();
+      syncCombinedValues();
+    }
+    form.addEventListener('submit', presubmitProductFormSync);
+    form.addEventListener('product-form-presubmit', presubmitProductFormSync);
+    updateMode();
   });
 }
 
 function initProductListImagePreview() {
   var table = document.querySelector('.product-table-v2');
   if (!table) return;
-  var rows = table.querySelectorAll('tbody tr[data-product-preview-images]');
+  var rows = table.querySelectorAll('tbody tr.has-product-preview');
   if (!rows.length) return;
 
   var preview = document.createElement('div');
@@ -1521,14 +2237,28 @@ function initProductListImagePreview() {
     '<img alt="" referrerpolicy="no-referrer">' +
     '<span class="product-list-image-preview-more d-none"></span>' +
     '</div>' +
-    '<div class="product-list-image-preview-name"></div>';
+    '<div class="product-list-image-preview-name"></div>' +
+    '<div class="product-list-image-preview-variants d-none"></div>';
   document.body.appendChild(preview);
 
   var previewImg = preview.querySelector('img');
+  var mediaWrap = preview.querySelector('.product-list-image-preview-media');
   var moreBadge = preview.querySelector('.product-list-image-preview-more');
   var nameEl = preview.querySelector('.product-list-image-preview-name');
+  var variantsEl = preview.querySelector('.product-list-image-preview-variants');
   var activeRow = null;
   var hideTimer = null;
+
+  function fmtMoney(n) {
+    return (parseInt(n, 10) || 0).toLocaleString('vi-VN') + ' đ';
+  }
+
+  function fmtQty(n) {
+    if (window.ProductUnits && ProductUnits.formatQty) return ProductUnits.formatQty(n);
+    var v = parseFloat(n);
+    if (isNaN(v)) return '0';
+    return v === Math.floor(v) ? String(Math.floor(v)) : String(v);
+  }
 
   function parseImages(tr) {
     try {
@@ -1539,18 +2269,30 @@ function initProductListImagePreview() {
     }
   }
 
+  function parseVariants(tr) {
+    try {
+      var items = JSON.parse(tr.getAttribute('data-product-preview-variants') || '[]');
+      return Array.isArray(items) ? items : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
   function hidePreview() {
     activeRow = null;
-    preview.classList.remove('is-visible');
+    preview.classList.remove('is-visible', 'has-variants');
     preview.setAttribute('aria-hidden', 'true');
     previewImg.removeAttribute('src');
+    variantsEl.innerHTML = '';
+    variantsEl.classList.add('d-none');
+    mediaWrap.classList.remove('d-none');
   }
 
   function positionPreview(clientX, clientY) {
     var pad = 14;
     var gap = 18;
     var rect = preview.getBoundingClientRect();
-    var w = rect.width || 256;
+    var w = rect.width || 280;
     var h = rect.height || 280;
     var x = clientX + gap;
     var y = clientY + gap;
@@ -1565,12 +2307,50 @@ function initProductListImagePreview() {
     preview.style.top = y + 'px';
   }
 
+  function renderVariants(variants) {
+    variantsEl.innerHTML = '';
+    if (!variants.length) {
+      variantsEl.classList.add('d-none');
+      preview.classList.remove('has-variants');
+      return;
+    }
+    variants.forEach(function (v) {
+      var row = document.createElement('div');
+      row.className = 'product-list-preview-variant-row';
+      var thumb = v.image_url
+        ? '<span class="product-list-preview-variant-thumb"><img src="' + v.image_url + '" alt="" referrerpolicy="no-referrer"></span>'
+        : '<span class="product-list-preview-variant-thumb is-empty"><i class="bi bi-image"></i></span>';
+      var meta = [];
+      if (v.brand_name) meta.push(v.brand_name);
+      if (v.cost != null && v.cost !== '') meta.push('Nhập: ' + fmtMoney(v.cost));
+      meta.push(fmtMoney(v.price || 0));
+      if (v.qty != null && v.qty !== '') meta.push(fmtQty(v.qty));
+      row.innerHTML =
+        thumb +
+        '<span class="product-list-preview-variant-body">' +
+        '<span class="product-list-preview-variant-label">' + (v.label || '') + '</span>' +
+        '<span class="product-list-preview-variant-meta">' + meta.join(' · ') + '</span>' +
+        '</span>';
+      variantsEl.appendChild(row);
+    });
+    variantsEl.classList.remove('d-none');
+    preview.classList.add('has-variants');
+  }
+
   function showPreview(tr, clientX, clientY) {
     if (tr.querySelector('.dropdown.show')) return;
     var urls = parseImages(tr);
-    if (!urls.length) return;
+    var variants = parseVariants(tr);
+    if (!urls.length && !variants.length) return;
     activeRow = tr;
-    previewImg.src = urls[0];
+    var displayUrl = urls[0] || (variants[0] && variants[0].image_url) || '';
+    if (displayUrl) {
+      previewImg.src = displayUrl;
+      mediaWrap.classList.remove('d-none');
+    } else {
+      previewImg.removeAttribute('src');
+      mediaWrap.classList.add('d-none');
+    }
     previewImg.alt = tr.getAttribute('data-product-preview-name') || '';
     nameEl.textContent = tr.getAttribute('data-product-preview-name') || '';
     if (urls.length > 1) {
@@ -1579,6 +2359,7 @@ function initProductListImagePreview() {
     } else {
       moreBadge.classList.add('d-none');
     }
+    renderVariants(variants);
     preview.classList.add('is-visible');
     preview.setAttribute('aria-hidden', 'false');
     positionPreview(clientX, clientY);
@@ -1597,8 +2378,15 @@ function initProductListImagePreview() {
       }
     });
     nameTd.addEventListener('mouseleave', function () {
-      hideTimer = setTimeout(hidePreview, 60);
+      hideTimer = setTimeout(hidePreview, 80);
     });
+  });
+
+  preview.addEventListener('mouseenter', function () {
+    clearTimeout(hideTimer);
+  });
+  preview.addEventListener('mouseleave', function () {
+    hideTimer = setTimeout(hidePreview, 80);
   });
 
   table.addEventListener('scroll', hidePreview, true);
@@ -1608,8 +2396,9 @@ function initProductListImagePreview() {
 
 document.addEventListener('DOMContentLoaded', function () {
   initProductModalActions();
+  initProductVariantSetup();
+  initVariantRetailPriceFields();
   initProductImageUrlFields();
-  initProductMultiImages();
   initProductListImagePreview();
   initProductDetailGallery();
   initProductUnitSetup();

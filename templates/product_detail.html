@@ -7,7 +7,7 @@
 {% set sale_key, sale_label = product_list_status(p) %}
 {% set stock_key, stock_label = product_inventory_level(p) %}
 {% set cat_path = product_category_path(p) %}
-{% set brand_name = product_brand_name(p) %}
+{% set brand_name = product_brands_display(p) %}
 {% set stock_low = p.stock <= p.low_stock %}
 {% set sale_mode = product_default_sale_unit_mode(p) %}
 {% set sale_unit = product_unit_label(p, sale_mode) %}
@@ -163,11 +163,19 @@
     <div class="product-detail-kpi-row">
       <div class="product-detail-kpi-card">
         <span class="product-detail-kpi-label">Tồn kho hiện tại</span>
+        {% set kpi_var_rows = product_variant_rows(p) %}
+        {% if kpi_var_rows %}
+        <span class="product-detail-kpi-value{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">
+          {{ format_qty_display(p.stock) }} <small>{{ bu }}</small>
+        </span>
+        <span class="product-detail-kpi-sub">{{ kpi_var_rows|length }} biến thể</span>
+        {% else %}
         <span class="product-detail-kpi-value{% if stock_low %} is-low{% elif p.stock <= 0 %} is-out{% endif %}">
           {{ format_qty_display(p.stock) }} <small>{{ bu }}</small>
         </span>
         {% if product_has_unit_conversion(p) %}
         <span class="product-detail-kpi-sub">({{ format_qty_display(stock_purchase) }} {{ pu }})</span>
+        {% endif %}
         {% endif %}
       </div>
       <div class="product-detail-kpi-card">
@@ -180,8 +188,14 @@
       </div>
       <div class="product-detail-kpi-card">
         <span class="product-detail-kpi-label">Giá bán lẻ</span>
+        {% set kpi_variant_rows = product_variant_price_rows(p) %}
+        {% if kpi_variant_rows %}
+        <span class="product-detail-kpi-value price-retail">{{ kpi_variant_rows[0].price|money }} – {{ kpi_variant_rows[-1].price|money }}</span>
+        <span class="product-detail-kpi-sub">{{ kpi_variant_rows|length }} biến thể · / {{ sale_unit }}</span>
+        {% else %}
         <span class="product-detail-kpi-value price-retail">{{ p.retail_price|money }}</span>
         <span class="product-detail-kpi-sub">/ {{ sale_unit }}</span>
+        {% endif %}
       </div>
       <div class="product-detail-kpi-card">
         <span class="product-detail-kpi-label">Nhà cung cấp chính</span>
@@ -219,9 +233,62 @@
             <span class="product-detail-price-unit">/ {{ sale_unit }}</span>
           </div>
           <div class="product-detail-price-card">
-            <span class="product-detail-price-label">Giá bán lẻ</span>
+            <span class="product-detail-price-label">Giá bán lẻ &amp; Tồn kho</span>
+            {% set detail_var_rows = product_variant_rows(p) %}
+            {% set detail_price_rows = product_variant_price_rows(p) %}
+            {% if detail_var_rows %}
+            <div class="product-detail-price-variants product-detail-variant-table">
+              <div class="product-detail-price-variant-header product-detail-variant-table-head">
+                <span>Ảnh</span><span>Biến thể</span><span>Giá nhập</span><span>Giá lẻ</span><span>Tồn</span>
+              </div>
+              {% for row in detail_var_rows %}
+              <div class="product-detail-price-variant-row product-detail-variant-table-row">
+                <span class="product-detail-variant-thumb">
+                  {% if row.image_url is defined %}
+                  <img src="{{ row.image_url }}" alt="" referrerpolicy="no-referrer">
+                  {% else %}<span class="text-muted">—</span>{% endif %}
+                </span>
+                <span class="product-detail-price-variant-label">{{ row.label }}</span>
+                <span class="product-detail-price-cost">{% if row.cost is defined %}{{ row.cost|money }}{% else %}—{% endif %}</span>
+                <span class="product-detail-price-value price-retail">{{ row.price|money }}</span>
+                <span class="product-detail-price-qty">
+                  <span>{{ format_qty_display(row.qty) }} {{ bu }}</span>
+                  {% if product_has_unit_conversion(p) %}
+                  {% set row_equiv = product_qty_equivalent_text(p, row.qty) %}
+                  {% if row_equiv %}
+                  <span class="product-detail-price-qty-equiv">≈ {{ row_equiv }}</span>
+                  {% endif %}
+                  {% endif %}
+                </span>
+              </div>
+              {% endfor %}
+            </div>
+            <span class="product-detail-price-unit">
+              Tổng tồn: {{ format_qty_display(p.stock) }} {{ bu }}
+              {% if product_has_unit_conversion(p) %}
+              {% set total_equiv = product_stock_equivalent_text(p) %}
+              {% if total_equiv %}
+              <span class="product-detail-price-qty-equiv d-block">≈ {{ total_equiv }}</span>
+              {% endif %}
+              {% endif %}
+            </span>
+            {% elif detail_price_rows %}
+            <div class="product-detail-price-variants">
+              {% for row in detail_price_rows %}
+              <div class="product-detail-price-variant-row">
+                <span class="product-detail-price-variant-label">{{ row.label }}</span>
+                <span class="product-detail-price-value price-retail">{{ row.price|money }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            <span class="product-detail-price-unit">/ {{ sale_unit }}</span>
+            {% elif p.variant and ',' in p.variant %}
+            <span class="product-detail-price-value text-muted">—</span>
+            <span class="product-detail-price-unit small-muted">Chưa nhập giá và SL từng biến thể</span>
+            {% else %}
             <span class="product-detail-price-value price-retail">{{ p.retail_price|money }}</span>
             <span class="product-detail-price-unit">/ {{ sale_unit }}</span>
+            {% endif %}
           </div>
         </div>
       </section>

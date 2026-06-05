@@ -101,6 +101,47 @@ function initAppFlashes() {
   dataEl.parentNode && dataEl.parentNode.removeChild(dataEl);
 }
 
+function vnSearchFold(value) {
+  if (value == null) return '';
+  var text = String(value).trim().toLowerCase();
+  var map = {
+    à: 'a', á: 'a', ả: 'a', ã: 'a', ạ: 'a',
+    ă: 'a', ằ: 'a', ắ: 'a', ẳ: 'a', ẵ: 'a', ặ: 'a',
+    â: 'a', ầ: 'a', ấ: 'a', ẩ: 'a', ẫ: 'a', ậ: 'a',
+    è: 'e', é: 'e', ẻ: 'e', ẽ: 'e', ẹ: 'e',
+    ê: 'e', ề: 'e', ế: 'e', ể: 'e', ễ: 'e', ệ: 'e',
+    ì: 'i', í: 'i', ỉ: 'i', ĩ: 'i', ị: 'i',
+    ò: 'o', ó: 'o', ỏ: 'o', õ: 'o', ọ: 'o',
+    ô: 'o', ồ: 'o', ố: 'o', ổ: 'o', ỗ: 'o', ộ: 'o',
+    ơ: 'o', ờ: 'o', ớ: 'o', ở: 'o', ỡ: 'o', ợ: 'o',
+    ù: 'u', ú: 'u', ủ: 'u', ũ: 'u', ụ: 'u',
+    ư: 'u', ừ: 'u', ứ: 'u', ử: 'u', ữ: 'u', ự: 'u',
+    ỳ: 'y', ý: 'y', ỷ: 'y', ỹ: 'y', ỵ: 'y',
+    đ: 'd',
+  };
+  return text
+    .split('')
+    .map(function (ch) {
+      return map[ch] || ch;
+    })
+    .join('');
+}
+
+function vnSearchMatch(haystack, query) {
+  var foldedHay = vnSearchFold(haystack);
+  var tokens = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.every(function (token) {
+    return foldedHay.indexOf(vnSearchFold(token)) !== -1;
+  });
+}
+
+window.vnSearchFold = vnSearchFold;
+window.vnSearchMatch = vnSearchMatch;
+
 function parseMoneyInput(value) {
   return parseInt(String(value || '').replace(/\D/g, ''), 10) || 0;
 }

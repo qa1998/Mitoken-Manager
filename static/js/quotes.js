@@ -111,28 +111,81 @@
     return 'is-ok';
   }
 
-  function getSelectedProductIds(excludeRow) {
-    var form = resolveQuoteForm(excludeRow);
-    var ids = new Set();
-    if (!form) return ids;
-    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
-      if (row === excludeRow) return;
-      var input = row.querySelector('input[name="product_id"]');
-      if (input && input.value) ids.add(String(input.value));
-    });
-    return ids;
+  function lineCatalogKey(productId, variantLabel) {
+    var vl = variantLabel || '';
+    return vl ? String(productId) + ':' + vl : String(productId);
   }
 
-  function findProduct(id) {
-    return quoteCatalog.find(function (p) {
-      return String(p.id) === String(id);
+  function getRowCatalogKey(row) {
+    if (!row) return '';
+    var pid = row.querySelector('input[name="product_id"]');
+    var vl = row.querySelector('input[name="variant_label"]');
+    if (!pid || !pid.value) return '';
+    return lineCatalogKey(pid.value, vl ? vl.value : '');
+  }
+
+  function getSelectedCatalogKeys(excludeRow) {
+    var form = resolveQuoteForm(excludeRow);
+    var keys = new Set();
+    if (!form) return keys;
+    form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
+      if (row === excludeRow) return;
+      var key = getRowCatalogKey(row);
+      if (key) keys.add(key);
     });
+    return keys;
+  }
+
+  function findProduct(id, variantLabel) {
+    var vl = variantLabel || '';
+    return quoteCatalog.find(function (p) {
+      return String(p.id) === String(id) && (p.variant_label || '') === vl;
+    });
+  }
+
+  function findCatalogEntry(entry) {
+    if (!entry) return null;
+    if (entry.catalog_key) {
+      var byKey = quoteCatalog.find(function (p) {
+        return p.catalog_key === entry.catalog_key;
+      });
+      if (byKey) return byKey;
+    }
+    return findProduct(entry.productId || entry.product_id || entry.id, entry.variantLabel || entry.variant_label);
   }
 
   var productPickerScrollHandler = null;
 
+  function getQuotePickerMenu(picker) {
+    if (!picker) return null;
+    return picker._floatedMenu || picker.querySelector('.quote-product-picker-menu');
+  }
+
+  function getQuotePickerFloatRoot(picker) {
+    if (!picker) return document.body;
+    return picker.closest('.modal') || document.body;
+  }
+
+  function floatQuotePickerMenuToBody(picker) {
+    var menu = getQuotePickerMenu(picker);
+    if (!menu) return null;
+    var root = getQuotePickerFloatRoot(picker);
+    if (menu.parentElement !== root) {
+      root.appendChild(menu);
+      menu._quotePickerOwner = picker;
+      picker._floatedMenu = menu;
+    }
+    return menu;
+  }
+
   function dockProductPickerMenu(menu) {
     if (!menu) return;
+    var picker = menu._quotePickerOwner;
+    if (picker && !picker.contains(menu)) {
+      picker.appendChild(menu);
+      delete menu._quotePickerOwner;
+      delete picker._floatedMenu;
+    }
     menu.classList.remove('open', 'is-floating', 'is-drop-up');
     menu.style.removeProperty('top');
     menu.style.removeProperty('left');
@@ -182,8 +235,8 @@
   function bindProductPickerScrollListeners(picker) {
     unbindProductPickerScrollListeners();
     productPickerScrollHandler = function () {
-      var menu = picker.querySelector('.quote-product-picker-menu.open');
-      if (menu) positionProductPickerMenu(picker, menu);
+      var menu = picker._floatedMenu || picker.querySelector('.quote-product-picker-menu.open');
+      if (menu && menu.classList.contains('open')) positionProductPickerMenu(picker, menu);
     };
     window.addEventListener('scroll', productPickerScrollHandler, true);
     window.addEventListener('resize', productPickerScrollHandler);
@@ -194,6 +247,7 @@
 
   function closeAllProductMenus(exceptPicker) {
     document.querySelectorAll('.quote-product-picker-menu.open').forEach(function (menu) {
+      if (exceptPicker && menu._quotePickerOwner === exceptPicker) return;
       if (exceptPicker && exceptPicker.contains(menu)) return;
       dockProductPickerMenu(menu);
     });
@@ -201,33 +255,42 @@
   }
 
   function renderProductMenu(picker, row) {
-    var list = picker.querySelector('.quote-product-list');
-    var search = picker.querySelector('.quote-product-search');
+    var menu = getQuotePickerMenu(picker);
+    if (!menu) return;
+    var list = menu.querySelector('.quote-product-list');
+    var search = menu.querySelector('.quote-product-search');
     if (!list) return;
-    var q = (search && search.value ? search.value : '').toLowerCase().trim();
-    var selected = getSelectedProductIds(row);
-    var currentId = row.querySelector('input[name="product_id"]').value;
+    var q = search ? String(search.value || '').trim() : '';
+    var selected = getSelectedCatalogKeys(row);
+    var currentKey = getRowCatalogKey(row);
     list.innerHTML = '';
 
     quoteCatalog.forEach(function (p) {
-      var id = String(p.id);
-      var hay = (p.sku + ' ' + p.name + ' ' + (p.spec || '') + ' ' + p.label).toLowerCase();
-      if (q && hay.indexOf(q) === -1) return;
+      var key = p.catalog_key || lineCatalogKey(p.id, p.variant_label);
+      var hay = p.sku + ' ' + p.name + ' ' + (p.display_name || '') + ' ' + (p.spec || '') + ' ' + p.label;
+      if (q) {
+        var matched = typeof window.vnSearchMatch === 'function'
+          ? window.vnSearchMatch(hay, q)
+          : hay.toLowerCase().indexOf(q.toLowerCase()) !== -1;
+        if (!matched) return;
+      }
 
-      var usedElsewhere = selected.has(id) && id !== String(currentId);
+      var usedElsewhere = selected.has(key) && key !== currentKey;
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'quote-product-item' + (usedElsewhere ? ' is-disabled' : '');
       btn.disabled = usedElsewhere;
-      btn.dataset.id = id;
+      btn.dataset.id = String(p.id);
+      btn.dataset.variant = p.variant_label || '';
+      btn.dataset.catalogKey = key;
       btn.innerHTML =
         '<span class="quote-product-item-thumb">' +
         (p.image_url
-          ? '<img src="' + p.image_url + '" alt="">'
+          ? '<img src="' + p.image_url + '" alt="" referrerpolicy="no-referrer">'
           : '<i class="bi bi-image"></i>') +
         '</span><span class="quote-product-item-text">' +
         '<span class="quote-product-item-sku">' + p.sku + '</span>' +
-        '<span class="quote-product-item-name">' + p.name + '</span>' +
+        '<span class="quote-product-item-name">' + (p.display_name || p.name) + '</span>' +
         (p.spec ? '<span class="quote-product-item-spec">' + p.spec + '</span>' : '') +
         '</span>' +
         '<span class="stock-status-badge status-' + (p.stock_status || 'ok') + '">' +
@@ -236,11 +299,12 @@
         (usedElsewhere ? '<span class="quote-product-item-badge">Đã thêm</span>' : '');
 
       if (!usedElsewhere) {
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
           var form = resolveQuoteForm(row);
           setRowProduct(row, p);
-          dockProductPickerMenu(picker.querySelector('.quote-product-picker-menu'));
-          unbindProductPickerScrollListeners();
+          closeAllProductMenus();
           syncAllProductMenus();
           recalcQuoteTotals(form, true);
           scheduleQuotePreview({ immediate: true });
@@ -262,8 +326,8 @@
   function syncAllProductMenus() {
     document.querySelectorAll('.quote-product-picker').forEach(function (picker) {
       var row = picker.closest('.quote-line-row');
-      var menu = picker.querySelector('.quote-product-picker-menu.open');
-      if (menu) {
+      var menu = getQuotePickerMenu(picker);
+      if (menu && menu.classList.contains('open')) {
         renderProductMenu(picker, row);
         positionProductPickerMenu(picker, menu);
       }
@@ -272,10 +336,14 @@
 
   function renderProductCell(row, product) {
     var cell = row.querySelector('.quote-line-product-cell');
-    var picker = cell.querySelector('.quote-product-picker');
+    var oldPicker = cell.querySelector('.quote-product-picker');
+    if (oldPicker && oldPicker._floatedMenu) {
+      dockProductPickerMenu(oldPicker._floatedMenu);
+    }
     if (!product) {
       cell.innerHTML =
         '<input type="hidden" name="product_id" value="">' +
+        '<input type="hidden" name="variant_label" value="">' +
         '<div class="quote-product-picker">' +
         '<button type="button" class="quote-product-picker-btn is-placeholder">' +
         '<span class="quote-product-picker-placeholder">Chọn sản phẩm</span>' +
@@ -291,15 +359,16 @@
 
     cell.innerHTML =
       '<input type="hidden" name="product_id" value="' + product.id + '">' +
+      '<input type="hidden" name="variant_label" value="' + (product.variant_label || '') + '">' +
       '<div class="quote-product-picker">' +
       '<button type="button" class="quote-line-product-display">' +
       '<span class="quote-line-product-thumb">' +
       (product.image_url
-        ? '<img src="' + product.image_url + '" alt="">'
+        ? '<img src="' + product.image_url + '" alt="" referrerpolicy="no-referrer">'
         : '<i class="bi bi-image"></i>') +
       '</span>' +
       '<span class="quote-line-product-text">' +
-      '<span class="quote-line-product-title">' + product.sku + ' - ' + product.name + '</span>' +
+      '<span class="quote-line-product-title">' + (product.label || (product.sku + ' - ' + (product.display_name || product.name))) + '</span>' +
       (product.spec ? '<span class="quote-line-product-spec">' + product.spec + '</span>' : '') +
       '</span>' +
       '<i class="bi bi-chevron-down quote-product-picker-caret"></i></button>' +
@@ -784,7 +853,8 @@
     form.querySelectorAll('.quote-items-body .quote-line-row').forEach(function (row) {
       var productId = row.querySelector('input[name="product_id"]').value;
       if (!productId) return;
-      var product = findProduct(productId);
+      var vlInput = row.querySelector('input[name="variant_label"]');
+      var product = findProduct(productId, vlInput ? vlInput.value : '');
       if (!product) return;
       applyRowPriceFromUnit(row, product);
       updateRowAmount(row);
@@ -792,21 +862,40 @@
     recalcQuoteTotals(form);
   }
 
+  function bindProductPickerSearch(picker, row) {
+    var menu = getQuotePickerMenu(picker);
+    if (!menu || menu.dataset.searchBound === '1') return;
+    menu.dataset.searchBound = '1';
+    menu.addEventListener('input', function (e) {
+      if (!e.target || !e.target.classList.contains('quote-product-search')) return;
+      renderProductMenu(picker, row);
+    });
+    menu.addEventListener('click', function (e) {
+      if (e.target && e.target.classList.contains('quote-product-search')) {
+        e.stopPropagation();
+      }
+    });
+  }
+
   function initProductPicker(picker, row) {
     var btn = picker.querySelector('.quote-product-picker-btn, .quote-line-product-display');
     var menu = picker.querySelector('.quote-product-picker-menu');
-    var search = picker.querySelector('.quote-product-search');
     if (!btn || !menu) return;
+
+    bindProductPickerSearch(picker, row);
 
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
-      var isOpen = menu.classList.contains('open');
+      var activeMenu = getQuotePickerMenu(picker) || menu;
+      var isOpen = activeMenu.classList.contains('open');
       closeAllProductMenus(picker);
       if (!isOpen) {
-        menu.classList.add('open');
+        var floated = floatQuotePickerMenuToBody(picker) || activeMenu;
+        floated.classList.add('open');
         renderProductMenu(picker, row);
-        positionProductPickerMenu(picker, menu);
+        positionProductPickerMenu(picker, floated);
         bindProductPickerScrollListeners(picker);
+        var search = floated.querySelector('.quote-product-search');
         if (search) {
           search.value = '';
           search.focus();
@@ -817,15 +906,9 @@
     menu.addEventListener('click', function (e) {
       e.stopPropagation();
     });
-
-    if (search) {
-      search.addEventListener('input', function () {
-        renderProductMenu(picker, row);
-      });
-      search.addEventListener('click', function (e) {
-        e.stopPropagation();
-      });
-    }
+    menu.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+    });
   }
 
   function bindRowInputs(row) {
@@ -972,7 +1055,7 @@
     if (tbody) tbody.innerHTML = '';
     rowSeq = 0;
     (items || []).forEach(function (item) {
-      var product = findProduct(item.productId || item.product_id);
+      var product = findCatalogEntry(item);
       if (!product) return;
       addQuoteRow(form, product, { qty: item.qty || 1 });
     });
@@ -1000,7 +1083,7 @@
       return;
     }
     items.forEach(function (item) {
-      var product = findProduct(item.product_id);
+      var product = findProduct(item.product_id, item.variant_label || '');
       if (!product) return;
       addQuoteRow(form, product, {
         keepPrice: true,
@@ -1076,7 +1159,9 @@
       });
     }
 
-    document.addEventListener('click', function () {
+    document.addEventListener('click', function (e) {
+      if (e.target.closest('.quote-product-picker-menu')) return;
+      if (e.target.closest('.quote-product-picker-btn, .quote-line-product-display')) return;
       closeAllProductMenus();
     });
 
@@ -1086,6 +1171,7 @@
     if (createModal) {
       initQuotePreviewPanel();
       createModal.addEventListener('shown.bs.modal', function () {
+        quoteCatalog = parseCatalog();
         var form = document.getElementById('create-quote-form');
         var tbody = getFormTbody(form);
         if (tbody && !tbody.children.length) addQuoteRow(form);
@@ -1108,6 +1194,7 @@
 
     document.querySelectorAll('.quote-edit-modal').forEach(function (modalEl) {
       modalEl.addEventListener('shown.bs.modal', function () {
+        quoteCatalog = parseCatalog();
         var form = modalEl.querySelector('form.quote-form');
         if (form) loadEditQuoteForm(form);
       });
@@ -1151,5 +1238,8 @@
     loadQuoteCartItems: loadQuoteCartItems,
     resetCreateQuoteForm: resetCreateQuoteForm,
     recalcQuoteTotals: recalcQuoteTotals,
+    refreshCatalog: function () {
+      quoteCatalog = parseCatalog();
+    },
   };
 })();

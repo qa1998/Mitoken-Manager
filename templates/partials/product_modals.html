@@ -2,6 +2,7 @@
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
 {% from 'partials/product_unit_setup.html' import product_unit_setup %}
+{% from 'partials/product_variant_setup.html' import product_variant_setup %}
 {% from 'partials/product_list_ctx_fields.html' import product_list_ctx_hidden_fields %}
 
 {% macro product_redirect_fields() %}
@@ -140,7 +141,7 @@
 <div class="modal fade product-page-modal" id="productEdit{{ p.id }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
-      <form method="post" action="{{ url_for('update_product', pid=p.id) }}" enctype="multipart/form-data">
+      <form method="post" action="{{ url_for('update_product', pid=p.id) }}">
         {{ product_redirect_fields() }}
         <div class="modal-header border-0 pb-0">
           <h5 class="modal-title fw-bold">Chỉnh sửa sản phẩm</h5>
@@ -173,13 +174,16 @@
               <label class="form-label-custom">Model</label>
               <input type="text" name="model" class="form-control" value="{{ p.model }}">
             </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Biến thể</label>
-              <input type="text" name="variant" class="form-control" value="{{ p.variant }}">
+            <div class="col-md-6">
+              {{ product_variant_setup(p) }}
             </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Tồn kho <span class="text-muted fw-normal">({{ product_base_unit(p) }})</span></label>
-              <input type="number" name="stock" class="form-control" value="{{ p.stock }}" step="any" min="0">
+            <div class="col-md-4" data-product-variant-stock-col
+                 data-initial-stocks="{{ product_variant_stock_input_value(p) }}">
+              <input type="hidden" name="stock" data-variant-stock-submit value="{{ product_variant_stock_input_value(p) }}">
+              <div data-stock-single-wrap>
+                <label class="form-label-custom">Tồn kho <span class="text-muted fw-normal">({{ product_base_unit(p) }})</span></label>
+                <input type="number" class="form-control" data-stock-single value="{{ p.stock }}" step="any" min="0">
+              </div>
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Tồn tối thiểu</label>

@@ -1,0 +1,61 @@
+{% macro product_variant_stock_cell(product, compact=false) %}
+{% set variant_rows = product_variant_rows(product) %}
+{% set variant_labels = product_variant_label_list(product) %}
+{% set bu = product_base_unit(product) %}
+{% set has_conv = product_has_unit_conversion(product) %}
+<div class="product-stock-cell{% if compact %} product-stock-cell-compact{% endif %}">
+  {% if compact and variant_rows|length > 1 %}
+  {% set inv_key, inv_label = product_inventory_level(product) %}
+  <div class="product-stock-qty stock-level-{{ inv_key }}">
+    {{ format_qty_display(product.stock) }} {{ bu }}
+  </div>
+  {% if has_conv %}
+  {% set total_equiv = product_stock_equivalent_text(product) %}
+  {% if total_equiv %}
+  <div class="product-stock-equiv">≈ {{ total_equiv }}</div>
+  {% endif %}
+  {% endif %}
+  <div class="product-stock-equiv small-muted">{{ variant_rows|length }} biến thể</div>
+  {% elif variant_rows and not compact %}
+  <div class="product-stock-variant-list">
+    {% for row in variant_rows %}
+    <div class="product-stock-variant-row">
+      <span class="product-stock-variant-label">{{ row.label }}</span>
+      <span class="product-stock-qty">
+        {{ format_qty_display(row.qty) }} {{ bu }}
+        {% if has_conv %}
+        {% set row_equiv = product_qty_equivalent_text(product, row.qty) %}
+        {% if row_equiv %}
+        <span class="product-stock-qty-equiv">≈ {{ row_equiv }}</span>
+        {% endif %}
+        {% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="product-stock-total small-muted">
+    Tổng: {{ format_qty_display(product.stock) }} {{ bu }}
+    {% if has_conv %}
+    {% set total_equiv = product_stock_equivalent_text(product) %}
+    {% if total_equiv %}
+    <span class="product-stock-qty-equiv d-block">≈ {{ total_equiv }}</span>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% elif variant_labels|length > 1 %}
+  <span class="product-stock-qty text-muted">—</span>
+  <span class="small-muted">Chưa nhập SL từng biến thể</span>
+  {% else %}
+  {% set inv_key, inv_label = product_inventory_level(product) %}
+  <div class="product-stock-qty stock-level-{{ inv_key }}">
+    {{ format_qty_display(product.stock) }} {{ bu }}
+  </div>
+  {% if has_conv %}
+  {% set total_equiv = product_stock_equivalent_text(product) %}
+  {% if total_equiv %}
+  <div class="product-stock-equiv">≈ {{ total_equiv }}</div>
+  {% endif %}
+  {% endif %}
+  {% endif %}
+</div>
+{% endmacro %}

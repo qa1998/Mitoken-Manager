@@ -3,6 +3,9 @@
 {% from 'partials/product_taxonomy_picker.html' import product_taxonomy_picker %}
 {% from 'partials/product_image_upload_panel.html' import product_image_upload_panel %}
 {% from 'partials/product_price_setup.html' import product_price_setup %}
+{% from 'partials/product_variant_prices_cell.html' import product_variant_prices_cell %}
+{% from 'partials/product_variant_stock_cell.html' import product_variant_stock_cell %}
+{% from 'partials/product_variant_setup.html' import product_variant_setup %}
 {% from 'partials/product_unit_setup.html' import product_unit_setup %}
 {% from 'partials/list_pagination.html' import list_pagination_footer %}
 {% from 'partials/product_list_ctx_fields.html' import product_list_ctx_hidden_fields %}
@@ -115,7 +118,7 @@
       <div class="product-filter-search-row">
         <div class="input-icon-wrap product-search-wrap">
           <i class="bi bi-search"></i>
-          <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm theo tên sản phẩm, SKU, mã vạch...">
+          <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Tìm tên, SKU, model… (không cần dấu)">
         </div>
         <button type="submit" class="btn btn-light btn-product-filter">
           <i class="bi bi-search me-2"></i>Tìm kiếm
@@ -269,12 +272,17 @@
           {% for p in products %}
           {% set sale_key, sale_label = product_sale_status(p) %}
           {% set preview_imgs = product_image_urls(p) %}
-          <tr class="list-row-clickable{% if preview_imgs %} has-product-preview{% endif %}"
+          {% set variant_labels = product_variant_label_list(p) %}
+          {% set preview_vars = product_list_preview_variants(p) %}
+          <tr class="list-row-clickable{% if preview_imgs or preview_vars %} has-product-preview{% endif %}"
               data-list-detail-href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}"
-              {% if preview_imgs %}data-product-preview-images='{{ preview_imgs|tojson }}' data-product-preview-name="{{ p.name|e }}"{% endif %}>
+              {% if variant_labels|length > 1 %}data-product-variant-labels='{{ variant_labels|tojson }}'{% endif %}
+              {% if preview_imgs %}data-product-preview-images='{{ preview_imgs|tojson }}'{% endif %}
+              data-product-preview-name="{{ p.name|e }}"
+              {% if preview_vars %}data-product-preview-variants='{{ preview_vars|tojson }}'{% endif %}>
             <td class="product-col-name">
               <div class="product-cell-combined">
-                {{ product_thumb(p) }}
+                {{ product_thumb(p, show_more_badge=false) }}
                 <div class="product-name-block">
                   <a href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}" class="product-name-main product-name-link" onclick="event.stopPropagation()">{{ p.name }}</a>
                   <div class="product-barcode-sub">SKU: {{ p.sku }}{% if product_barcode(p) and product_barcode(p) != p.sku %} · {{ product_barcode(p) }}{% endif %}</div>
@@ -287,25 +295,9 @@
               <span class="product-category-badge">{{ cat_path }}</span>
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
-            <td>{{ product_brand_name(p) or '—' }}</td>
-            <td>
-              <div class="product-price-cell">
-                <span class="product-price-value">{{ p.retail_price|money }}</span>
-                <span class="product-price-unit">/ {{ product_unit_label(p) }}</span>
-              </div>
-            </td>
-            <td>
-              {% set stock_base = p.stock %}
-              {% set inv_key, inv_label = product_inventory_level(p) %}
-              <div class="product-stock-cell">
-                <div class="product-stock-qty stock-level-{{ inv_key }}">
-                  {{ format_qty_display(qty_from_base_unit(p, stock_base)) }} {{ product_unit_label(p) }}
-                </div>
-                {% if product_has_unit_conversion(p) %}
-                <div class="product-stock-equiv">{{ format_qty_display(stock_base) }} {{ product_base_unit(p) }}{% if product_stock_equivalent_text(p) %} ({{ product_stock_equivalent_text(p) }}){% endif %}</div>
-                {% endif %}
-              </div>
-            </td>
+            <td>{{ product_brands_display(p) or '—' }}</td>
+            <td>{{ product_variant_prices_cell(p, compact=true) }}</td>
+            <td>{{ product_variant_stock_cell(p, compact=true) }}</td>
             <td>
               <span class="product-status-badge status-{{ sale_key }}"><span class="product-status-dot" aria-hidden="true"></span>{{ sale_label }}</span>
             </td>
@@ -313,8 +305,7 @@
               <div class="product-row-actions">
                 {% if can_quotes and p.is_active %}
                 <button type="button" class="btn btn-light btn-action-cart js-add-to-quote-cart"
-                        data-product-id="{{ p.id }}" title="Chọn / bỏ chọn cho báo giá" aria-label="Chọn / bỏ chọn cho báo giá"
-                        onclick="event.stopPropagation()">
+                        data-product-id="{{ p.id }}" title="Thêm vào báo giá" aria-label="Thêm vào báo giá">
                   <i class="bi bi-file-earmark-plus"></i>
                 </button>
                 {% endif %}
@@ -323,14 +314,6 @@
                   <i class="bi bi-three-dots-vertical"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm product-action-menu">
-                  {% if can_quotes and p.is_active %}
-                  <li>
-                    <button type="button" class="dropdown-item js-add-to-quote-cart" data-product-id="{{ p.id }}">
-                      <i class="bi bi-file-earmark-plus me-2"></i>Chọn cho báo giá
-                    </button>
-                  </li>
-                  <li><hr class="dropdown-divider"></li>
-                  {% endif %}
                   <li>
                     <a class="dropdown-item" href="{{ url_for('product_detail', pid=p.id, **product_list_nav) }}">
                       <i class="bi bi-eye me-2"></i>Chi tiết
@@ -397,7 +380,7 @@
 <div class="modal fade product-page-modal" id="createProductModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
-      <form method="post" action="{{ url_for('products') }}" enctype="multipart/form-data">
+      <form method="post" action="{{ url_for('products') }}">
         <div class="modal-header border-0 pb-0">
           <h5 class="modal-title fw-bold">Thêm sản phẩm mới</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -429,13 +412,15 @@
               <label class="form-label-custom">Model</label>
               <input type="text" name="model" class="form-control" placeholder="VD: Action 4">
             </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Biến thể</label>
-              <input type="text" name="variant" class="form-control" placeholder="VD: Adventure Combo">
+            <div class="col-md-6">
+              {{ product_variant_setup() }}
             </div>
-            <div class="col-md-4">
-              <label class="form-label-custom">Tồn kho <span class="text-muted fw-normal">(đơn vị tồn kho)</span></label>
-              <input type="number" name="stock" class="form-control" value="0" min="0" step="any">
+            <div class="col-md-4" data-product-variant-stock-col>
+              <input type="hidden" name="stock" data-variant-stock-submit value="0">
+              <div data-stock-single-wrap>
+                <label class="form-label-custom">Tồn kho <span class="text-muted fw-normal">(đơn vị tồn kho)</span></label>
+                <input type="number" class="form-control" data-stock-single value="0" min="0" step="any">
+              </div>
             </div>
             <div class="col-md-4">
               <label class="form-label-custom">Tồn tối thiểu</label>
@@ -499,7 +484,7 @@
             <em>Đơn vị tồn kho</em> = <code>Chiếc</code>,
             <em>Đơn vị nhập</em> = <code>Hộp</code> (hoặc Thùng),
             <em>Hệ số quy đổi</em> = <code>20</code> (1 hộp = 20 chiếc). Cùng cột dùng cho mét/cuộn (VD: Cuộn, 50).<br>
-            <strong>Ảnh:</strong> cột <em>URL hình ảnh</em> (link <code>https://...</code>) — có URL thì hiển thị ảnh online, không có thì dùng ảnh upload trên web.<br>
+            <strong>Ảnh:</strong> cột <em>URL hình ảnh</em> (link <code>https://...</code>); nhiều biến thể dùng <code>||</code> để phân tách URL theo từng biến thể.<br>
             Export và import dùng cùng định dạng cột — tải lại file mẫu nếu file cũ thiếu cột.
           </div>
           <div class="mb-3">

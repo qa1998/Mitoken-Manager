@@ -1,0 +1,11 @@
+{% macro product_variant_setup(product=none) %}
+<div class="product-variant-setup" data-product-variant-setup>
+  <label class="form-label-custom">Biến thể</label>
+  <input type="hidden" name="variant" value="{% if product %}{{ product_variant_label_list(product)|join(', ') }}{% endif %}">
+  <div class="product-variant-name-list" data-variant-name-list></div>
+  <button type="button" class="btn btn-sm btn-outline-primary product-variant-add-btn" data-variant-add-btn>
+    <i class="bi bi-plus-lg me-1"></i>Thêm biến thể
+  </button>
+  <div class="product-variant-setup-hint small-muted mt-1">Bấm <strong>Thêm biến thể</strong> — giá, tồn nhập ở khối bên dưới; thương hiệu &amp; ảnh tuỳ chọn</div>
+</div>
+{% endmacro %}

@@ -1,5 +1,6 @@
-{% macro product_price_setup(product=none, cost_reference_only=false) %}
-{% set ref = product_supplier_reference_cost(product) if (product and cost_reference_only) else none %}
+{% macro product_price_setup(product=none, show_supplier_cost_hint=false) %}
+{% set ref = product_supplier_reference_cost(product) if (product and show_supplier_cost_hint) else none %}
+{% set multi_variant = product and (product_variant_label_list(product)|length > 1) %}
 <div class="product-price-setup-card"{% if product %} data-product-price-setup
      data-cost-base="{{ product.cost_price or 0 }}"
      data-conversion-factor="{{ product_conversion_factor(product) }}"
@@ -7,13 +8,11 @@
      data-sale-mode="{{ product_cost_sale_unit_mode(product) }}"{% endif %}>
   <div class="product-price-setup-head">
     <h6 class="product-price-setup-title"><i class="bi bi-tags me-2"></i>Thiết lập giá bán</h6>
-    {% if not cost_reference_only %}
     <p class="product-price-setup-sub mb-0">Thiết lập theo thứ tự từ giá nhập đến giá bán lẻ</p>
-    {% endif %}
   </div>
-  {% if cost_reference_only and ref %}
+  {% if ref %}
   <div class="product-price-reference mb-3">
-    <div class="product-price-reference-label">Giá nhập (tham chiếu từ NCC)</div>
+    <div class="product-price-reference-label">Giá nhập tham chiếu từ NCC</div>
     <div class="product-price-reference-value">{{ ref.amount|money }}
       {% if product and product_has_unit_conversion(product) %}
       <span class="text-muted fw-normal">/ {{ product_cost_unit_label(product) }}</span>
@@ -24,86 +23,113 @@
     </div>
   </div>
   {% endif %}
+  <input type="hidden" name="project_price" data-project-price-submit
+         value="{% if product %}{{ product_variant_project_input_value(product) }}{% endif %}">
+  <input type="hidden" name="dealer_price" data-dealer-price-submit
+         value="{% if product %}{{ product_variant_dealer_input_value(product) }}{% endif %}">
   <div class="row g-3 product-price-setup-grid">
-    {% if not cost_reference_only %}
-    <div class="col-md-6 col-xl-3">
-      <label class="form-label-custom">
-        Giá nhập
-        {% if product and product_has_unit_conversion(product) %}
-        <span class="text-muted fw-normal">(/ <span data-cost-unit-label>{{ product_cost_unit_label(product) }}</span>)</span>
-        {% endif %}
-      </label>
-      <div class="money-input-wrap">
-        <input type="text"
-               name="cost_price"
-               class="form-control money-input"
-               inputmode="numeric"
-               autocomplete="off"
-               data-product-cost-input
-               value="{% if product and product.cost_price %}{{ product_cost_display_amount(product)|money_plain }}{% endif %}"
-               placeholder="0">
-        <span class="money-input-suffix">đ</span>
-      </div>
-      <div class="product-price-field-hint" data-cost-equiv-hint>
-        {% if product and product_has_unit_conversion(product) %}
-          {% if product_cost_sale_unit_mode(product) == 'purchase' %}
-          Tương đương <strong>{{ product.cost_price|money }}/{{ product_base_unit(product) }}</strong> tồn kho
-          {% else %}
-          Tương đương <strong>{{ purchase_unit_cost_from_base_cost(product, product.cost_price or 0)|money }}/{{ product_purchase_unit(product) }}</strong>
+    <div class="col-md-6 col-xl-3" data-product-cost-col>
+      <div data-cost-single-wrap>
+        <label class="form-label-custom">
+          Giá nhập
+          {% if product and product_has_unit_conversion(product) %}
+          <span class="text-muted fw-normal">(/ <span data-cost-unit-label>{{ product_cost_unit_label(product) }}</span>)</span>
           {% endif %}
-        {% else %}
-        Giá mua từ nhà cung cấp
-        {% endif %}
+        </label>
+        <div class="money-input-wrap">
+          <input type="text"
+                 class="form-control money-input"
+                 inputmode="numeric"
+                 autocomplete="off"
+                 data-product-cost-input
+                 data-cost-single
+                 value="{% if product and not multi_variant %}{{ product_cost_display_amount(product)|money_plain }}{% endif %}"
+                 placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+        <div class="product-price-field-hint" data-cost-equiv-hint>
+          {% if product and product_has_unit_conversion(product) %}
+            {% if product_cost_sale_unit_mode(product) == 'purchase' %}
+            Tương đương <strong>{{ product.cost_price|money }}/{{ product_base_unit(product) }}</strong> tồn kho
+            {% else %}
+            Tương đương <strong>{{ purchase_unit_cost_from_base_cost(product, product.cost_price or 0)|money }}/{{ product_purchase_unit(product) }}</strong>
+            {% endif %}
+          {% else %}
+          Giá mua từ nhà cung cấp
+          {% endif %}
+        </div>
       </div>
     </div>
-    {% endif %}
-    <div class="col-md-6{% if cost_reference_only %} col-12{% else %} col-xl-3{% endif %}">
-      <label class="form-label-custom">Giá công trình</label>
-      <div class="money-input-wrap">
-        <input type="text"
-               name="project_price"
-               class="form-control money-input"
-               inputmode="numeric"
-               autocomplete="off"
-               value="{% if product and product.project_price %}{{ product.project_price|money_plain }}{% endif %}"
-               placeholder="0">
-        <span class="money-input-suffix">đ</span>
+    <div class="col-md-6 col-xl-3" data-project-price-col>
+      <div data-project-single-wrap>
+        <label class="form-label-custom">Giá công trình</label>
+        <div class="money-input-wrap">
+          <input type="text"
+                 class="form-control money-input"
+                 inputmode="numeric"
+                 autocomplete="off"
+                 data-project-single
+                 value="{% if product and not multi_variant %}{{ product_variant_project_input_value(product) }}{% endif %}"
+                 placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+        <div class="product-price-field-hint">Áp dụng cho đơn dự án / số lượng lớn</div>
       </div>
-      {% if not cost_reference_only %}
-      <div class="product-price-field-hint">Áp dụng cho đơn dự án / số lượng lớn</div>
-      {% endif %}
     </div>
-    <div class="col-md-6{% if cost_reference_only %} col-12{% else %} col-xl-3{% endif %}">
-      <label class="form-label-custom">Giá sỉ</label>
-      <div class="money-input-wrap">
-        <input type="text"
-               name="dealer_price"
-               class="form-control money-input"
-               inputmode="numeric"
-               autocomplete="off"
-               value="{% if product and product.dealer_price %}{{ product.dealer_price|money_plain }}{% endif %}"
-               placeholder="0">
-        <span class="money-input-suffix">đ</span>
+    <div class="col-md-6 col-xl-3" data-dealer-price-col>
+      <div data-dealer-single-wrap>
+        <label class="form-label-custom">Giá sỉ</label>
+        <div class="money-input-wrap">
+          <input type="text"
+                 class="form-control money-input"
+                 inputmode="numeric"
+                 autocomplete="off"
+                 data-dealer-single
+                 value="{% if product and not multi_variant %}{{ product_variant_dealer_input_value(product) }}{% endif %}"
+                 placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+        <div class="product-price-field-hint">Áp dụng cho đại lý hoặc khách quen</div>
       </div>
-      {% if not cost_reference_only %}
-      <div class="product-price-field-hint">Áp dụng cho đại lý hoặc khách quen</div>
-      {% endif %}
     </div>
-    <div class="col-md-6{% if cost_reference_only %} col-12{% else %} col-xl-3{% endif %}">
-      <label class="form-label-custom">Giá lẻ</label>
-      <div class="money-input-wrap">
-        <input type="text"
-               name="retail_price"
-               class="form-control money-input"
-               inputmode="numeric"
-               autocomplete="off"
-               value="{% if product and product.retail_price %}{{ product.retail_price|money_plain }}{% endif %}"
-               placeholder="0">
-        <span class="money-input-suffix">đ</span>
+    <div class="col-12 product-retail-price-col"
+         data-product-retail-price-col
+         {% if product %}data-initial-variant="{{ product.variant or '' }}"
+         data-initial-prices="{{ product_retail_price_input_value(product) }}"
+         data-initial-stocks="{{ product_variant_stock_input_value(product) }}"
+         data-initial-costs="{{ product_variant_cost_input_value(product) }}"
+         data-initial-dealers="{{ product_variant_dealer_input_value(product) }}"
+         data-initial-projects="{{ product_variant_project_input_value(product) }}"
+         data-initial-images="{{ product_variant_image_urls_input_value(product)|e }}"
+         data-initial-brands="{{ product_variant_brand_ids_input_value(product) }}"
+         data-default-brand-id="{{ product.brand_id or '' }}"{% endif %}>
+      <input type="hidden" name="cost_price" data-cost-price-submit
+             value="{% if product %}{{ product_variant_cost_input_value(product) }}{% endif %}">
+      <input type="hidden" name="retail_price" data-retail-price-submit
+             value="{% if product %}{{ product_retail_price_input_value(product) }}{% endif %}">
+      <input type="hidden" name="variant_image_urls" data-variant-image-urls-submit
+             value="{% if product %}{{ product_variant_image_urls_input_value(product)|e }}{% endif %}">
+      <input type="hidden" name="variant_brand_ids" data-variant-brand-ids-submit
+             value="{% if product %}{{ product_variant_brand_ids_input_value(product) }}{% endif %}">
+      <div data-retail-single-wrap>
+        <label class="form-label-custom">Giá lẻ</label>
+        <div class="money-input-wrap">
+          <input type="text"
+                 class="form-control money-input"
+                 inputmode="numeric"
+                 autocomplete="off"
+                 data-retail-price-single
+                 value="{% if product and not multi_variant %}{{ product_retail_price_input_value(product) }}{% endif %}"
+                 placeholder="0">
+          <span class="money-input-suffix">đ</span>
+        </div>
+        <div class="product-price-field-hint">Giá bán thông thường cho sản phẩm một biến thể</div>
       </div>
-      {% if not cost_reference_only %}
-      <div class="product-price-field-hint">Giá bán thông thường</div>
-      {% endif %}
+      <div data-retail-variants-wrap class="d-none">
+        <label class="form-label-custom">Biến thể — thương hiệu, ảnh &amp; giá theo từng dòng</label>
+        <div class="product-variant-price-list" data-retail-variant-list></div>
+        <div class="product-price-field-hint">Mỗi biến thể: giá nhập, giá lẻ, giá sỉ, giá công trình và tồn kho; thương hiệu và URL ảnh tuỳ chọn</div>
+      </div>
     </div>
   </div>
 </div>

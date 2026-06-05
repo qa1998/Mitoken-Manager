@@ -2,13 +2,13 @@
   <div class="product-quote-cart-bar-inner">
     <button type="button" class="product-quote-cart-bar-main" id="btnOpenQuoteCart" aria-controls="productQuoteCartPanel">
       <span class="product-quote-cart-bar-icon"><i class="bi bi-file-earmark-text"></i></span>
-      <span class="product-quote-cart-bar-text" id="productQuoteCartBarText">Đã chọn sản phẩm cho báo giá</span>
+      <span class="product-quote-cart-bar-text" id="productQuoteCartBarText">Đã thêm sản phẩm cho báo giá</span>
     </button>
     <div class="product-quote-cart-bar-actions">
       <button type="button" class="btn btn-primary btn-sm" id="btnCreateQuoteFromCart">
         <i class="bi bi-send me-1"></i>Tạo báo giá
       </button>
-      <button type="button" class="btn btn-light btn-sm" id="btnClearQuoteCart" title="Bỏ chọn">
+      <button type="button" class="btn btn-light btn-sm" id="btnClearQuoteCart" title="Xóa tất cả">
         <i class="bi bi-x-lg"></i>
       </button>
     </div>
@@ -18,8 +18,8 @@
 <div class="offcanvas offcanvas-end product-quote-cart-panel" tabindex="-1" id="productQuoteCartPanel" aria-labelledby="productQuoteCartPanelLabel">
   <div class="offcanvas-header border-bottom">
     <div>
-      <h5 class="offcanvas-title" id="productQuoteCartPanelLabel">Xem trước chọn báo giá</h5>
-      <p class="small-muted mb-0">Chọn nhiều sản phẩm — bấm <strong>Tạo báo giá</strong> khi đã chọn xong</p>
+      <h5 class="offcanvas-title" id="productQuoteCartPanelLabel">Danh sách thêm báo giá</h5>
+      <p class="small-muted mb-0">Bấm <strong>Tạo báo giá</strong> khi đã thêm đủ sản phẩm</p>
     </div>
     <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Đóng"></button>
   </div>
@@ -27,7 +27,7 @@
     <div class="product-quote-cart-list" id="productQuoteCartList"></div>
     <div class="product-quote-cart-empty text-center text-muted py-5 px-3" id="productQuoteCartEmpty" hidden>
       <i class="bi bi-file-earmark-text d-block mb-2" style="font-size:2rem;opacity:.35"></i>
-      Chưa chọn sản phẩm. Bấm icon trên từng dòng để chọn — có thể chọn nhiều sản phẩm.
+      Chưa có sản phẩm. Bấm icon <i class="bi bi-file-earmark-plus"></i> trên từng dòng để thêm — sản phẩm có biến thể sẽ mở hộp chọn biến thể.
     </div>
     <div class="product-quote-cart-panel-footer border-top p-3 mt-auto">
       <p class="small-muted mb-2">Số lượng và thêm dòng khác sẽ nhập trong form tạo báo giá.</p>
@@ -35,6 +35,30 @@
         <i class="bi bi-send me-1"></i>Tạo báo giá (<span id="productQuoteDraftCount">0</span>)
       </button>
       <button type="button" class="btn btn-link btn-sm text-danger w-100 mt-1" id="btnClearQuoteCartPanel">Bỏ tất cả</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade product-quote-variant-modal" id="productQuoteVariantModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <div>
+          <h5 class="modal-title fw-bold" id="productQuoteVariantModalTitle">Chọn biến thể</h5>
+          <p class="small-muted mb-0" id="productQuoteVariantModalSku"></p>
+          <p class="small-muted mb-0 mt-1">Chọn một hoặc nhiều biến thể, bấm <strong>Xác nhận</strong> khi xong</p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body pt-2 pb-0">
+        <div class="product-quote-variant-list" id="productQuoteVariantList"></div>
+      </div>
+      <div class="modal-footer border-0 pt-2">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Huỷ</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmQuoteVariants">
+          Xác nhận (<span id="productQuoteVariantSelectCount">0</span>)
+        </button>
+      </div>
     </div>
   </div>
 </div>

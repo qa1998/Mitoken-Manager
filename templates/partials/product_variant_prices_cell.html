@@ -1,0 +1,43 @@
+{% macro product_variant_prices_cell(product, compact=false) %}
+{% set variant_rows = product_variant_rows(product) or product_variant_price_rows(product) %}
+{% set variant_labels = product_variant_label_list(product) %}
+<div class="product-price-cell{% if compact %} product-price-cell-compact{% endif %}">
+  {% if compact and variant_rows|length > 1 %}
+  {% set prices = variant_rows|map(attribute='price')|list %}
+  <span class="product-price-value">{{ prices|min|money }}{% if prices|min != prices|max %} – {{ prices|max|money }}{% endif %}</span>
+  <span class="product-price-unit">{{ variant_rows|length }} biến thể · / {{ product_unit_label(product) }}</span>
+  {% elif variant_rows and not compact %}
+  <div class="product-price-variant-list">
+    {% for row in variant_rows %}
+    <div class="product-price-variant-row{% if row.image_url is defined %} has-variant-image{% endif %}">
+      {% if row.image_url is defined %}
+      <span class="product-price-variant-thumb">
+        <img src="{{ row.image_url }}" alt="" referrerpolicy="no-referrer">
+      </span>
+      {% endif %}
+      <div class="product-price-variant-body">
+        <span class="product-price-variant-label">{{ row.label }}</span>
+        {% if row.brand_name is defined and row.brand_name %}
+        <span class="product-price-variant-brand">{{ row.brand_name }}</span>
+        {% endif %}
+        {% if row.cost is defined %}
+        <span class="product-price-cost">Nhập: {{ row.cost|money }}</span>
+        {% endif %}
+        <span class="product-price-value">{{ row.price|money }}</span>
+        {% if row.qty is defined %}
+        <span class="product-price-qty">{{ format_qty_display(row.qty) }} {{ product_unit_label(product) }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <span class="product-price-unit">/ {{ product_unit_label(product) }}</span>
+  {% elif variant_labels|length > 1 %}
+  <span class="product-price-value text-muted">—</span>
+  <span class="product-price-unit small-muted">Chưa nhập đủ thông tin biến thể</span>
+  {% else %}
+  <span class="product-price-value">{{ product.retail_price|money }}</span>
+  <span class="product-price-unit">/ {{ product_unit_label(product) }}</span>
+  {% endif %}
+</div>
+{% endmacro %}

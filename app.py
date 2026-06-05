@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import time
+import unicodedata
 import uuid
 import csv
 import io
@@ -15,7 +17,8 @@ from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, Response, session, abort, has_request_context, jsonify
 from werkzeug.utils import secure_filename
-from sqlalchemy import func, or_
+from sqlalchemy import event, func, or_
+from sqlalchemy.engine import Engine
 from flask_sqlalchemy import SQLAlchemy
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -56,6 +59,30 @@ app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+def vietnamese_search_fold(value):
+    """Bỏ dấu tiếng Việt để so khớp tìm kiếm gần đúng."""
+    if value is None:
+        return ''
+    text = str(value).strip().lower()
+    if not text:
+        return ''
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+    return text.replace('đ', 'd')
+
+
+def _sqlite_vn_fold(value):
+    return vietnamese_search_fold(value)
+
+
+@event.listens_for(Engine, 'connect')
+def _register_sqlite_search_functions(dbapi_connection, connection_record):
+    try:
+        dbapi_connection.create_function('vn_fold', 1, _sqlite_vn_fold)
+    except Exception:
+        pass
+
 
 class Customer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -100,6 +127,13 @@ class Product(db.Model):
     brand_ref = db.relationship('Brand', foreign_keys=[brand_id])
     model = db.Column(db.String(120), default='')
     variant = db.Column(db.String(120), default='')
+    variant_prices = db.Column(db.Text, default='')
+    variant_stocks = db.Column(db.Text, default='')
+    variant_cost_prices = db.Column(db.Text, default='')
+    variant_dealer_prices = db.Column(db.Text, default='')
+    variant_project_prices = db.Column(db.Text, default='')
+    variant_image_urls = db.Column(db.Text, default='')
+    variant_brand_ids = db.Column(db.Text, default='')
     unit = db.Column(db.String(40), default='cái')
     base_unit = db.Column(db.String(40), default='')
     purchase_unit = db.Column(db.String(40), default='')
@@ -170,6 +204,7 @@ class QuoteItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     quote_id = db.Column(db.Integer, db.ForeignKey('quote.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    variant_label = db.Column(db.String(120), default='')
     product_name = db.Column(db.String(255), nullable=False)
     sku = db.Column(db.String(80), default='')
     unit = db.Column(db.String(40), default='cái')
@@ -892,20 +927,23 @@ def assign_product_taxonomy_from_form(product):
     else:
         legacy = request.form.get('category', '').strip()
         product.category_id = find_category_id_by_path(legacy) if legacy else None
-    brand_id = request.form.get('brand_id', type=int)
-    if brand_id:
-        product.brand_id = brand_id
-    else:
-        legacy_brand = request.form.get('brand', '').strip()
-        if legacy_brand:
-            brand = Brand.query.filter_by(name=legacy_brand).first()
-            if not brand:
-                brand = Brand(name=legacy_brand)
-                db.session.add(brand)
-                db.session.flush()
-            product.brand_id = brand.id
+    variant_raw = request.form.get('variant', product.variant or '')
+    variant_labels = split_csv_field(variant_raw)
+    if len(variant_labels) <= 1:
+        brand_id = request.form.get('brand_id', type=int)
+        if brand_id:
+            product.brand_id = brand_id
         else:
-            product.brand_id = None
+            legacy_brand = request.form.get('brand', '').strip()
+            if legacy_brand:
+                brand = Brand.query.filter_by(name=legacy_brand).first()
+                if not brand:
+                    brand = Brand(name=legacy_brand)
+                    db.session.add(brand)
+                    db.session.flush()
+                product.brand_id = brand.id
+            else:
+                product.brand_id = None
     sync_product_taxonomy_strings(product)
 
 def ensure_category_from_path(path):
@@ -1017,6 +1055,20 @@ def ensure_product_columns():
             conn.execute(text('ALTER TABLE product ADD COLUMN lot_factor REAL DEFAULT 0'))
         if 'sale_unit_mode' not in cols:
             conn.execute(text("ALTER TABLE product ADD COLUMN sale_unit_mode VARCHAR(20) DEFAULT ''"))
+        if 'variant_prices' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_prices TEXT DEFAULT ''"))
+        if 'variant_stocks' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_stocks TEXT DEFAULT ''"))
+        if 'variant_cost_prices' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_cost_prices TEXT DEFAULT ''"))
+        if 'variant_image_urls' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_image_urls TEXT DEFAULT ''"))
+        if 'variant_brand_ids' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_brand_ids TEXT DEFAULT ''"))
+        if 'variant_dealer_prices' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_dealer_prices TEXT DEFAULT ''"))
+        if 'variant_project_prices' not in cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN variant_project_prices TEXT DEFAULT ''"))
     _migrate_product_image_paths()
     _migrate_product_unit_fields()
 
@@ -1296,10 +1348,11 @@ def product_list_unit_display(product):
         'mode_label': mode_label,
     }
 
-def product_stock_equivalent_text(product):
+def product_qty_equivalent_text(product, base_qty):
+    """Quy đổi số lượng tồn (đơn vị gốc) sang text đơn vị nhập/lô."""
     if not product_has_unit_conversion(product):
         return None
-    stock = float(product.stock or 0)
+    stock = float(base_qty or 0)
     factor = product_conversion_factor(product)
     if factor <= 0:
         return None
@@ -1315,6 +1368,9 @@ def product_stock_equivalent_text(product):
     if not parts:
         return f'0 {bu}'
     return ' + '.join(parts)
+
+def product_stock_equivalent_text(product):
+    return product_qty_equivalent_text(product, product.stock)
 
 def product_unit_conversion_label(product):
     if not product_has_unit_conversion(product):
@@ -1348,6 +1404,7 @@ app.jinja_env.globals['product_has_lot_unit'] = product_has_lot_unit
 app.jinja_env.globals['product_lot_unit'] = product_lot_unit
 app.jinja_env.globals['product_unit_conversion_label'] = product_unit_conversion_label
 app.jinja_env.globals['product_stock_equivalent_text'] = product_stock_equivalent_text
+app.jinja_env.globals['product_qty_equivalent_text'] = product_qty_equivalent_text
 app.jinja_env.globals['format_qty_display'] = format_qty_display
 app.jinja_env.globals['base_unit_cost_from_purchase_cost'] = base_unit_cost_from_purchase_cost
 app.jinja_env.globals['purchase_unit_cost_from_base_cost'] = purchase_unit_cost_from_base_cost
@@ -1372,6 +1429,8 @@ def ensure_quote_item_columns():
     with db.engine.begin() as conn:
         if 'qty_unit_mode' not in cols:
             conn.execute(text("ALTER TABLE quote_item ADD COLUMN qty_unit_mode VARCHAR(20) DEFAULT ''"))
+        if 'variant_label' not in cols:
+            conn.execute(text("ALTER TABLE quote_item ADD COLUMN variant_label VARCHAR(120) DEFAULT ''"))
 
 def apply_product_unit_from_form(product):
     ensure_product_columns()
@@ -1451,7 +1510,54 @@ def product_external_image_url(product):
         getattr(product, 'image_url', None) or ''
     ) else ''
 
+def parse_variant_image_urls_raw(value):
+    if value is None or value == '':
+        return []
+    s = str(value).strip()
+    if s.startswith('['):
+        try:
+            data = json.loads(s)
+            if isinstance(data, list):
+                return [str(u).strip() for u in data]
+        except Exception:
+            pass
+    if '||' in s:
+        return [u.strip() for u in s.split('||')]
+    if s:
+        return [s]
+    return []
+
+def parse_variant_image_urls_list(value, expected_len=None):
+    """Parse URL ảnh biến thể — giữ đủ vị trí, cho phép ô trống."""
+    urls = parse_variant_image_urls_raw(value)
+    if expected_len is not None:
+        while len(urls) < expected_len:
+            urls.append('')
+        urls = urls[:expected_len]
+    return urls
+
+def product_stored_variant_image_urls(product):
+    raw = (getattr(product, 'variant_image_urls', None) or '').strip()
+    if not raw:
+        return []
+    return parse_variant_image_urls_raw(raw)
+
+def variant_image_urls_to_storage(urls):
+    normalized = []
+    for u in urls or []:
+        u = str(u or '').strip()
+        if u and is_external_image_url(u):
+            normalized.append(u)
+        else:
+            normalized.append('')
+    if not any(normalized):
+        return ''
+    return json.dumps(normalized, ensure_ascii=False)
+
 def product_image_urls(product):
+    variant_urls = [u for u in product_stored_variant_image_urls(product) if u]
+    if variant_urls:
+        return variant_urls
     ext = product_external_image_url(product)
     if ext:
         return [ext]
@@ -1478,39 +1584,567 @@ def product_spec_short(product):
     parts = [x for x in (product.model or '', product.variant or '') if x]
     return ' - '.join(parts) if parts else ''
 
+def split_csv_field(value):
+    if value is None:
+        return []
+    return [p.strip() for p in str(value).split(',') if p.strip()]
+
+def split_variant_labels(value):
+    """Tách tên biến thể — form ghép bằng «Tên1, Tên2» (dấu phẩy + space)."""
+    if value is None or not str(value).strip():
+        return []
+    s = str(value).strip()
+    if ', ' in s:
+        parts = [p.strip() for p in s.split(', ') if p.strip()]
+        if parts:
+            return parts
+    return split_csv_field(s)
+
+def parse_price_csv(value):
+    """Parse một hoặc nhiều giá VNĐ. Nhiều biến thể: «1000000, 500000»; một giá: số thuần hoặc 1.000.000."""
+    if value is None or value == '':
+        return []
+    s = str(value).strip()
+    if ', ' in s:
+        return [parse_int(part, 0) for part in s.split(', ')]
+    if ',' not in s:
+        return [parse_int(s, 0)]
+    parts = split_csv_field(s)
+    if len(parts) > 1 and all(p.isdigit() for p in parts) and all(len(p) == 3 for p in parts[1:]):
+        return [parse_int(''.join(parts), 0)]
+    return [parse_int(part, 0) for part in parts]
+
+def parse_qty_csv(value):
+    """Parse một hoặc nhiều số lượng, phân tách bằng dấu phẩy (theo biến thể)."""
+    if value is None or value == '':
+        return []
+    s = str(value).strip()
+    if ',' not in s:
+        return [parse_qty(s, 0)]
+    return [parse_qty(part, 0) for part in split_csv_field(s)]
+
+def _quote_variant_prices_for_labels(product, labels):
+    """Giá lẻ theo từng biến thể — đủ N giá, hoặc một giá áp cho tất cả."""
+    if not labels:
+        return []
+    stored = (getattr(product, 'variant_prices', None) or '').strip()
+    prices = parse_price_csv(stored) if stored else []
+    if len(prices) == len(labels):
+        return prices
+    if len(prices) == 1:
+        return prices * len(labels)
+    if product.retail_price:
+        return [product.retail_price] * len(labels)
+    if prices:
+        last = prices[-1]
+        return prices + [last] * (len(labels) - len(prices))
+    return [0] * len(labels)
+
+def _product_variant_price_pairs(product):
+    labels = split_csv_field(getattr(product, 'variant', '') or '')
+    if len(labels) <= 1:
+        return []
+    prices = _quote_variant_prices_for_labels(product, labels)
+    if len(prices) != len(labels):
+        return []
+    return [{'label': label, 'price': price} for label, price in zip(labels, prices)]
+
+def product_variant_price_rows(product):
+    return _product_variant_price_pairs(product)
+
+def product_variant_rows(product):
+    """Ghép biến thể với giá, tồn, giá nhập, ảnh — khi đủ dữ liệu khớp."""
+    price_pairs = _product_variant_price_pairs(product)
+    if not price_pairs:
+        return []
+    labels = [r['label'] for r in price_pairs]
+    stocks_stored = (getattr(product, 'variant_stocks', None) or '').strip()
+    if not stocks_stored:
+        return []
+    stocks = parse_qty_csv(stocks_stored)
+    if len(stocks) != len(labels):
+        return []
+    costs = parse_price_csv((getattr(product, 'variant_cost_prices', None) or '').strip())
+    dealers = parse_price_csv((getattr(product, 'variant_dealer_prices', None) or '').strip())
+    projects = parse_price_csv((getattr(product, 'variant_project_prices', None) or '').strip())
+    images = product_stored_variant_image_urls(product)
+    brand_ids = product_stored_variant_brand_ids(product)
+    rows = []
+    for i, r in enumerate(price_pairs):
+        row = {'label': r['label'], 'price': r['price'], 'qty': stocks[i]}
+        if len(costs) == len(labels):
+            row['cost'] = costs[i]
+        if len(dealers) == len(labels):
+            row['dealer_price'] = dealers[i]
+        if len(projects) == len(labels):
+            row['project_price'] = projects[i]
+        if len(images) == len(labels):
+            row['image_url'] = images[i]
+        if len(brand_ids) == len(labels) and brand_ids[i]:
+            row['brand_id'] = brand_ids[i]
+            row['brand_name'] = brand_name_by_id(brand_ids[i])
+        rows.append(row)
+    return rows
+
+def product_list_preview_variants(product):
+    """Dữ liệu biến thể cho hover preview trên danh sách sản phẩm."""
+    rows = product_variant_rows(product) or product_variant_price_rows(product)
+    items = []
+    for r in rows:
+        item = {
+            'label': r['label'],
+            'price': r.get('price', 0),
+            'qty': r.get('qty'),
+            'brand_name': r.get('brand_name') or '',
+            'image_url': r.get('image_url') or '',
+        }
+        if r.get('cost') is not None:
+            item['cost'] = r['cost']
+        items.append(item)
+    return items
+
+def quote_catalog_variant_rows(product):
+    """Biến thể cho catalog báo giá — tách theo cột biến thể, giá lẻ nếu có."""
+    labels = split_csv_field(getattr(product, 'variant', '') or '')
+    if len(labels) <= 1:
+        return []
+    prices = _quote_variant_prices_for_labels(product, labels)
+    price_pairs = [{'label': label, 'price': price} for label, price in zip(labels, prices)]
+    full_by_label = {r['label']: r for r in product_variant_rows(product)}
+    stocks_raw = (getattr(product, 'variant_stocks', None) or '').strip()
+    stocks = parse_qty_csv(stocks_raw) if stocks_raw else []
+    has_stocks = len(stocks) == len(labels)
+    images = product_stored_variant_image_urls(product)
+    brand_ids = product_stored_variant_brand_ids(product)
+    rows = []
+    for i, pp in enumerate(price_pairs):
+        label = pp['label']
+        if label in full_by_label:
+            rows.append(full_by_label[label])
+            continue
+        row = {'label': label, 'price': pp['price'], 'qty': stocks[i] if has_stocks else 0}
+        if len(images) == len(labels):
+            row['image_url'] = images[i]
+        if len(brand_ids) == len(labels) and brand_ids[i]:
+            row['brand_id'] = brand_ids[i]
+            row['brand_name'] = brand_name_by_id(brand_ids[i])
+        rows.append(row)
+    return rows
+
+def apply_product_variant_retail_prices(product, retail_raw):
+    """Lưu giá lẻ — mỗi biến thể một giá (có thể trùng nhau)."""
+    prices = parse_price_csv(retail_raw)
+    labels = split_variant_labels(product.variant or '')
+    if len(labels) > 1:
+        if len(prices) != len(labels):
+            return False, (
+                f'Cần nhập đủ {len(labels)} giá lẻ cho {len(labels)} biến thể, '
+                f'hiện có {len(prices)} giá.'
+            )
+        product.variant_prices = ', '.join(str(p) for p in prices)
+        product.retail_price = prices[0]
+        return True, ''
+    if len(prices) > 1:
+        return False, (
+            'Bạn đang nhập nhiều giá lẻ nhưng sản phẩm chỉ có một biến thể. '
+            'Bấm «Thêm biến thể» để thêm dòng, hoặc chỉ nhập một giá lẻ.'
+        )
+    product.retail_price = prices[0] if prices else 0
+    product.variant_prices = ''
+    return True, ''
+
+def product_retail_price_input_value(product):
+    if not product:
+        return ''
+    stored = (getattr(product, 'variant_prices', None) or '').strip()
+    if stored:
+        return ', '.join(money_plain(p) for p in parse_price_csv(stored))
+    if product.retail_price:
+        return money_plain(product.retail_price)
+    return ''
+
+def apply_product_variant_stocks(product, stock_raw):
+    """Lưu tồn kho — mỗi biến thể một số lượng riêng; tổng tồn = tổng các biến thể."""
+    qtys = parse_qty_csv(stock_raw)
+    labels = split_variant_labels(product.variant or '')
+    if len(labels) > 1:
+        if len(qtys) != len(labels):
+            return False, (
+                f'Cần nhập đủ {len(labels)} tồn kho cho {len(labels)} biến thể, '
+                f'hiện có {len(qtys)} số lượng.'
+            )
+        product.variant_stocks = ', '.join(
+            str(int(q)) if float(q) == int(q) else str(q) for q in qtys
+        )
+        product.stock = sum(qtys)
+        return True, ''
+    if len(qtys) > 1:
+        return False, (
+            'Bạn đang nhập nhiều tồn kho nhưng sản phẩm chỉ có một biến thể. '
+            'Bấm «Thêm biến thể» để thêm dòng, hoặc chỉ nhập một số lượng.'
+        )
+    product.stock = qtys[0] if qtys else 0
+    product.variant_stocks = ''
+    return True, ''
+
+def product_variant_stock_input_value(product):
+    if not product:
+        return '0'
+    stored = (getattr(product, 'variant_stocks', None) or '').strip()
+    if stored:
+        return stored
+    if product.stock is not None:
+        val = float(product.stock or 0)
+        return str(int(val)) if val == int(val) else str(val)
+    return '0'
+
+def _apply_product_variant_price_csv(product, raw, *, variant_attr, product_attr, label):
+    prices = parse_price_csv(raw)
+    labels = split_variant_labels(product.variant or '')
+    if len(labels) > 1:
+        if len(prices) != len(labels):
+            return False, (
+                f'Cần nhập đủ {len(labels)} {label} cho {len(labels)} biến thể, '
+                f'hiện có {len(prices)} giá.'
+            )
+        setattr(product, variant_attr, ', '.join(str(p) for p in prices))
+        setattr(product, product_attr, prices[0])
+        return True, ''
+    if len(prices) > 1:
+        return False, (
+            f'{label} không hợp lệ: hệ thống đọc được nhiều giá trong một ô. '
+            'Nếu sản phẩm chỉ có một biến thể thì chỉ nhập một giá; '
+            'nếu cần nhiều giá theo biến thể thì bấm «Thêm biến thể» để thêm từng dòng.'
+        )
+    setattr(product, product_attr, prices[0] if prices else 0)
+    setattr(product, variant_attr, '')
+    return True, ''
+
+def _product_variant_price_input_value(product, variant_attr, product_attr):
+    if not product:
+        return ''
+    stored = (getattr(product, variant_attr, None) or '').strip()
+    if stored:
+        return ', '.join(money_plain(p) for p in parse_price_csv(stored))
+    val = getattr(product, product_attr, None)
+    if val:
+        return money_plain(val)
+    return ''
+
+def apply_product_variant_cost_prices(product, cost_raw):
+    return _apply_product_variant_price_csv(
+        product, cost_raw,
+        variant_attr='variant_cost_prices', product_attr='cost_price', label='giá nhập',
+    )
+
+def product_variant_cost_input_value(product):
+    return _product_variant_price_input_value(product, 'variant_cost_prices', 'cost_price')
+
+def apply_product_variant_dealer_prices(product, raw):
+    return _apply_product_variant_price_csv(
+        product, raw,
+        variant_attr='variant_dealer_prices', product_attr='dealer_price', label='giá sỉ',
+    )
+
+def product_variant_dealer_input_value(product):
+    return _product_variant_price_input_value(product, 'variant_dealer_prices', 'dealer_price')
+
+def apply_product_variant_project_prices(product, raw):
+    return _apply_product_variant_price_csv(
+        product, raw,
+        variant_attr='variant_project_prices', product_attr='project_price', label='giá công trình',
+    )
+
+def product_variant_project_input_value(product):
+    return _product_variant_price_input_value(product, 'variant_project_prices', 'project_price')
+
+def product_edit_form_snapshot(product):
+    """Ảnh chụp form chỉnh sửa — dùng xem trước thay đổi trước khi lưu."""
+    parent_id = ''
+    if product.category_id:
+        cat = Category.query.get(product.category_id)
+        if cat and cat.parent_id:
+            parent_id = str(cat.parent_id)
+    return {
+        'name': (product.name or '').strip(),
+        'sku': (product.sku or '').strip(),
+        'model': (product.model or '').strip(),
+        'warranty': (product.warranty or '').strip(),
+        'low_stock': str(product.low_stock or 0),
+        'category_parent_id': parent_id,
+        'category_id': str(product.category_id or ''),
+        'category_label': product_category_path(product) or '—',
+        'brand_id': str(product.brand_id or ''),
+        'brand_label': product_brand_name(product) or '—',
+        'variant': (product.variant or '').strip(),
+        'image_url': (product_external_image_url(product) or '').strip(),
+        'base_unit': product_base_unit(product),
+        'purchase_unit': product_purchase_unit(product),
+        'unit_conversion_enabled': '1' if product_has_unit_conversion(product) else '0',
+        'conversion_factor': str(product_conversion_factor(product) or 1),
+        'lot_unit_enabled': '1' if product_has_lot_unit(product) else '0',
+        'lot_unit': (product_lot_unit(product) or '').strip(),
+        'lot_factor': str(product_lot_factor(product) or 0),
+        'sale_unit_mode': product_default_sale_unit_mode(product) or 'base',
+        'stock': str(product.stock or 0),
+        'cost_price': product_variant_cost_input_value(product),
+        'retail_price': product_retail_price_input_value(product),
+        'dealer_price': product_variant_dealer_input_value(product),
+        'project_price': product_variant_project_input_value(product),
+        'variant_image_urls': product_variant_image_urls_input_value(product),
+        'variant_brand_ids': product_variant_brand_ids_input_value(product),
+    }
+
+def apply_product_variant_image_urls(product, raw):
+    labels = split_csv_field(product.variant or '')
+    if len(labels) > 1:
+        urls = parse_variant_image_urls_list(raw, len(labels))
+        valid = []
+        for u in urls:
+            u = u.strip()
+            if not u:
+                valid.append('')
+                continue
+            if not is_external_image_url(u):
+                return False, f'URL ảnh biến thể không hợp lệ: {u[:80]}'
+            valid.append(u)
+        product.variant_image_urls = variant_image_urls_to_storage(valid)
+        product.image_url = next((u for u in valid if u), '')
+        return True, ''
+    product.variant_image_urls = ''
+    return True, ''
+
+def product_variant_image_urls_input_value(product):
+    labels = split_csv_field(getattr(product, 'variant', '') or '')
+    if len(labels) > 1:
+        raw = (getattr(product, 'variant_image_urls', None) or '').strip()
+        urls = parse_variant_image_urls_list(raw if raw else '[]', len(labels))
+        return json.dumps(urls, ensure_ascii=False)
+    urls = product_stored_variant_image_urls(product)
+    return json.dumps(urls, ensure_ascii=False) if urls else ''
+
+def parse_variant_brand_ids_raw(value):
+    if value is None or not str(value).strip():
+        return []
+    ids = []
+    for piece in str(value).split(','):
+        piece = piece.strip()
+        if not piece:
+            ids.append(0)
+            continue
+        try:
+            ids.append(int(piece))
+        except (TypeError, ValueError):
+            ids.append(0)
+    return ids
+
+def product_stored_variant_brand_ids(product):
+    raw = (getattr(product, 'variant_brand_ids', None) or '').strip()
+    if not raw:
+        return []
+    return parse_variant_brand_ids_raw(raw)
+
+def variant_brand_ids_to_storage(ids):
+    return ', '.join(str(int(i)) for i in ids)
+
+def brand_name_by_id(brand_id):
+    if not brand_id:
+        return ''
+    brand = Brand.query.get(int(brand_id))
+    return brand.name if brand else ''
+
+def apply_product_variant_brand_ids(product, raw):
+    labels = split_csv_field(product.variant or '')
+    if len(labels) > 1:
+        ids = parse_variant_brand_ids_raw(raw)
+        while len(ids) < len(labels):
+            ids.append(0)
+        ids = ids[:len(labels)]
+        for i, bid in enumerate(ids):
+            if bid and not Brand.query.get(bid):
+                return False, f'Thương hiệu không hợp lệ cho biến thể "{labels[i]}".'
+        product.variant_brand_ids = variant_brand_ids_to_storage(ids)
+        first_brand = next((bid for bid in ids if bid), None)
+        product.brand_id = first_brand
+        sync_product_taxonomy_strings(product)
+        return True, ''
+    product.variant_brand_ids = ''
+    return True, ''
+
+def product_variant_brand_ids_input_value(product):
+    ids = product_stored_variant_brand_ids(product)
+    return ', '.join(str(i) for i in ids) if ids else ''
+
+def product_brands_display(product):
+    rows = product_variant_rows(product)
+    if rows:
+        names = []
+        for row in rows:
+            name = row.get('brand_name') or ''
+            if name and name not in names:
+                names.append(name)
+        if names:
+            return ', '.join(names)
+    return product_brand_name(product) or ''
+
+def product_variant_brands_export_value(product):
+    ids = product_stored_variant_brand_ids(product)
+    labels = split_csv_field(product.variant or '')
+    if len(labels) > 1 and len(ids) == len(labels):
+        names = [brand_name_by_id(bid) for bid in ids if bid]
+        if names:
+            return ', '.join(names)
+    return product_brand_name(product)
+
+def _import_variant_brand_ids_from_data(data):
+    labels = split_csv_field(data.get('variant') or '')
+    brand_raw = (data.get('brand') or '').strip()
+    if len(labels) <= 1 or not brand_raw:
+        return ''
+    if ',' in brand_raw:
+        brand_names = [x.strip() for x in brand_raw.split(',')]
+    else:
+        brand_names = [brand_raw] * len(labels)
+    if len(brand_names) != len(labels):
+        return ''
+    category_path = resolve_import_category_path(data)
+    category_id = ensure_category_from_path(category_path) if category_path else None
+    ids = []
+    for name in brand_names:
+        if not name:
+            return ''
+        ids.append(ensure_brand_name(name, category_id))
+    return variant_brand_ids_to_storage(ids)
+
+def _import_variant_prices_from_data(data):
+    labels = split_csv_field(data.get('variant') or '')
+    retail_prices = parse_price_csv(data.get('retail_price_raw', data.get('retail_price')))
+    if len(labels) > 1:
+        if len(retail_prices) == len(labels):
+            return ', '.join(str(p) for p in retail_prices)
+        return ''
+    if len(retail_prices) > 1:
+        return ', '.join(str(p) for p in retail_prices)
+    return ''
+
+def _import_variant_stocks_from_data(data):
+    labels = split_csv_field(data.get('variant') or '')
+    stocks = parse_qty_csv(data.get('stock_raw', data.get('stock')))
+    if len(labels) > 1:
+        if len(stocks) == len(labels):
+            return ', '.join(
+                str(int(q)) if float(q) == int(q) else str(q) for q in stocks
+            )
+        return ''
+    return ''
+
+def _import_variant_cost_prices_from_data(data):
+    labels = split_csv_field(data.get('variant') or '')
+    costs = parse_price_csv(data.get('cost_price_raw', data.get('cost_price')))
+    if len(labels) > 1:
+        if len(costs) == len(labels):
+            return ', '.join(str(p) for p in costs)
+        return ''
+    return ''
+
+def _import_variant_image_urls_from_data(data):
+    labels = split_csv_field(data.get('variant') or '')
+    urls = parse_variant_image_urls_raw(data.get('image_url_raw', data.get('image_url')))
+    if len(labels) > 1:
+        if len(urls) == len(labels) and all(is_external_image_url(u) for u in urls):
+            return variant_image_urls_to_storage(urls)
+        return ''
+    return ''
+
+def _quote_variant_inventory(qty, low_stock):
+    qty = float(qty or 0)
+    low = float(low_stock or 5)
+    if qty <= 0:
+        return 'out', 'Hết hàng'
+    if qty <= low:
+        return 'low', 'Sắp hết'
+    return 'ok', 'Còn nhiều'
+
+def _quote_catalog_base_entry(p):
+    status_key, status_label = product_inventory_level(p)
+    return {
+        'id': p.id,
+        'sku': p.sku,
+        'name': p.name,
+        'unit': product_unit_label(p, product_default_sale_unit_mode(p)),
+        'base_unit': product_base_unit(p),
+        'purchase_unit': product_purchase_unit(p),
+        'unit_conversion_enabled': bool(getattr(p, 'unit_conversion_enabled', False))
+            or product_has_unit_conversion(p),
+        'conversion_factor': product_conversion_factor(p),
+        'lot_unit': product_lot_unit(p),
+        'lot_factor': product_lot_factor(p),
+        'has_lot_unit': product_has_lot_unit(p),
+        'sale_unit_mode': product_default_sale_unit_mode(p),
+        'stock': p.stock or 0,
+        'low_stock': p.low_stock or 5,
+        'stock_status': status_key,
+        'stock_label': status_label,
+        'retail_price': p.retail_price or 0,
+        'dealer_price': p.dealer_price or 0,
+        'project_price': p.project_price or 0,
+        'image_url': product_image_url(p) or '',
+    }
+
 def quote_product_catalog(products):
     items = []
     for p in products:
         if not product_is_active(p):
             continue
-        status_key, status_label = product_inventory_level(p)
-        items.append({
-            'id': p.id,
-            'sku': p.sku,
-            'name': p.name,
-            'spec': product_spec_short(p),
-            'unit': product_unit_label(p, product_default_sale_unit_mode(p)),
-            'base_unit': product_base_unit(p),
-            'purchase_unit': product_purchase_unit(p),
-            'unit_conversion_enabled': bool(getattr(p, 'unit_conversion_enabled', False))
-                or product_has_unit_conversion(p),
-            'conversion_factor': product_conversion_factor(p),
-            'lot_unit': product_lot_unit(p),
-            'lot_factor': product_lot_factor(p),
-            'has_lot_unit': product_has_lot_unit(p),
-            'sale_unit_mode': product_default_sale_unit_mode(p),
-            'stock': p.stock or 0,
-            'low_stock': p.low_stock or 5,
-            'stock_status': status_key,
-            'stock_label': status_label,
-            'retail_price': p.retail_price or 0,
-            'dealer_price': p.dealer_price or 0,
-            'project_price': p.project_price or 0,
-            'image_url': product_image_url(p) or '',
-            'label': f'{p.sku} - {p.name}',
-        })
+        base = _quote_catalog_base_entry(p)
+        variant_rows = quote_catalog_variant_rows(p)
+        if variant_rows:
+            for vr in variant_rows:
+                vl = vr['label']
+                st_key, st_label = _quote_variant_inventory(vr['qty'], p.low_stock)
+                brand_name = vr.get('brand_name') or product_brand_name(p)
+                spec_parts = [x for x in (brand_name, p.model or '', vl) if x]
+                spec = ' · '.join(spec_parts)
+                image = vr.get('image_url') or base['image_url']
+                items.append({
+                    **base,
+                    'variant_label': vl,
+                    'catalog_key': f'{p.id}:{vl}',
+                    'display_name': vl,
+                    'brand_name': brand_name,
+                    'spec': spec,
+                    'retail_price': vr['price'],
+                    'dealer_price': vr.get('dealer_price', base['dealer_price']),
+                    'project_price': vr.get('project_price', base['project_price']),
+                    'stock': vr['qty'],
+                    'stock_status': st_key,
+                    'stock_label': st_label,
+                    'image_url': image,
+                    'label': f'{p.sku} - {vl}',
+                })
+        else:
+            items.append({
+                **base,
+                'variant_label': '',
+                'catalog_key': str(p.id),
+                'display_name': p.name,
+                'spec': product_spec_short(p),
+                'label': f'{p.sku} - {p.name}',
+            })
     return items
 
+app.jinja_env.globals['product_variant_rows'] = product_variant_rows
+app.jinja_env.globals['product_variant_label_list'] = lambda p: split_variant_labels(getattr(p, 'variant', '') or '')
+app.jinja_env.globals['product_list_preview_variants'] = product_list_preview_variants
+app.jinja_env.globals['product_variant_price_rows'] = product_variant_price_rows
+app.jinja_env.globals['product_retail_price_input_value'] = product_retail_price_input_value
+app.jinja_env.globals['product_variant_stock_input_value'] = product_variant_stock_input_value
+app.jinja_env.globals['product_variant_cost_input_value'] = product_variant_cost_input_value
+app.jinja_env.globals['product_variant_dealer_input_value'] = product_variant_dealer_input_value
+app.jinja_env.globals['product_variant_project_input_value'] = product_variant_project_input_value
+app.jinja_env.globals['product_variant_image_urls_input_value'] = product_variant_image_urls_input_value
+app.jinja_env.globals['product_variant_brand_ids_input_value'] = product_variant_brand_ids_input_value
+app.jinja_env.globals['product_brands_display'] = product_brands_display
 app.jinja_env.globals['product_image_url'] = product_image_url
 app.jinja_env.globals['product_image_urls'] = product_image_urls
 app.jinja_env.globals['product_external_image_url'] = product_external_image_url
@@ -2591,6 +3225,7 @@ def parse_quote_line_items_from_form(quote=None):
     stopped_names = []
     existing_ids = {i.product_id for i in quote.items} if quote else set()
     qty_modes = request.form.getlist('qty_unit_mode')
+    variant_labels = request.form.getlist('variant_label')
     for idx, (product_id, qty, price) in enumerate(zip(
         request.form.getlist('product_id'),
         request.form.getlist('qty'),
@@ -2604,12 +3239,13 @@ def parse_quote_line_items_from_form(quote=None):
         if not product_is_active(p) and p.id not in existing_ids:
             stopped_names.append(p.name or p.sku)
             continue
+        variant_label = (variant_labels[idx] if idx < len(variant_labels) else '').strip()
         mode = (qty_modes[idx] if idx < len(qty_modes) else '').strip().lower()
         if mode not in ('base', 'purchase', 'lot'):
             mode = product_default_sale_unit_mode(p)
         qv = max(parse_qty(qty, 1), 0.0001)
         pv = parse_int(price, p.retail_price)
-        line_items.append((p, qv, pv, int(round(qv * pv)), mode))
+        line_items.append((p, variant_label, qv, pv, int(round(qv * pv)), mode))
     return line_items, stopped_names
 
 def apply_quote_line_items(quote, line_items):
@@ -2617,12 +3253,16 @@ def apply_quote_line_items(quote, line_items):
     for old in list(quote.items):
         db.session.delete(old)
     subtotal = 0
-    for p, qv, pv, amount, mode in line_items:
+    for p, variant_label, qv, pv, amount, mode in line_items:
         subtotal += amount
+        display_name = p.name
+        if variant_label:
+            display_name = f'{p.name} ({variant_label})'
         db.session.add(QuoteItem(
             quote_id=quote.id,
             product_id=p.id,
-            product_name=p.name,
+            variant_label=variant_label or '',
+            product_name=display_name,
             sku=p.sku,
             unit=product_unit_label(p, mode),
             qty_unit_mode=mode,
@@ -2656,6 +3296,7 @@ def build_quote_preview_from_form():
         valid_until = date.today() + timedelta(days=30)
 
     line_discounts = request.form.getlist('line_discount')
+    variant_labels = request.form.getlist('variant_label')
     items = []
     subtotal = 0
     for idx, (product_id, qty, price) in enumerate(zip(
@@ -2668,6 +3309,7 @@ def build_quote_preview_from_form():
         p = Product.query.get(int(product_id))
         if not p:
             continue
+        variant_label = (variant_labels[idx] if idx < len(variant_labels) else '').strip()
         line_disc = 0.0
         if idx < len(line_discounts):
             try:
@@ -2683,8 +3325,9 @@ def build_quote_preview_from_form():
         amount = round(qv * pv * (1 - line_disc / 100))
         subtotal += amount
         unit_price = round(pv * (1 - line_disc / 100)) if line_disc else pv
+        display_name = f'{p.name} ({variant_label})' if variant_label else p.name
         items.append(SimpleNamespace(
-            product_name=p.name,
+            product_name=display_name,
             sku=p.sku,
             unit=product_unit_label(p, mode),
             qty=qv,
@@ -6786,17 +7429,42 @@ app.jinja_env.globals['products_list_url'] = products_list_url
 app.jinja_env.globals['product_detail_url_kwargs'] = product_detail_url_kwargs
 
 
+def _product_search_field_match(column, token):
+    raw = (token or '').strip()
+    if not raw:
+        return None
+    folded = vietnamese_search_fold(raw)
+    parts = [column.ilike(f'%{raw}%')]
+    if folded:
+        parts.append(func.vn_fold(column).like(f'%{folded}%'))
+    return or_(*parts)
+
+
+def apply_product_text_search(query, q):
+    """Tìm gần đúng: bỏ dấu, mỗi từ trong ô tìm phải khớp ít nhất một trường."""
+    tokens = [t for t in re.split(r'\s+', (q or '').strip()) if t]
+    if not tokens:
+        return query
+    columns = (
+        Product.name,
+        Product.sku,
+        Product.model,
+        Product.variant,
+        Product.brand,
+        Product.category,
+    )
+    for token in tokens:
+        field_clauses = [_product_search_field_match(col, token) for col in columns]
+        field_clauses = [c for c in field_clauses if c is not None]
+        if field_clauses:
+            query = query.filter(or_(*field_clauses))
+    return query
+
+
 def apply_product_filters(query, filters):
     q = filters.get('q', '')
     if q:
-        like = f'%{q}%'
-        query = query.filter(or_(
-            Product.name.ilike(like),
-            Product.sku.ilike(like),
-            Product.category.ilike(like),
-            Product.brand.ilike(like),
-            Product.model.ilike(like),
-        ))
+        query = apply_product_text_search(query, q)
     if filters.get('category_id'):
         query = query.filter(Product.category_id == filters['category_id'])
     elif filters.get('category_parent_id'):
@@ -6806,7 +7474,15 @@ def apply_product_filters(query, filters):
     elif filters.get('category'):
         query = query.filter(Product.category == filters['category'])
     if filters.get('brand_id'):
-        query = query.filter(Product.brand_id == filters['brand_id'])
+        bid = filters['brand_id']
+        bid_s = str(bid)
+        query = query.filter(or_(
+            Product.brand_id == bid,
+            Product.variant_brand_ids == bid_s,
+            Product.variant_brand_ids.like(f'{bid_s},%'),
+            Product.variant_brand_ids.like(f'%, {bid_s},%'),
+            Product.variant_brand_ids.like(f'%, {bid_s}'),
+        ))
     elif filters.get('brand'):
         query = query.filter(Product.brand == filters['brand'])
     if filters.get('supplier_id'):
@@ -6883,7 +7559,77 @@ def apply_product_price_from_form(product, note='', fields=None):
             continue
         old = getattr(product, field) or 0
         if field == 'cost_price':
-            new = parse_product_cost_from_form(product)
+            old_vc = (getattr(product, 'variant_cost_prices', None) or '').strip()
+            ok, err = apply_product_variant_cost_prices(product, request.form.get('cost_price'))
+            if not ok:
+                flash(err, 'warning')
+                continue
+            new = product.cost_price or 0
+            new_vc = (getattr(product, 'variant_cost_prices', None) or '').strip()
+            if new != old or new_vc != old_vc:
+                db.session.add(PriceHistory(
+                    product_id=product.id,
+                    price_type=field,
+                    old_price=old,
+                    new_price=new,
+                    note=note or (new_vc if new_vc else ''),
+                ))
+                changed.append(field)
+            continue
+        elif field == 'retail_price':
+            old_vp = (getattr(product, 'variant_prices', None) or '').strip()
+            ok, err = apply_product_variant_retail_prices(product, request.form.get('retail_price'))
+            if not ok:
+                flash(err, 'warning')
+                continue
+            new = product.retail_price or 0
+            new_vp = (getattr(product, 'variant_prices', None) or '').strip()
+            if new != old or new_vp != old_vp:
+                db.session.add(PriceHistory(
+                    product_id=product.id,
+                    price_type=field,
+                    old_price=old,
+                    new_price=new,
+                    note=note or (new_vp if new_vp else ''),
+                ))
+                changed.append(field)
+            continue
+        elif field == 'dealer_price':
+            old_vd = (getattr(product, 'variant_dealer_prices', None) or '').strip()
+            ok, err = apply_product_variant_dealer_prices(product, request.form.get('dealer_price'))
+            if not ok:
+                flash(err, 'warning')
+                continue
+            new = product.dealer_price or 0
+            new_vd = (getattr(product, 'variant_dealer_prices', None) or '').strip()
+            if new != old or new_vd != old_vd:
+                db.session.add(PriceHistory(
+                    product_id=product.id,
+                    price_type=field,
+                    old_price=old,
+                    new_price=new,
+                    note=note or (new_vd if new_vd else ''),
+                ))
+                changed.append(field)
+            continue
+        elif field == 'project_price':
+            old_vp = (getattr(product, 'variant_project_prices', None) or '').strip()
+            ok, err = apply_product_variant_project_prices(product, request.form.get('project_price'))
+            if not ok:
+                flash(err, 'warning')
+                continue
+            new = product.project_price or 0
+            new_vp = (getattr(product, 'variant_project_prices', None) or '').strip()
+            if new != old or new_vp != old_vp:
+                db.session.add(PriceHistory(
+                    product_id=product.id,
+                    price_type=field,
+                    old_price=old,
+                    new_price=new,
+                    note=note or (new_vp if new_vp else ''),
+                ))
+                changed.append(field)
+            continue
         else:
             new = parse_int(request.form.get(field), old)
         if new != old:
@@ -6908,15 +7654,46 @@ def apply_product_form(product):
     assign_product_taxonomy_from_form(product)
     product.model = request.form.get('model', '')
     product.variant = request.form.get('variant', '')
-    apply_product_image_url_from_form(product)
     apply_product_unit_from_form(product)
     product.warranty = request.form.get('warranty', '')
+    variant_labels = split_variant_labels(request.form.get('variant', '') or product.variant or '')
+    if len(variant_labels) > 1:
+        ok_img, err_img = apply_product_variant_image_urls(
+            product, request.form.get('variant_image_urls', '')
+        )
+        if not ok_img:
+            flash(err_img, 'warning')
+        ok_brand, err_brand = apply_product_variant_brand_ids(
+            product, request.form.get('variant_brand_ids', '')
+        )
+        if not ok_brand:
+            flash(err_brand, 'warning')
+    else:
+        apply_product_image_url_from_form(product)
+        product.variant_image_urls = ''
+        product.variant_brand_ids = ''
     if 'cost_price' in request.form:
-        product.cost_price = parse_product_cost_from_form(product)
-    product.retail_price = parse_int(request.form.get('retail_price'))
-    product.dealer_price = parse_int(request.form.get('dealer_price'))
-    product.project_price = parse_int(request.form.get('project_price'))
-    product.stock = parse_qty(request.form.get('stock'))
+        ok_cost, err_cost = apply_product_variant_cost_prices(product, request.form.get('cost_price'))
+        if not ok_cost:
+            flash(err_cost, 'warning')
+    ok, err = apply_product_variant_retail_prices(product, request.form.get('retail_price'))
+    if not ok:
+        flash(err, 'warning')
+    if 'dealer_price' in request.form:
+        ok_dealer, err_dealer = apply_product_variant_dealer_prices(
+            product, request.form.get('dealer_price')
+        )
+        if not ok_dealer:
+            flash(err_dealer, 'warning')
+    if 'project_price' in request.form:
+        ok_project, err_project = apply_product_variant_project_prices(
+            product, request.form.get('project_price')
+        )
+        if not ok_project:
+            flash(err_project, 'warning')
+    ok_stock, err_stock = apply_product_variant_stocks(product, request.form.get('stock'))
+    if not ok_stock:
+        flash(err_stock, 'warning')
     product.low_stock = parse_qty(request.form.get('low_stock'), product.low_stock or 5)
 
 def category_product_counts():
@@ -7199,15 +7976,19 @@ def product_row_from_import(row, col_map):
         'brand': cell('brand'),
         'model': cell('model'),
         'variant': cell('variant'),
+        'image_url_raw': cell('image_url'),
         'image_url': cell('image_url'),
         'unit': cell('unit', 'cái') or 'cái',
         'purchase_unit': cell('purchase_unit') or cell('unit', 'cái') or 'cái',
         'conversion_factor': parse_qty(cell('conversion_factor'), 1.0),
         'warranty': cell('warranty'),
+        'cost_price_raw': cell('cost_price'),
         'cost_price': parse_int(cell('cost_price'), 0),
+        'retail_price_raw': cell('retail_price'),
         'retail_price': parse_int(cell('retail_price'), 0),
         'dealer_price': parse_int(cell('dealer_price'), 0),
         'project_price': parse_int(cell('project_price'), 0),
+        'stock_raw': cell('stock'),
         'stock': parse_qty(cell('stock'), 0),
         'low_stock': parse_qty(cell('low_stock'), 5),
         'is_active': parse_import_active_status(cell('status', 'Đang bán')),
@@ -7220,9 +8001,30 @@ def product_row_from_import(row, col_map):
         raw['category_child'] = parts[-1].strip()
     elif path and not raw['category_parent'] and not raw['category_child']:
         raw['category_parent'] = path
+    retail_prices = parse_price_csv(raw['retail_price_raw'])
+    if retail_prices:
+        raw['retail_price'] = retail_prices[0]
+    raw['variant_prices'] = _import_variant_prices_from_data(raw)
+    cost_prices = parse_price_csv(raw['cost_price_raw'])
+    if cost_prices:
+        raw['cost_price'] = cost_prices[0]
+    raw['variant_cost_prices'] = _import_variant_cost_prices_from_data(raw)
+    stock_qtys = parse_qty_csv(raw['stock_raw'])
+    if stock_qtys:
+        raw['stock'] = sum(stock_qtys) if len(stock_qtys) > 1 else stock_qtys[0]
+    raw['variant_stocks'] = _import_variant_stocks_from_data(raw)
+    raw['variant_image_urls'] = _import_variant_image_urls_from_data(raw)
+    raw['variant_brand_ids'] = _import_variant_brand_ids_from_data(raw)
     return raw
 
 def _apply_import_image_url(product, data):
+    vi = (data.get('variant_image_urls') or '').strip()
+    if vi:
+        product.variant_image_urls = vi
+        urls = product_stored_variant_image_urls(product)
+        product.image_url = urls[0] if urls else ''
+        return
+    product.variant_image_urls = ''
     raw = (data.get('image_url') or '').strip()
     product.image_url = raw if is_external_image_url(raw) else ''
 
@@ -7242,24 +8044,26 @@ def _apply_import_unit_fields(product, data):
 def product_to_export_row(product):
     parent_name, child_name = product_category_parts(product)
     _, sale_label = product_sale_status(product)
+    variant_imgs = product_stored_variant_image_urls(product)
+    image_export = '||'.join(variant_imgs) if variant_imgs else (getattr(product, 'image_url', None) or '').strip()
     return [
         product.sku,
         product.name,
         parent_name,
         child_name,
-        product_brand_name(product),
+        product_variant_brands_export_value(product),
         product.model or '',
         product.variant or '',
-        (getattr(product, 'image_url', None) or '').strip(),
+        image_export,
         product_base_unit(product),
         product_purchase_unit(product) if product_has_unit_conversion(product) else product_base_unit(product),
         product_conversion_factor(product) if product_has_unit_conversion(product) else '',
         product.warranty or '',
-        product.cost_price or 0,
-        product.retail_price or 0,
+        (getattr(product, 'variant_cost_prices', None) or '').strip() or (product.cost_price or 0),
+        (getattr(product, 'variant_prices', None) or '').strip() or (product.retail_price or 0),
         product.dealer_price or 0,
         product.project_price or 0,
-        product.stock or 0,
+        (getattr(product, 'variant_stocks', None) or '').strip() or (product.stock or 0),
         product.low_stock or 5,
         sale_label,
     ]
@@ -7536,8 +8340,13 @@ def ensure_product_for_supplier_intake_row(data, update_existing=False):
             existing.warranty = data['warranty']
             existing.cost_price = data['cost_price']
             existing.retail_price = data['retail_price']
+            existing.variant_prices = data.get('variant_prices') or ''
+            existing.variant_stocks = data.get('variant_stocks') or ''
+            existing.variant_cost_prices = data.get('variant_cost_prices') or ''
+            existing.variant_brand_ids = data.get('variant_brand_ids') or ''
             existing.dealer_price = data['dealer_price']
             existing.project_price = data['project_price']
+            existing.stock = data['stock']
             existing.low_stock = data['low_stock']
             existing.is_active = data['is_active']
             _apply_import_taxonomy(existing, data)
@@ -7548,12 +8357,16 @@ def ensure_product_for_supplier_intake_row(data, update_existing=False):
         name=data['name'],
         model=data['model'],
         variant=data['variant'],
+        variant_prices=data.get('variant_prices') or '',
+        variant_stocks=data.get('variant_stocks') or '',
+        variant_cost_prices=data.get('variant_cost_prices') or '',
+        variant_brand_ids=data.get('variant_brand_ids') or '',
         warranty=data['warranty'],
         cost_price=data['cost_price'],
         retail_price=data['retail_price'],
         dealer_price=data['dealer_price'],
         project_price=data['project_price'],
-        stock=0,
+        stock=data['stock'],
         low_stock=data['low_stock'],
         is_active=data['is_active'],
     )
@@ -7595,11 +8408,23 @@ def _apply_import_taxonomy(product, data):
         product.category_id = ensure_category_from_path(category_path)
     else:
         product.category_id = None
-    brand_name = (data.get('brand') or '').strip()
-    if brand_name:
-        product.brand_id = ensure_brand_name(brand_name, product.category_id)
+    data['category_id'] = product.category_id
+    variant_brand_ids = (data.get('variant_brand_ids') or '').strip()
+    labels = split_csv_field(data.get('variant') or '')
+    if len(labels) > 1 and variant_brand_ids:
+        product.variant_brand_ids = variant_brand_ids
+        ids = product_stored_variant_brand_ids(product)
+        product.brand_id = ids[0] if ids else None
     else:
-        product.brand_id = None
+        product.variant_brand_ids = ''
+        brand_name = (data.get('brand') or '').strip()
+        if brand_name and ',' not in brand_name:
+            product.brand_id = ensure_brand_name(brand_name, product.category_id)
+        elif brand_name:
+            first_brand = brand_name.split(',')[0].strip()
+            product.brand_id = ensure_brand_name(first_brand, product.category_id) if first_brand else None
+        else:
+            product.brand_id = None
     sync_product_taxonomy_strings(product)
 
 def import_product_data_list(items, update_existing=False):
@@ -7621,6 +8446,10 @@ def import_product_data_list(items, update_existing=False):
             existing.warranty = data['warranty']
             existing.cost_price = data['cost_price']
             existing.retail_price = data['retail_price']
+            existing.variant_prices = data.get('variant_prices') or ''
+            existing.variant_stocks = data.get('variant_stocks') or ''
+            existing.variant_cost_prices = data.get('variant_cost_prices') or ''
+            existing.variant_brand_ids = data.get('variant_brand_ids') or ''
             existing.dealer_price = data['dealer_price']
             existing.project_price = data['project_price']
             existing.stock = data['stock']
@@ -7633,6 +8462,10 @@ def import_product_data_list(items, update_existing=False):
         p = Product(
             sku=sku, name=name,
             model=data['model'], variant=data['variant'],
+            variant_prices=data.get('variant_prices') or '',
+            variant_stocks=data.get('variant_stocks') or '',
+            variant_cost_prices=data.get('variant_cost_prices') or '',
+            variant_brand_ids=data.get('variant_brand_ids') or '',
             warranty=data['warranty'], cost_price=data['cost_price'],
             retail_price=data['retail_price'], dealer_price=data['dealer_price'],
             project_price=data['project_price'], stock=data['stock'],
@@ -8445,10 +9278,6 @@ def products():
         p.low_stock = parse_qty(request.form.get('low_stock'), 5)
         apply_product_image_url_from_form(p)
         db.session.add(p)
-        db.session.flush()
-        if not save_product_images(p, request.files.getlist('images')):
-            db.session.rollback()
-            return redirect(url_for('products'))
         db.session.commit()
         flash('Đã thêm sản phẩm', 'success')
         return redirect(url_for('products'))
@@ -8545,6 +9374,10 @@ def product_edit(pid):
             list_ctx['per_page'], list_ctx['filters'], list_ctx['page'],
         ),
         taxonomy_catalog_json=json.dumps(categories_catalog_json(), ensure_ascii=False),
+        brands_catalog_json=json.dumps(brands_catalog_json(), ensure_ascii=False),
+        product_edit_snapshot_json=json.dumps(
+            product_edit_form_snapshot(p), ensure_ascii=False,
+        ),
     )
 
 @app.route('/products/<int:pid>')
@@ -8600,13 +9433,6 @@ def update_product(pid):
     apply_product_form(p)
     if request.form.getlist('ps_supplier_id'):
         apply_product_suppliers_from_form(p)
-    remove_indices = request.form.getlist('remove_image_idx')
-    if remove_indices:
-        remove_product_images(p, remove_indices)
-    elif request.form.get('remove_image') == '1':
-        delete_all_product_image_files(p)
-    if not save_product_images(p, request.files.getlist('images')):
-        return products_redirect_after_save()
     db.session.commit()
     return products_redirect_after_save('Đã cập nhật sản phẩm')
 
